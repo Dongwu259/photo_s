@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
@@ -686,14 +687,19 @@ STRINGS = {
 
 # ── Flat button (renders colors correctly on macOS Aqua) ─────────────────────
 
-class FlatButton(tk.Label):
+class FlatButton(tk.Frame):
     """A flat button that honors bg/fg colors on every platform.
 
     tk.Button on macOS Aqua ignores custom colors entirely (white text on
-    a light native button becomes unreadable), so a Label-based button is
-    used instead. Supports hover feedback and a disabled state that both
-    greys the text and blocks clicks.
+    a light native button becomes unreadable), so a Frame+Label button is
+    used instead. The optional 1px border is drawn by the wrapper frame
+    itself (frame bg = border color, label inset by 1px) — pixel-exact on
+    every platform, unlike highlightthickness which macOS renders offset
+    from the widget. Supports hover feedback and a disabled state that
+    blocks clicks.
     """
+
+    _LABEL_OPTS = ("text", "bg", "fg")
 
     def __init__(self, master, text, command, bg, fg="white",
                  hover_bg=None, font=None, padx=16, pady=7,
@@ -701,24 +707,50 @@ class FlatButton(tk.Label):
         self._command = command
         self._bg = bg
         self._hover_bg = hover_bg or bg
-        extra = {}
-        if border_color:
-            extra = {"highlightthickness": 1, "highlightbackground": border_color}
+        # tk.Frame has no -state option (tk.Label did), so keep it in Python.
+        self._state = "normal"
+        super().__init__(master, bg=border_color or bg, bd=0,
+                         highlightthickness=0)
         try:
-            super().__init__(
-                master, text=text, font=font or FONT_BUTTON, bg=bg, fg=fg,
-                padx=padx, pady=pady, cursor="pointinghand", **extra,
+            self._label = tk.Label(
+                self, text=text, font=font or FONT_BUTTON, bg=bg, fg=fg,
+                padx=padx, pady=pady, cursor="pointinghand",
             )
         except Exception:
             # Some environments (e.g. headless Xvfb) lack the 'pointinghand'
             # cursor; degrade to the default cursor instead of failing.
-            super().__init__(
-                master, text=text, font=font or FONT_BUTTON, bg=bg, fg=fg,
-                padx=padx, pady=pady, **extra,
+            self._label = tk.Label(
+                self, text=text, font=font or FONT_BUTTON, bg=bg, fg=fg,
+                padx=padx, pady=pady,
             )
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-        self.bind("<Button-1>", self._on_click)
+        inset = 1 if border_color else 0
+        self._label.pack(padx=inset, pady=inset)
+        for widget in (self, self._label):
+            widget.bind("<Enter>", self._on_enter)
+            widget.bind("<Leave>", self._on_leave)
+            widget.bind("<Button-1>", self._on_click)
+
+    def configure(self, cnf=None, **kw):
+        if isinstance(cnf, dict):
+            kw.update(cnf)
+        state = kw.pop("state", None)
+        if state is not None:
+            self._state = state
+        label_kw = {k: v for k, v in kw.items() if k in self._LABEL_OPTS}
+        rest = {k: v for k, v in kw.items() if k not in self._LABEL_OPTS}
+        if label_kw:
+            self._label.configure(**label_kw)
+        if rest:
+            super().configure(**rest)
+
+    config = configure
+
+    def cget(self, key):
+        if key == "state":
+            return self._state
+        if key in self._LABEL_OPTS:
+            return self._label.cget(key)
+        return super().cget(key)
 
     def _is_enabled(self):
         return str(self.cget("state")) != "disabled"
@@ -1138,21 +1170,37 @@ class PhotoSApp:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Bind mousewheel for scrolling (only while the pointer is over the
-        # settings canvas). At the scroll boundaries the canvas would keep
-        # accepting scroll events and bounce/jitter — clamp so scrolling past
-        # the top/bottom is a no-op instead of an animated wobble.
+        # Mousewheel scrolling: active while the pointer is anywhere over the
+        # settings CARD (canvas, scrollbar, or any widget inside the panel).
+        # Binding on the card instead of the canvas keeps the handler alive
+        # over child widgets — the old canvas-only Enter/Leave unbound on
+        # every child crossing, so scrolling stuttered/jumped near the bottom
+        # where the pointer sits between widgets. The handler clamps at the
+        # boundaries and re-snaps for a beat after hitting one, so trackpad
+        # momentum — which can reverse direction for a few frames — can't
+        # wobble the view off the edge.
+        _last_boundary = [0.0]
+
         def _on_mousewheel(event):
             # macOS: event.delta is ±1; Windows/Linux: event.delta is ±120
             delta = event.delta
-            if abs(delta) < 10:  # macOS trackpad/mouse
-                amount = -delta
-            else:  # Windows/Linux
-                amount = -delta / 120
+            amount = -delta if abs(delta) < 10 else -delta / 120
+            if time.monotonic() - _last_boundary[0] < 0.15:
+                return  # momentum tail right after a boundary hit — drop it
             top, bottom = canvas.yview()
-            if (amount < 0 and top <= 0.0) or (amount > 0 and bottom >= 1.0):
-                return  # already at a boundary — do nothing (no bounce)
-            canvas.yview_scroll(int(amount), "units")
+            if amount > 0:
+                if bottom >= 1.0 - 1e-9:
+                    _last_boundary[0] = time.monotonic()
+                    canvas.yview_moveto(1.0)  # snap exactly to the bottom
+                    return
+            elif amount < 0:
+                if top <= 1e-9:
+                    _last_boundary[0] = time.monotonic()
+                    canvas.yview_moveto(0.0)
+                    return
+            # Pass the raw (possibly fractional) amount through so Windows
+            # high-resolution wheels (delta=±30/±60) scroll smoothly too.
+            canvas.yview_scroll(amount, "units")
 
         def _bind_scroll(event):
             canvas.bind_all("<MouseWheel>", _on_mousewheel)
@@ -1160,8 +1208,8 @@ class PhotoSApp:
         def _unbind_scroll(event):
             canvas.unbind_all("<MouseWheel>")
 
-        canvas.bind("<Enter>", _bind_scroll)
-        canvas.bind("<Leave>", _unbind_scroll)
+        card.bind("<Enter>", _bind_scroll)
+        card.bind("<Leave>", _unbind_scroll)
 
         pad = {"padx": 18, "pady": 4}
 
