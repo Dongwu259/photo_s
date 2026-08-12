@@ -1264,6 +1264,21 @@ def run_cli(args: List[str] = None) -> int:
         help="配置文件路径 Config file path",
     )
 
+    # ── mcp subcommand ───────────────────────────────────────────────────────
+    mcp_parser = subparsers.add_parser(
+        "mcp", help="启动 MCP server（供 AI agent / Claude Desktop 调用）"
+                    "Start MCP server (stdio)",
+    )
+    mcp_parser.add_argument(
+        "--config", type=str, default=None,
+        help="配置文件路径 Config file path",
+    )
+    mcp_parser.add_argument(
+        "--list-tools", action="store_true",
+        help="列出工具与参数 schema（不启动服务器）"
+             "List tools & schemas without starting",
+    )
+
     parsed = parser.parse_args(args)
 
     if not parsed.command:
@@ -1574,26 +1589,7 @@ def run_cli(args: List[str] = None) -> int:
     # ── Handle 'info' command ────────────────────────────────────────────────
     if parsed.command == "info":
         from .engine import _HAS_PILLOW_HEIF
-        import importlib.util as _ilu
-
-        def _optional_features() -> dict:
-            """Installed optional-dependency status, for environment probing."""
-            return {
-                "enhance": _ilu.find_spec("cv2") is not None,
-                "raw": _ilu.find_spec("rawpy") is not None,
-                "heic": _ilu.find_spec("pillow_heif") is not None,
-                "avif": _ilu.find_spec("pillow_avif") is not None,
-                "exif": _ilu.find_spec("piexif") is not None,
-                "watch": _ilu.find_spec("watchdog") is not None,
-                "gui_dnd": _ilu.find_spec("tkinterdnd2") is not None,
-            }
-
-        def _plugins() -> list:
-            from .plugin import discover_plugins
-            return [{
-                "name": p.name,
-                "provides": list(getattr(p, "provides", ())),
-            } for p in discover_plugins()]
+        from .envinfo import optional_features, plugins
 
         if getattr(parsed, 'json', False):
             import json
@@ -1602,8 +1598,8 @@ def run_cli(args: List[str] = None) -> int:
                 "input_extensions": sorted(ALL_INPUT_EXTENSIONS),
                 "formats": sorted(SUPPORTED_FORMATS),
                 "writable": sorted(PIL_WRITABLE),
-                "optional_features": _optional_features(),
-                "plugins": _plugins(),
+                "optional_features": optional_features(),
+                "plugins": plugins(),
             }, indent=2, ensure_ascii=False))
             return 0
         print("PhotoS — 支持的图片格式 Supported Formats")
@@ -1628,9 +1624,9 @@ def run_cli(args: List[str] = None) -> int:
             print("   pip install pillow-heif")
         print()
         print("可选依赖 Optional features:")
-        for name, installed in _optional_features().items():
+        for name, installed in optional_features().items():
             print(f"  {'✅' if installed else '·'} {name}")
-        plugins = _plugins()
+        plugins = plugins()
         print()
         print("已装插件 Installed plugins:")
         if plugins:
@@ -1684,6 +1680,30 @@ def run_cli(args: List[str] = None) -> int:
             print(f"🔐 已生成 token Generated: {token}", file=sys.stderr)
         run_server(parsed.host, parsed.port, options=base_options,
                    token=token, ready_file=parsed.ready_file)
+        return 0
+
+    # ── Handle 'mcp' command ─────────────────────────────────────────────────
+    if parsed.command == "mcp":
+        # The mcp SDK requires Python >= 3.10 — check before any import so
+        # py3.9 gets a clear message instead of an ImportError.
+        if sys.version_info < (3, 10):
+            print("❌ photo-s mcp 需要 Python 3.10+（mcp SDK 要求）"
+                  "MCP server requires Python 3.10+ (mcp SDK).",
+                  file=sys.stderr)
+            return 1
+        try:
+            if parsed.list_tools:
+                import json
+                from .mcp_server import list_tools_json
+                print(json.dumps({"tools": list_tools_json()},
+                                 indent=2, ensure_ascii=False))
+                return 0
+            from .mcp_server import run_stdio
+            run_stdio(config_path=parsed.config)
+        except RuntimeError as e:
+            # missing mcp extra / bad config
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
         return 0
 
     # ── Handle 'rename' command ─────────────────────────────────────────────
@@ -1839,7 +1859,8 @@ def run_cli(args: List[str] = None) -> int:
 
     # ── Handle 'hash' command ───────────────────────────────────────────────
     if parsed.command == "hash":
-        from .check import compute_checksums, write_manifest, verify_manifest
+        from .check import (collect_files, compute_checksums, write_manifest,
+                            verify_manifest)
         import json
 
         if parsed.verify:
@@ -1862,19 +1883,7 @@ def run_cli(args: List[str] = None) -> int:
             return 0 if (not report["missing"] and not report["mismatched"]) else 1
 
         # Hash every file (not just images — for archives)
-        files = []
-        for pat in parsed.paths:
-            p = Path(pat)
-            if p.is_dir():
-                if parsed.recursive:
-                    files.extend(str(x) for x in p.rglob("*") if x.is_file())
-                else:
-                    files.extend(str(x) for x in p.iterdir() if x.is_file())
-            elif p.is_file():
-                files.append(str(p.absolute()))
-            else:
-                files.extend(m for m in glob.glob(pat) if os.path.isfile(m))
-        files = sorted(set(files))
+        files = collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
             print("❌ 没有找到文件。No files found.")
             return 1

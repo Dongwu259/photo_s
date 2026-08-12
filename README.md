@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-352%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-378%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s-orange)](https://pypi.org)
 
 **PhotoS** is a cross-platform batch image processing tool with **both GUI and CLI**. Built for photographers who need to deliver images at specific sizes, and for AI agents that need reliable image processing pipelines.
@@ -63,6 +63,7 @@
 | REST API | — | ✅ | `photo-s serve` for AI agents |
 | Plugin system | — | ✅ | Third-party plugin support |
 | Official plugin manager | — | ✅ | `photo-s plugin list/install/info/fetch` + `pip install photo-s-plugin-scunet` |
+| MCP server | — | ✅ | `photo-s mcp` expose 7 tools to MCP clients (Claude Desktop) |
 
 > ¹ Denoise / auto-straighten need an optional dependency: `pip install photo-s[enhance]` (opencv-python-headless).
 > When missing, these features give a clear install hint and the rest keeps working.
@@ -84,6 +85,7 @@ pip install photo-s[raw]       # RAW processing
 pip install photo-s[watch]     # folder watching
 pip install photo-s[exif]      # EXIF editing
 pip install photo-s[enhance]   # NLM denoise + auto-straighten (opencv)
+pip install photo-s[mcp]       # MCP server (Python 3.10+)
 ```
 
 ### From source
@@ -368,6 +370,41 @@ no work done) and `options.output_sizes` (multi-size, `[["thumb",480,None], ...]
 
 `photo-s compress a.jpg -q 80 --json` → stdout JSON. Each call has a Python
 interpreter startup cost (~200-300ms); not recommended for high-frequency batch.
+
+### 4. MCP server (Claude Desktop & MCP clients)
+
+[Model Context Protocol](https://modelcontextprotocol.io) server — lets Claude
+Desktop / any MCP client call PhotoS tools directly (needs Python 3.10+ and
+the optional extra):
+
+```bash
+pip install "photo-s[mcp]"
+photo-s mcp --list-tools        # inspect the 7 tools + schemas (JSON)
+photo-s mcp                     # start the stdio MCP server
+```
+
+Tools: `process` (batch quality/format/resize/tone/denoise), `info` (environment
+probe), `exif` (read/filter/write metadata), `dedup` (perceptual-hash groups,
+keep-sharpest), `cull` (exposure/sharpness filter), `hash` (SHA-256 manifests),
+`plugin` (official plugin management). Output shapes mirror the CLI `--json`
+contracts.
+
+Claude Desktop config (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "photo-s": {
+      "command": "photo-s",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+> Destructive safety: `dedup` `keep-sharpest` defaults to `dry_run=True`
+> (deletion requires an explicit `dry_run=False`). `process` never overwrites
+> inputs.
 
 ### Windows packaging (no Python/PATH env)
 

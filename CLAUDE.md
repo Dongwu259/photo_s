@@ -15,9 +15,9 @@
 ## 架构速览
 
 - `engine.py` — `ProcessOptions` dataclass + `process_image` + `batch_process`（核心）
-- `cli.py` — argparse，子命令：compress/convert/batch/exif/preset/watch/dedup/info/rename/config/serve/check/contact-sheet/cull/hash/gallery/plugin
+- `cli.py` — argparse，子命令：compress/convert/batch/exif/preset/watch/dedup/info/rename/config/serve/mcp/check/contact-sheet/cull/hash/gallery/plugin
 - `gui.py` — Tkinter，双语（STRINGS zh/en），设置面板可滚动 canvas
-- 其他模块：adjust（调色/构图/白平衡/曝光/自动色阶）、logcurve（LOG 还原 1D LUT，纯 math）、denoise（NLM，可选 opencv）、straighten（扶正，可选 opencv）、metrics（SSIM/blur/曝光统计）、rename、dedup（含 keep-sharpest）、watcher、presets、plugin（插件发现 + find_provider）、plugincmd（`plugin` 子命令：install/list/info/fetch，shell 到 pip）、registry（官方插件目录）、modelstore（权重下载/校验/缓存，仅 stdlib）、hooks（PhotoSPlugin 接口：过滤器钩子 + operation provider）、config（TOML）、server（stdlib HTTP）、contact（联系表）、check（完整性/校验和清单）、gallery（HTML 画廊）
+- 其他模块：adjust（调色/构图/白平衡/曝光/自动色阶）、logcurve（LOG 还原 1D LUT，纯 math）、denoise（NLM，可选 opencv）、straighten（扶正，可选 opencv）、metrics（SSIM/blur/曝光统计）、rename、dedup（含 keep-sharpest）、watcher、presets、plugin（插件发现 + find_provider）、plugincmd（`plugin` 子命令：install/list/info/fetch，shell 到 pip）、registry（官方插件目录）、modelstore（权重下载/校验/缓存，仅 stdlib）、hooks（PhotoSPlugin 接口：过滤器钩子 + operation provider）、config（TOML）、server（stdlib HTTP）、contact（联系表）、check（完整性/校验和清单 + collect_files）、gallery（HTML 画廊）、envinfo（环境探测，info/MCP/GUI 三处共享）、mcp_server（MCP server，7 工具：process/info/exif/dedup/cull/hash/plugin；**模块级零 mcp import**——mcp SDK 要求 py3.10+，惰性导入 + CLI 版本检查双防护）
 - 可选依赖：`enhance = opencv-python-headless`（denoise + straighten）。这些模块**懒加载** cv2，缺失时抛 "pip install 'photo-s[enhance]'" 的 RuntimeError → process_image 记为 per-file 错误。
 - 官方可选插件：独立 PyPI 发行版 `photo-s-plugin-<name>`（源码在 `plugins/<name>/`，不进核心 wheel）；模型权重外置（首次使用经 `modelstore.ensure` 下载到缓存 + sha256 校验）。安装双通道：`photo-s plugin install <name>` 或 `pip install photo-s-plugin-<name>`。
 - **Operation provider**：`PhotoSPlugin.provides = ("denoise",)` + 同名方法（如 `denoise(img, strength, ctx)`）。`provides` 非空的插件**被排除**在通用 pre/post 钩子之外，只在管线槽位被调用（引擎 `find_provider` 查找，`--denoise` 有 provider 时优先，否则回退 NLM）。provider 异常按 per-file 错误传播，不静默吞。
@@ -42,9 +42,10 @@
 ## 常用命令
 
 ```bash
-python3 -m pytest tests/ -q      # 全量测试（当前 352 个）
+python3 -m pytest tests/ -q      # 全量测试（当前 375 个）
 python3 -m photo_s.cli --help    # CLI 冒烟（无 PATH 依赖）
 python3 -m photo_s.cli plugin list --json   # 官方插件目录 + 已装状态
+python3 -m photo_s.cli mcp --list-tools     # MCP 工具 + schema（需 photo-s[mcp]，py3.10+）
 ```
 
 ## 集成方式（用户 agent 产品）

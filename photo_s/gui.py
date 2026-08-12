@@ -312,16 +312,6 @@ STRINGS = {
         "plugins_ok": "✅ {}",
         "plugins_err": "❌ {}",
         # Exposure analysis
-        "analyze": "Exposure analysis",
-        "analyze_title": "Exposure Stats",
-        "analyze_none": "Select an image in the file list first",
-        "analyze_err": "Cannot read that image",
-        "analyze_luminance": "Mean luminance",
-        "analyze_over": "Overexposed (≥250)",
-        "analyze_under": "Underexposed (≤5)",
-        "analyze_blur": "Blur score",
-        "analyze_histogram": "Luminance histogram",
-        # Exposure analysis
         "analyze": "曝光分析",
         "analyze_title": "曝光统计",
         "analyze_none": "请先在文件列表中选择一张图片",
@@ -331,6 +321,27 @@ STRINGS = {
         "analyze_under": "欠曝 (≤5)",
         "analyze_blur": "模糊分",
         "analyze_histogram": "亮度直方图",
+        # Settings dialog (MCP + optional deps)
+        "settings": "设置",
+        "settings_title": "设置",
+        "set_mcp": "MCP 服务器",
+        "set_mcp_desc": "让 Claude Desktop 等 MCP 客户端直接调用 PhotoS 工具",
+        "mcp_installed": "已安装",
+        "mcp_missing": "未安装",
+        "mcp_install_hint": "安装 Install: pip install 'photo-s[mcp]'",
+        "mcp_launch": "启动命令 Launch command",
+        "mcp_claude_config": "Claude Desktop 配置 Claude Desktop config",
+        "mcp_claude_snippet": (
+            "{\n  \"mcpServers\": {\n    \"photo-s\": {\n"
+            "      \"command\": \"photo-s\",\n      \"args\": [\"mcp\"]\n"
+            "    }\n  }\n}"
+        ),
+        "copy": "复制",
+        "copied": "已复制",
+        "set_deps": "可选依赖 Optional dependencies",
+        "dep_install": "安装",
+        "dep_installing": "安装中…",
+        "set_plugins_link": "打开插件管理器 Open Plugin Manager",
         # Watermark
         "sec_watermark": "水印",
         "wm_text": "文字",
@@ -566,16 +577,27 @@ STRINGS = {
         "analyze_under": "Underexposed (≤5)",
         "analyze_blur": "Blur score",
         "analyze_histogram": "Luminance histogram",
-        # Exposure analysis
-        "analyze": "曝光分析",
-        "analyze_title": "曝光统计",
-        "analyze_none": "请先在文件列表中选择一张图片",
-        "analyze_err": "无法读取该图片",
-        "analyze_luminance": "平均亮度",
-        "analyze_over": "过曝 (≥250)",
-        "analyze_under": "欠曝 (≤5)",
-        "analyze_blur": "模糊分",
-        "analyze_histogram": "亮度直方图",
+        # Settings dialog (MCP + optional deps)
+        "settings": "Settings",
+        "settings_title": "Settings",
+        "set_mcp": "MCP Server",
+        "set_mcp_desc": "Let MCP clients (Claude Desktop, agents) call PhotoS tools",
+        "mcp_installed": "Installed",
+        "mcp_missing": "Not installed",
+        "mcp_install_hint": "Install: pip install 'photo-s[mcp]'",
+        "mcp_launch": "Launch command",
+        "mcp_claude_config": "Claude Desktop config",
+        "mcp_claude_snippet": (
+            "{\n  \"mcpServers\": {\n    \"photo-s\": {\n"
+            "      \"command\": \"photo-s\",\n      \"args\": [\"mcp\"]\n"
+            "    }\n  }\n}"
+        ),
+        "copy": "Copy",
+        "copied": "Copied",
+        "set_deps": "Optional dependencies",
+        "dep_install": "Install",
+        "dep_installing": "Installing…",
+        "set_plugins_link": "Open Plugin Manager",
         # Watermark
         "sec_watermark": "Watermark",
         "wm_text": "Text",
@@ -928,6 +950,14 @@ class PhotoSApp:
             font=FONT_SMALL, padx=10, pady=4, border_color=COLORS["border"],
         )
         plugins_btn.pack(side="right", pady=(6, 0))
+
+        # Settings button (right side)
+        settings_btn = FlatButton(
+            title_frame, text=self._t("settings"), command=self._show_settings,
+            bg=COLORS["bg"], fg=COLORS["text_secondary"], hover_bg=COLORS["border"],
+            font=FONT_SMALL, padx=10, pady=4, border_color=COLORS["border"],
+        )
+        settings_btn.pack(side="right", pady=(6, 0))
 
         # Language selector (right side)
         self.lang_combo = ttk.Combobox(
@@ -2024,6 +2054,191 @@ class PhotoSApp:
                                                            pady=(0, 12))
 
         _refresh()
+
+    # ── Settings (MCP + optional deps) ──────────────────────────────────────
+
+    def _show_settings(self):
+        """Settings dialog: MCP server status + launch/config, optional
+        dependency installs, and a link to the plugin manager."""
+        import importlib.util
+        from .plugincmd import _pip_run
+
+        win = tk.Toplevel(self.root)
+        win.title(self._t("settings_title"))
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+        win.geometry("620x580")
+
+        inner = tk.Frame(win, bg=COLORS["bg"])
+        inner.pack(fill="both", expand=True, padx=24, pady=18)
+
+        def section_title(text):
+            tk.Label(inner, text=text, font=FONT_SECTION,
+                     fg=COLORS["text"], bg=COLORS["bg"]).pack(anchor="w",
+                                                              pady=(8, 2))
+
+        def _status_lbl(parent, text, color):
+            return tk.Label(parent, text=text, font=FONT_SMALL, fg=color,
+                            bg=COLORS["bg"])
+
+        # ── MCP section ─────────────────────────────────────────────────────
+        section_title(self._t("set_mcp"))
+        tk.Label(inner, text=self._t("set_mcp_desc"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"],
+                 wraplength=560, justify="left").pack(anchor="w", pady=(0, 6))
+
+        mcp_row = tk.Frame(inner, bg=COLORS["bg"])
+        mcp_row.pack(anchor="w", fill="x")
+        mcp_ok = importlib.util.find_spec("mcp") is not None
+        mcp_status = _status_lbl(
+            mcp_row,
+            ("✅ " + self._t("mcp_installed")) if mcp_ok
+            else ("❌ " + self._t("mcp_missing")),
+            COLORS["success"] if mcp_ok else COLORS["danger"])
+        mcp_status.pack(side="left")
+
+        install_btns = []
+        if not mcp_ok:
+            def _install_mcp():
+                self._run_dep_install(win, "mcp>=1.20,<2", mcp_install_btn,
+                                      mcp_status,
+                                      lambda: "✅ " + self._t("mcp_installed"))
+            mcp_install_btn = FlatButton(
+                mcp_row, text=self._t("dep_install"),
+                command=_install_mcp,
+                bg=COLORS["accent"], hover_bg=COLORS["accent_hover"],
+                font=FONT_SMALL, padx=10, pady=3)
+            mcp_install_btn.pack(side="left", padx=(10, 0))
+            install_btns.append(mcp_install_btn)
+
+        # Launch command + copy
+        tk.Label(inner, text=self._t("mcp_launch"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(anchor="w",
+                                                                    pady=(10, 2))
+        launch_row = tk.Frame(inner, bg=COLORS["bg"])
+        launch_row.pack(anchor="w", fill="x")
+        launch_entry = ttk.Entry(launch_row, font=FONT_SMALL)
+        launch_entry.insert(0, "photo-s mcp")
+        launch_entry.configure(state="readonly")
+        launch_entry.pack(side="left", fill="x", expand=True)
+        copy_launch = FlatButton(
+            launch_row, text=self._t("copy"),
+            command=lambda: self._copy_text(win, "photo-s mcp",
+                                            copy_launch),
+            bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
+            font=FONT_SMALL, padx=10, pady=3, border_color=COLORS["border"])
+        copy_launch.pack(side="left", padx=(8, 0))
+
+        # Claude Desktop config snippet
+        tk.Label(inner, text=self._t("mcp_claude_config"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(anchor="w",
+                                                                    pady=(10, 2))
+        cfg_row = tk.Frame(inner, bg=COLORS["bg"])
+        cfg_row.pack(anchor="w", fill="x")
+        snippet = self._t("mcp_claude_snippet")
+        cfg_text = tk.Text(cfg_row, height=7, font=("Menlo", 10),
+                           bg=COLORS["card"], fg=COLORS["text"],
+                           relief="flat", borderwidth=0, wrap="none")
+        cfg_text.insert("1.0", snippet)
+        cfg_text.configure(state="disabled")
+        cfg_text.pack(side="left", fill="both", expand=True)
+        copy_cfg = FlatButton(
+            cfg_row, text=self._t("copy"),
+            command=lambda: self._copy_text(win, snippet, copy_cfg),
+            bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
+            font=FONT_SMALL, padx=10, pady=3, border_color=COLORS["border"])
+        copy_cfg.pack(side="left", padx=(8, 0), fill="y")
+
+        # ── Optional dependencies ────────────────────────────────────────────
+        section_title(self._t("set_deps"))
+        deps = [
+            ("rawpy", "rawpy", "RAW"),
+            ("piexif", "piexif", "EXIF"),
+            ("watchdog", "watchdog", "watch"),
+            ("opencv-python-headless", "cv2", "enhance"),
+            ("mcp", "mcp", "MCP"),
+        ]
+        for dist, mod, purpose in deps:
+            row = tk.Frame(inner, bg=COLORS["bg"])
+            row.pack(anchor="w", fill="x", pady=1)
+            tk.Label(row, text=f"{dist} ({purpose})", font=FONT_SMALL,
+                     fg=COLORS["text"], bg=COLORS["bg"],
+                     width=30, anchor="w").pack(side="left")
+            installed = importlib.util.find_spec(mod) is not None
+            status = _status_lbl(
+                row, ("✅ " + self._t("mcp_installed")) if installed
+                else ("· " + self._t("mcp_missing")),
+                COLORS["success"] if installed else COLORS["text_secondary"])
+            status.pack(side="left")
+            if not installed:
+                btn = FlatButton(
+                    row, text=self._t("dep_install"),
+                    command=lambda d=dist, s=status, b=None:
+                        self._run_dep_install(
+                            win, d, b, s,
+                            lambda: "✅ " + self._t("mcp_installed")),
+                    bg=COLORS["accent"], hover_bg=COLORS["accent_hover"],
+                    font=FONT_SMALL, padx=8, pady=2)
+                btn.pack(side="left", padx=(8, 0))
+                install_btns.append(btn)
+
+        # ── Plugin manager link ──────────────────────────────────────────────
+        FlatButton(inner, text=self._t("set_plugins_link"),
+                   command=lambda: (win.destroy(), self._show_plugin_manager()),
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL, padx=12, pady=4,
+                   border_color=COLORS["border"]).pack(anchor="w", pady=(14, 0))
+
+        self._settings_install_btns = install_btns
+
+        FlatButton(inner, text=self._t("close"), command=win.destroy,
+                   bg=COLORS["accent"], hover_bg=COLORS["accent_hover"],
+                   font=FONT_BUTTON, padx=20, pady=6).pack(pady=(16, 0))
+
+    def _copy_text(self, win, text, btn):
+        """Copy text to the clipboard and flash the button label."""
+        win.clipboard_clear()
+        win.clipboard_append(text)
+        old = btn.cget("text")
+        btn.configure(text=self._t("copied"))
+        win.after(1200, lambda: btn.configure(text=old))
+
+    def _run_dep_install(self, win, dist, btn, status_lbl, ok_text):
+        """Install an optional dependency in a background thread.
+
+        pip is subprocess-based (thread-safe); Tk must only be touched from
+        the main thread, so all UI updates go through win.after(). All
+        install buttons are disabled during the run (pip holds a global
+        lock — concurrent installs would wedge).
+        """
+        for b in getattr(self, "_settings_install_btns", []):
+            if b is not None:
+                b.configure(state="disabled")
+        status_lbl.config(text=self._t("dep_installing"))
+
+        def worker():
+            try:
+                from .plugincmd import _pip_run
+                proc = _pip_run(["install", "--quiet", dist])
+                ok = proc.returncode == 0
+                detail = (proc.stderr or "").strip()[-200:]
+            except FileNotFoundError:
+                ok, detail = False, "pip not available"
+
+            def finish():
+                for b in getattr(self, "_settings_install_btns", []):
+                    if b is not None:
+                        b.configure(state="normal")
+                if ok:
+                    status_lbl.config(text=ok_text(),
+                                      fg=COLORS["success"])
+                else:
+                    status_lbl.config(
+                        text="❌ " + (detail or self._t("mcp_missing")),
+                        fg=COLORS["danger"])
+            win.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # ── Exposure Analysis ───────────────────────────────────────────────────
 

@@ -6,13 +6,14 @@
 
 ---
 
-## 1. 三通道速览
+## 1. 四通道速览
 
 | 通道 | 适用场景 | 说明 |
 |---|---|---|
 | Python 直调 | 宿主是 Python | `from photo_s.engine import ProcessOptions, batch_process` |
 | `photo-s ... --json` | 一次性脚本 / CI | 每次调用有 ~200-300ms 解释器启动开销 |
 | `photo-s serve` | 跨进程 / 长任务 / 需进度与取消 | stdlib HTTP，同步 + 异步任务两种模式 |
+| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，7 个工具（需 py3.10+ 与 `photo-s[mcp]`） |
 
 ---
 
@@ -204,3 +205,36 @@ curl -X POST .../process -H "Authorization: Bearer $TOKEN" \
 - [ ] `paths` 里的目录默认只扫一层；需要子目录时传 `recursive: true`。
 - [ ] `--remove-original` / `dedup --action delete` 在 JSON 模式下直接执行，无确认。
 - [ ] `-f` / `output_format` 大小写随意（自动归一化）。
+
+---
+
+## 6. MCP server（Claude Desktop / MCP 客户端）
+
+需要 Python 3.10+ 与可选依赖：`pip install "photo-s[mcp]"`。stdio 协议，
+Claude Desktop 配置（`claude_desktop_config.json`）：
+
+```json
+{
+  "mcpServers": {
+    "photo-s": { "command": "photo-s", "args": ["mcp"] }
+  }
+}
+```
+
+`photo-s mcp --list-tools` 返回 7 个工具及 inputSchema（JSON，不启动服务器）。
+
+### 工具表（输出结构与 CLI `--json` 一致）
+
+| 工具 | 关键参数 | 输出 |
+|---|---|---|
+| `process` | `paths[]`, `recursive`, `quality`, `output_format`, `output_dir`, `resize` "WxH", `scale`, `suffix`, `target_size` "500KB", `strip_gps`, `denoise`, `ev`, `log_curve`, `wb_temp`, `auto_straighten`, `jobs`, `dry_run` | `BatchResult` JSON + `ok`；`dry_run` → `{"dry_run", "count", "files", "settings"}` |
+| `info` | — | 同 `photo-s info --json`（含 `optional_features`/`plugins`） |
+| `exif` | `action` "show"\|"write", `paths[]`, `recursive`, `rating_min`, `rating`, `keywords`, `camera`, `tags` {"path": {…}} | show → `{"count", "results": [{path, rating, keywords, …}]}`；write → `{"written", "errors"}` |
+| `dedup` | `paths[]`, `recursive`, `threshold` (默认 5), `action` "report"\|"keep-sharpest", `dry_run` (默认 **True**) | report → `{"count", "duplicate_count", "savings_bytes", "groups"}`；keep-sharpest → `{"kept", "removed", "dry_run"}` |
+| `cull` | `paths[]`, `recursive`, `overexposed_max`, `underexposed_max`, `luminance_min/max`, `sharpness_min` | `{"count", "kept", "results": [{path, luminance, …, kept}]}` |
+| `hash` | `paths[]`, `recursive`, `output`, `verify` (清单路径) | 生成 → `{"output", "count", "entries"}`；verify → `{"ok", "missing", "mismatched"}` |
+| `plugin` | `action` "list"\|"install"\|"uninstall", `name`, `dry_run` | list → `{"installed", "available"}`；install/uninstall → `{"ok", "name", "distribution", "version"?}` |
+
+**破坏性安全**：`dedup keep-sharpest` 默认 `dry_run=True`，删除需显式
+`dry_run=False`；`process` 不覆盖输入（`overwrite` 默认 False）。MCP 模式仅
+显式 `--config`（不自动发现 `photo-s.toml`）；工具显式参数优先于 config 默认值。

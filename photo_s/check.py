@@ -6,11 +6,34 @@ plus SHA-256 checksum manifests for long-term archive integrity.
 """
 
 import csv
+import glob
 import hashlib
 import os
+from pathlib import Path
 from typing import List
 
 from PIL import Image
+
+
+def collect_files(paths: List[str], recursive: bool = False) -> List[str]:
+    """Collect ANY files (not just images) from paths/globs/dirs.
+
+    Directories: recursive → rglob, else iterdir (files only). Globs are
+    expanded. Result is sorted and deduped — for archive manifests.
+    """
+    files = []
+    for pat in paths:
+        p = Path(pat)
+        if p.is_dir():
+            if recursive:
+                files.extend(str(x) for x in p.rglob("*") if x.is_file())
+            else:
+                files.extend(str(x) for x in p.iterdir() if x.is_file())
+        elif p.is_file():
+            files.append(str(p.absolute()))
+        else:
+            files.extend(m for m in glob.glob(pat) if os.path.isfile(m))
+    return sorted(set(files))
 
 
 def verify_images(files: List[str]) -> List[dict]:

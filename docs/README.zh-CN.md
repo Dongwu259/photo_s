@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-352%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-378%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s-orange)](https://pypi.org)
 
 **PhotoS** 是一款跨平台批量图片处理工具，同时提供 **GUI 和 CLI**。为需要按指定尺寸交付图片的摄影师，
@@ -64,6 +64,7 @@
 | REST API | — | ✅ | `photo-s serve` 供 AI agent 使用 |
 | 插件系统 | — | ✅ | 第三方插件支持 |
 | 官方插件管理 | — | ✅ | `photo-s plugin list/install/info/fetch` + `pip install photo-s-plugin-scunet` |
+| MCP server | — | ✅ | `photo-s mcp` 向 MCP 客户端（Claude Desktop）暴露 7 个工具 |
 
 > ¹ 降噪 / 自动扶正需要可选依赖：`pip install photo-s[enhance]`（opencv-python-headless）。
 > 未安装时这两个功能会给出明确的安装提示，不影响其余功能。
@@ -85,6 +86,7 @@ pip install photo-s[raw]       # RAW 处理
 pip install photo-s[watch]     # 文件夹监视
 pip install photo-s[exif]      # EXIF 编辑
 pip install photo-s[enhance]   # NLM 降噪 + 自动扶正（opencv）
+pip install photo-s[mcp]       # MCP server（需要 Python 3.10+）
 ```
 
 ### 源码安装
@@ -366,6 +368,38 @@ curl -X POST .../tasks/<id>/cancel
 
 `photo-s compress a.jpg -q 80 --json` → stdout JSON。每次调用有 Python
 解释器启动开销（~200-300ms），高频批量场景不推荐。
+
+### 4. MCP server（Claude Desktop 与 MCP 客户端）
+
+[Model Context Protocol](https://modelcontextprotocol.io) 服务器——让 Claude
+Desktop / 任意 MCP 客户端直接调用 PhotoS 工具（需要 Python 3.10+ 与可选依赖）：
+
+```bash
+pip install "photo-s[mcp]"
+photo-s mcp --list-tools        # 查看 7 个工具及参数 schema（JSON）
+photo-s mcp                     # 启动 stdio MCP server
+```
+
+工具：`process`（批量质量/格式/缩放/影调/降噪）、`info`（环境探测）、
+`exif`（元数据读写/筛选）、`dedup`（感知哈希分组、keep-sharpest）、
+`cull`（曝光/清晰度筛选）、`hash`（SHA-256 清单）、`plugin`（官方插件管理）。
+输出结构与 CLI `--json` 契约一致。
+
+Claude Desktop 配置（`claude_desktop_config.json`）：
+
+```json
+{
+  "mcpServers": {
+    "photo-s": {
+      "command": "photo-s",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+> 破坏性安全：`dedup` 的 `keep-sharpest` 默认 `dry_run=True`（删除需显式
+> `dry_run=False`）；`process` 不覆盖输入文件。
 
 ### Windows 打包（无 Python/PATH 环境）
 
