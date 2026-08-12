@@ -2142,6 +2142,13 @@ def main():
     Dispatches to GUI if no args are given or first arg is 'gui',
     otherwise runs CLI mode.
     """
+    # Force UTF-8 console output: CLI status lines use emoji, which crashes
+    # on Windows' default cp1252 code page (e.g. redirected/piped output).
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     if len(sys.argv) <= 1:
         from .gui import run_gui
         run_gui()

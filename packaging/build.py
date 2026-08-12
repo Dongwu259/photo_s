@@ -18,6 +18,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Windows console defaults to cp1252 which can't encode the emoji in the
+# status lines below — force UTF-8 output so the build script doesn't crash
+# on non-ASCII terminals.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
