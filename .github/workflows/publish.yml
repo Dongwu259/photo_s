@@ -1,0 +1,36 @@
+name: Publish to PyPI
+
+# 发布到 PyPI（Trusted Publishing，无需密码/token 明文）
+#
+# 1. 在 PyPI 项目设置中启用 Trusted Publishers，
+#    允许的仓库: <owner>/photo_s, 环境: pypi
+# 2. 打 tag 即触发：
+#    git tag v1.0.1 && git push origin v1.0.1
+#
+# 需要先在 PyPI 创建项目 photo-s，并在项目设置中添加本 workflow 的信任。
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write  # 用于 trusted publishing
+  contents: read
+
+jobs:
+  publish:
+    name: Build wheel & publish
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build
+        run: |
+          pip install build
+          python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

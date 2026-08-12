@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller build outputs
+build/
+dist/
+*.manifest
+
+# Tests / tooling
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local runtime
+photo-s.toml
+*.ready.json
+
+# Model weight downloads (in-progress .part files)
+*.part
+
+# Claude Code local settings (machine-specific, not for the repo)
+.claude/

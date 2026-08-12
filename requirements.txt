@@ -1,0 +1,10 @@
+# PhotoS — 批量图片压缩与格式转换工具
+# Required
+Pillow>=10.0.0
+
+# Optional: RAW photo processing (recommended)
+# Requires system libraw: brew install libraw
+# rawpy>=0.18.0
+
+# Optional: drag-and-drop support in GUI
+# tkinterdnd2>=0.3.0

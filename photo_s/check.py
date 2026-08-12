@@ -1,0 +1,106 @@
+"""
+PhotoS - Image Integrity Check
+
+Scans image files with PIL's verify() to detect corrupt or unreadable files,
+plus SHA-256 checksum manifests for long-term archive integrity.
+"""
+
+import csv
+import hashlib
+import os
+from typing import List
+
+from PIL import Image
+
+
+def verify_images(files: List[str]) -> List[dict]:
+    """Verify each image file.
+
+    Returns a list of dicts: {"path", "ok", "error"} — error is "" when ok.
+    Missing files, unreadable files, and truncated data all count as broken.
+    """
+    results = []
+    for path in files:
+        try:
+            with Image.open(path) as img:
+                img.verify()
+            results.append({"path": path, "ok": True, "error": ""})
+        except Exception as e:
+            results.append({"path": path, "ok": False, "error": str(e)})
+    return results
+
+
+def compute_checksums(paths: List[str], algorithm: str = "sha256",
+                      progress_callback=None) -> List[dict]:
+    """Compute a checksum per file (streaming, 1 MiB chunks).
+
+    Returns list of {"path", "size", <algorithm>}. Unreadable/missing files
+    get an empty checksum (verify_manifest treats those as missing).
+    """
+    algo = getattr(hashlib, algorithm, None) or hashlib.sha256
+    results = []
+    for i, path in enumerate(paths):
+        if progress_callback:
+            progress_callback(i + 1, len(paths))
+        abs_path = os.path.abspath(path)
+        try:
+            h = algo()
+            size = 0
+            with open(path, "rb") as f:
+                while chunk := f.read(1 << 20):
+                    h.update(chunk)
+                    size += len(chunk)
+            results.append({"path": abs_path, "size": size,
+                            algorithm: h.hexdigest()})
+        except OSError:
+            results.append({"path": abs_path, "size": 0, algorithm: ""})
+    return results
+
+
+def write_manifest(path: str, entries: List[dict], algorithm: str = "sha256") -> str:
+    """Write a checksum manifest CSV (header: path,size,<algorithm>)."""
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["path", "size", algorithm])
+        for e in entries:
+            writer.writerow([e["path"], e["size"], e[algorithm]])
+    return path
+
+
+def verify_manifest(path: str) -> dict:
+    """Re-hash every file listed in a checksum manifest; report problems.
+
+    Returns {"algorithm", "total", "ok", "missing": [paths], "mismatched":
+    [{"path", "expected", "actual"}]}. Missing files (unreadable now) are
+    reported separately from content mismatches.
+    """
+    entries = []
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        if not header:
+            return {"algorithm": "sha256", "total": 0, "ok": 0,
+                    "missing": [], "mismatched": []}
+        algorithm = header[2] if len(header) > 2 and header[2] else "sha256"
+        for row in reader:
+            if len(row) >= 3:
+                entries.append({"path": row[0], "expected": row[2]})
+
+    fresh = {e["path"]: e for e in compute_checksums(
+        [e["path"] for e in entries], algorithm=algorithm)}
+
+    missing, mismatched = [], []
+    ok = 0
+    for e in entries:
+        f = fresh.get(e["path"])
+        if f is None or not f.get(algorithm):
+            missing.append(e["path"])
+        elif f[algorithm] != e["expected"]:
+            mismatched.append({"path": e["path"], "expected": e["expected"],
+                               "actual": f[algorithm]})
+        else:
+            ok += 1
+    return {"algorithm": algorithm, "total": len(entries), "ok": ok,
+            "missing": missing, "mismatched": mismatched}

@@ -1,0 +1,178 @@
+"""
+PhotoS - Image Deduplication
+
+Perceptual hash (dhash) based duplicate detection. Pure PIL implementation,
+no additional dependencies required.
+"""
+
+import os
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional
+from collections import defaultdict
+
+
+def dhash(image, hash_size: int = 8) -> str:
+    """Compute the difference hash (dhash) of an image.
+
+    Algorithm:
+      1. Convert to grayscale and resize to (hash_size+1) × hash_size
+      2. Compute horizontal gradient: 1 if pixel[n] < pixel[n+1], else 0
+      3. Return 64-bit hash as hex string
+
+    Args:
+        image: A PIL Image object.
+        hash_size: Hash precision (default 8 → 64-bit hash).
+
+    Returns:
+        Hex string representation of the 64-bit hash.
+    """
+    img = image.convert("L").resize((hash_size + 1, hash_size))
+    pixels = list(img.get_flattened_data())  # getdata removed in Pillow 14
+
+    hash_bits = []
+    for row in range(hash_size):
+        for col in range(hash_size):
+            left = pixels[row * (hash_size + 1) + col]
+            right = pixels[row * (hash_size + 1) + col + 1]
+            hash_bits.append("1" if left < right else "0")
+
+    # Convert bit string to hex
+    bit_str = "".join(hash_bits)
+    return f"{int(bit_str, 2):016x}"
+
+
+def hamming_distance(hash1: str, hash2: str) -> int:
+    """Compute Hamming distance between two hex hash strings."""
+    if len(hash1) != len(hash2):
+        return 999
+    # Convert hex to integers
+    n1 = int(hash1, 16)
+    n2 = int(hash2, 16)
+    # XOR and count bits
+    xor = n1 ^ n2
+    return xor.bit_count()
+
+
+def _load_image_safe(path: str):
+    """Try to load an image, return None on failure."""
+    try:
+        from PIL import Image
+        return Image.open(path)
+    except Exception:
+        return None
+
+
+def find_duplicates(
+    paths: List[str],
+    threshold: int = 5,
+    progress_callback=None,
+) -> Dict[str, List[str]]:
+    """Find duplicate/similar images using perceptual hashing.
+
+    Images with Hamming distance ≤ threshold are considered duplicates.
+
+    Args:
+        paths: List of image file paths.
+        threshold: Max Hamming distance to consider as duplicate (default 5).
+        progress_callback: Optional callback(current, total).
+
+    Returns:
+        Dict mapping representative hash → list of duplicate paths.
+        Each group has ≥ 2 images.
+    """
+    # Phase 1: compute hashes
+    hashes: Dict[str, str] = {}
+    total = len(paths)
+    for i, path in enumerate(paths):
+        if progress_callback:
+            progress_callback(i + 1, total)
+        img = _load_image_safe(path)
+        if img is not None:
+            try:
+                hashes[path] = dhash(img)
+            except Exception:
+                pass
+
+    # Phase 2: group by hash (exact match first)
+    hash_groups: Dict[str, List[str]] = defaultdict(list)
+    for path, h in hashes.items():
+        hash_groups[h].append(path)
+
+    # Phase 3: merge groups within threshold distance
+    hash_list = list(hash_groups.keys())
+    merged: Dict[str, List[str]] = {}
+    assigned = set()
+
+    for i, h1 in enumerate(hash_list):
+        if h1 in assigned:
+            continue
+        group = list(hash_groups[h1])
+        assigned.add(h1)
+        for j, h2 in enumerate(hash_list):
+            if i == j or h2 in assigned:
+                continue
+            if hamming_distance(h1, h2) <= threshold:
+                group.extend(hash_groups[h2])
+                assigned.add(h2)
+        if len(group) >= 2:
+            merged[h1] = group
+
+    return merged
+
+
+def handle_duplicates(
+    dup_groups: Dict[str, List[str]],
+    action: str = "report",
+    dry_run: bool = False,
+) -> Tuple[int, int]:
+    """Act on duplicate groups.
+
+    Args:
+        dup_groups: Result from find_duplicates().
+        action: "report" | "move" | "delete" | "keep-sharpest".
+            keep-sharpest keeps the sharpest image in each burst (blur-score)
+            and moves/deletes the rest — pick-keepers for burst sequences.
+        dry_run: If True, only print what would happen.
+
+    Returns:
+        (files_kept, files_removed)
+    """
+    kept, removed = 0, 0
+
+    for group_id, paths in dup_groups.items():
+        if action == "keep-sharpest":
+            # blur-score is the variance-of-Laplacian focus measure; higher
+            # = sharper. Best-effort: unreadable files score 0 (lose).
+            from .metrics import compute_blur_score
+            scores = {}
+            for p in paths:
+                try:
+                    scores[p] = compute_blur_score(p)
+                except Exception:
+                    scores[p] = 0.0
+            keeper = max(paths, key=lambda p: scores[p])
+        else:
+            keeper = paths[0]  # keep the first one
+        dupes = [p for p in paths if p != keeper]
+
+        kept += 1
+
+        for dup in dupes:
+            removed += 1
+            if action == "move":
+                dup_dir = Path(keeper).parent / "_duplicates"
+                if not dry_run:
+                    dup_dir.mkdir(parents=True, exist_ok=True)
+                    dest = dup_dir / Path(dup).name
+                    counter = 1
+                    while dest.exists():
+                        dest = dup_dir / f"{Path(dup).stem}_{counter}{Path(dup).suffix}"
+                        counter += 1
+                    os.rename(dup, str(dest))
+            elif action in ("delete", "keep-sharpest"):
+                # keep-sharpest removes the non-keepers (the blurry rest of a
+                # burst), keeping only the sharpest image per group
+                if not dry_run:
+                    os.unlink(dup)
+
+    return kept, removed
