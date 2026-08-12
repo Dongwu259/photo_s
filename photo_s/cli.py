@@ -1574,6 +1574,27 @@ def run_cli(args: List[str] = None) -> int:
     # ── Handle 'info' command ────────────────────────────────────────────────
     if parsed.command == "info":
         from .engine import _HAS_PILLOW_HEIF
+        import importlib.util as _ilu
+
+        def _optional_features() -> dict:
+            """Installed optional-dependency status, for environment probing."""
+            return {
+                "enhance": _ilu.find_spec("cv2") is not None,
+                "raw": _ilu.find_spec("rawpy") is not None,
+                "heic": _ilu.find_spec("pillow_heif") is not None,
+                "avif": _ilu.find_spec("pillow_avif") is not None,
+                "exif": _ilu.find_spec("piexif") is not None,
+                "watch": _ilu.find_spec("watchdog") is not None,
+                "gui_dnd": _ilu.find_spec("tkinterdnd2") is not None,
+            }
+
+        def _plugins() -> list:
+            from .plugin import discover_plugins
+            return [{
+                "name": p.name,
+                "provides": list(getattr(p, "provides", ())),
+            } for p in discover_plugins()]
+
         if getattr(parsed, 'json', False):
             import json
             print(json.dumps({
@@ -1581,6 +1602,8 @@ def run_cli(args: List[str] = None) -> int:
                 "input_extensions": sorted(ALL_INPUT_EXTENSIONS),
                 "formats": sorted(SUPPORTED_FORMATS),
                 "writable": sorted(PIL_WRITABLE),
+                "optional_features": _optional_features(),
+                "plugins": _plugins(),
             }, indent=2, ensure_ascii=False))
             return 0
         print("PhotoS — 支持的图片格式 Supported Formats")
@@ -1603,6 +1626,19 @@ def run_cli(args: List[str] = None) -> int:
             print()
             print("💡 提示: 安装 pillow-heif 可获得跨平台 HEIC 支持")
             print("   pip install pillow-heif")
+        print()
+        print("可选依赖 Optional features:")
+        for name, installed in _optional_features().items():
+            print(f"  {'✅' if installed else '·'} {name}")
+        plugins = _plugins()
+        print()
+        print("已装插件 Installed plugins:")
+        if plugins:
+            for p in plugins:
+                provides = ", ".join(p["provides"]) or "-"
+                print(f"  {p['name']}  [{provides}]")
+        else:
+            print("  （无 none）")
         return 0
 
     # ── Handle 'config' command ─────────────────────────────────────────────

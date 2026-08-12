@@ -311,6 +311,26 @@ STRINGS = {
         "plugins_refresh": "刷新",
         "plugins_ok": "✅ {}",
         "plugins_err": "❌ {}",
+        # Exposure analysis
+        "analyze": "Exposure analysis",
+        "analyze_title": "Exposure Stats",
+        "analyze_none": "Select an image in the file list first",
+        "analyze_err": "Cannot read that image",
+        "analyze_luminance": "Mean luminance",
+        "analyze_over": "Overexposed (≥250)",
+        "analyze_under": "Underexposed (≤5)",
+        "analyze_blur": "Blur score",
+        "analyze_histogram": "Luminance histogram",
+        # Exposure analysis
+        "analyze": "曝光分析",
+        "analyze_title": "曝光统计",
+        "analyze_none": "请先在文件列表中选择一张图片",
+        "analyze_err": "无法读取该图片",
+        "analyze_luminance": "平均亮度",
+        "analyze_over": "过曝 (≥250)",
+        "analyze_under": "欠曝 (≤5)",
+        "analyze_blur": "模糊分",
+        "analyze_histogram": "亮度直方图",
         # Watermark
         "sec_watermark": "水印",
         "wm_text": "文字",
@@ -353,6 +373,29 @@ STRINGS = {
         "denoise_hint": "NLM 降噪（空 = 关闭；需 photo-s[enhance] 或 SCUNet 插件）",
         "auto_straighten": "自动扶正地平线",
         "max_straighten_angle": "最大扶正角°",
+        # White balance / color / evaluation
+        "wb_temp": "白平衡色温 (K)",
+        "wb_temp_hint": "如 5600；空 = 不调整",
+        "wb_reference": "白平衡参考图",
+        "wb_reference_hint": "灰卡图路径；空 = 不采样",
+        "browse_ref": "浏览…",
+        "auto_levels": "自动色阶（直方图拉伸）",
+        "srgb": "转 sRGB 色彩空间",
+        "flatten_cmyk": "CMYK 转 RGB",
+        "evaluate": "计算 SSIM 质量评分",
+        "blur_score": "计算模糊评分",
+        "resume": "断点续传（跳过已处理文件）",
+        "print_size": "打印尺寸",
+        "print_size_hint": "如 8x10@300dpi；空 = 不裁剪",
+        # Metadata
+        "sec_metadata": "元数据",
+        "date_shift": "EXIF 日期偏移",
+        "date_shift_hint": "如 -5h30m；空 = 不改",
+        "sync_date": "输出时间 ← EXIF 拍摄时间",
+        "scrub": "清除全部元数据 (EXIF+ICC+GPS)",
+        "gpx_trace": "GPX 轨迹文件",
+        "gpx_trace_hint": "按拍摄时间插值写入 GPS；空 = 不写入",
+        "browse_gpx": "浏览…",
         "cmp_no_result": "无对比结果",
         "cmp_no_result_body": "该文件尚未处理或处理失败。\nProcess this file first to compare before/after.",
         # About
@@ -513,6 +556,26 @@ STRINGS = {
         "plugins_refresh": "Refresh",
         "plugins_ok": "✅ {}",
         "plugins_err": "❌ {}",
+        # Exposure analysis
+        "analyze": "Exposure analysis",
+        "analyze_title": "Exposure Stats",
+        "analyze_none": "Select an image in the file list first",
+        "analyze_err": "Cannot read that image",
+        "analyze_luminance": "Mean luminance",
+        "analyze_over": "Overexposed (≥250)",
+        "analyze_under": "Underexposed (≤5)",
+        "analyze_blur": "Blur score",
+        "analyze_histogram": "Luminance histogram",
+        # Exposure analysis
+        "analyze": "曝光分析",
+        "analyze_title": "曝光统计",
+        "analyze_none": "请先在文件列表中选择一张图片",
+        "analyze_err": "无法读取该图片",
+        "analyze_luminance": "平均亮度",
+        "analyze_over": "过曝 (≥250)",
+        "analyze_under": "欠曝 (≤5)",
+        "analyze_blur": "模糊分",
+        "analyze_histogram": "亮度直方图",
         # Watermark
         "sec_watermark": "Watermark",
         "wm_text": "Text",
@@ -555,6 +618,29 @@ STRINGS = {
         "denoise_hint": "NLM denoise (blank = off; needs photo-s[enhance] or SCUNet plugin)",
         "auto_straighten": "Auto-straighten horizon",
         "max_straighten_angle": "Max straighten angle°",
+        # White balance / color / evaluation
+        "wb_temp": "White balance temp (K)",
+        "wb_temp_hint": "e.g. 5600; blank = off",
+        "wb_reference": "WB reference image",
+        "wb_reference_hint": "gray-card path; blank = no sampling",
+        "browse_ref": "Browse…",
+        "auto_levels": "Auto levels (histogram stretch)",
+        "srgb": "Convert to sRGB",
+        "flatten_cmyk": "Flatten CMYK → RGB",
+        "evaluate": "Compute SSIM score",
+        "blur_score": "Compute blur score",
+        "resume": "Resume (skip already-processed files)",
+        "print_size": "Print size",
+        "print_size_hint": "e.g. 8x10@300dpi; blank = no crop",
+        # Metadata
+        "sec_metadata": "Metadata",
+        "date_shift": "EXIF date shift",
+        "date_shift_hint": "e.g. -5h30m; blank = off",
+        "sync_date": "Output mtime ← EXIF datetime",
+        "scrub": "Strip ALL metadata (EXIF+ICC+GPS)",
+        "gpx_trace": "GPX track file",
+        "gpx_trace_hint": "interpolate GPS from timestamps; blank = off",
+        "browse_gpx": "Browse…",
         "cmp_no_result": "No comparison",
         "cmp_no_result_body": "This file was not processed yet (or failed).\nProcess it first to compare before/after.",
         # About
@@ -689,6 +775,21 @@ class PhotoSApp:
         self.denoise = tk.StringVar(value="")
         self.auto_straighten = tk.BooleanVar(value=False)
         self.max_straighten_angle = tk.StringVar(value="10")
+        # White balance / color / evaluation
+        self.wb_temp = tk.StringVar(value="")
+        self.wb_reference = tk.StringVar(value="")
+        self.auto_levels = tk.BooleanVar(value=False)
+        self.srgb = tk.BooleanVar(value=False)
+        self.flatten_cmyk = tk.BooleanVar(value=False)
+        self.evaluate = tk.BooleanVar(value=False)
+        self.blur_score = tk.BooleanVar(value=False)
+        self.resume = tk.BooleanVar(value=False)
+        self.print_size = tk.StringVar(value="")
+        # Metadata
+        self.date_shift = tk.StringVar(value="")
+        self.sync_date = tk.BooleanVar(value=False)
+        self.scrub = tk.BooleanVar(value=False)
+        self.gpx_trace = tk.StringVar(value="")
         # Composition
         self.crop = tk.StringVar(value="")
         self.crop_ratio = tk.StringVar(value="")
@@ -908,6 +1009,13 @@ class PhotoSApp:
             border_color=COLORS["border"],
         )
         clear_btn.pack(side="right")
+
+        analyze_btn = FlatButton(
+            toolbar, text=self._t("analyze"), command=self._show_analysis,
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"],
+        )
+        analyze_btn.pack(side="left", padx=(8, 0))
 
         self.file_count_label = tk.Label(
             toolbar, text=self._t("files_count", n=0), font=FONT_SMALL,
@@ -1183,6 +1291,18 @@ class PhotoSApp:
             font=FONT_SMALL, padx=10, pady=4, border_color=COLORS["border"],
         )
         browse_btn.grid(row=0, column=1)
+
+        # Print size (blank = off)
+        tk.Label(out_frame, text=self._t("print_size"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=1, column=0, sticky="w", pady=(10, 0))
+        ttk.Entry(out_frame, textvariable=self.print_size,
+                  font=FONT_BODY, width=10).grid(
+            row=1, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+        tk.Label(out_frame, text=self._t("print_size_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         # ── Naming ──────────────────────────────────────────────────────────
         self._add_section_label(settings_frame, self._t("sec_naming"), row=14)
@@ -1509,6 +1629,110 @@ class PhotoSApp:
                   font=FONT_BODY, width=8).grid(
             row=9, column=1, sticky="w", padx=(8, 0))
 
+        # ── White balance / color / evaluation (row 10+) ─────────────────────
+        # WB temperature (blank = off)
+        tk.Label(corr_frame, text=self._t("wb_temp"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=10, column=0, sticky="w", pady=(10, 0))
+        ttk.Entry(corr_frame, textvariable=self.wb_temp,
+                  font=FONT_BODY, width=8).grid(
+            row=10, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+        tk.Label(corr_frame, text=self._t("wb_temp_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=11, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
+        # WB reference image (blank = off)
+        tk.Label(corr_frame, text=self._t("wb_reference"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=12, column=0, sticky="w")
+        ref_entry = ttk.Entry(corr_frame, textvariable=self.wb_reference,
+                              font=FONT_SMALL)
+        ref_entry.grid(row=12, column=1, sticky="ew", padx=(8, 0))
+        FlatButton(corr_frame, text=self._t("browse_ref"),
+                   command=self._browse_wb_reference,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=8, pady=2, border_color=COLORS["border"]).grid(
+            row=12, column=2, sticky="e", padx=(4, 0))
+        tk.Label(corr_frame, text=self._t("wb_reference_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=13, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
+        # Checkboxes: auto levels / color / evaluation
+        self._add_checkbox(corr_frame, self._t("auto_levels"),
+                           self.auto_levels, row=14)
+        self._add_checkbox(corr_frame, self._t("srgb"),
+                           self.srgb, row=15)
+        self._add_checkbox(corr_frame, self._t("flatten_cmyk"),
+                           self.flatten_cmyk, row=16)
+        self._add_checkbox(corr_frame, self._t("evaluate"),
+                           self.evaluate, row=17)
+        self._add_checkbox(corr_frame, self._t("blur_score"),
+                           self.blur_score, row=18)
+        self._add_checkbox(corr_frame, self._t("resume"),
+                           self.resume, row=19)
+
+        # ── Metadata section ──────────────────────────────────────────────────
+        self._add_section_label(settings_frame, self._t("sec_metadata"), row=39)
+        meta_frame = tk.Frame(settings_frame, bg=COLORS["card"])
+        meta_frame.grid(row=41, sticky="ew", **pad)
+        meta_frame.columnconfigure(1, weight=1)
+
+        # EXIF date shift (blank = off)
+        tk.Label(meta_frame, text=self._t("date_shift"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=0, column=0, sticky="w")
+        ttk.Entry(meta_frame, textvariable=self.date_shift,
+                  font=FONT_BODY, width=8).grid(
+            row=0, column=1, sticky="w", padx=(8, 0))
+        tk.Label(meta_frame, text=self._t("date_shift_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
+        # GPX track (blank = off)
+        tk.Label(meta_frame, text=self._t("gpx_trace"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(meta_frame, textvariable=self.gpx_trace,
+                  font=FONT_SMALL).grid(
+            row=2, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        FlatButton(meta_frame, text=self._t("browse_gpx"),
+                   command=self._browse_gpx,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=8, pady=2, border_color=COLORS["border"]).grid(
+            row=2, column=2, sticky="e", padx=(4, 0), pady=(8, 0))
+        tk.Label(meta_frame, text=self._t("gpx_trace_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
+        self._add_checkbox(meta_frame, self._t("sync_date"),
+                           self.sync_date, row=4)
+        self._add_checkbox(meta_frame, self._t("scrub"),
+                           self.scrub, row=5)
+
+    def _browse_wb_reference(self):
+        """Pick a white-balance reference image (gray card)."""
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            title=self._t("wb_reference"),
+            filetypes=[("图片 Images", "*.jpg *.jpeg *.png *.webp *.tif *.tiff")])
+        if path:
+            self.wb_reference.set(path)
+
+    def _browse_gpx(self):
+        """Pick a GPX track file."""
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            title=self._t("gpx_trace"),
+            filetypes=[("GPX", "*.gpx"), ("All Files", "*.*")])
+        if path:
+            self.gpx_trace.set(path)
+
     def _browse_watermark_image(self):
         """Pick a watermark overlay image via file dialog."""
         from tkinter import filedialog
@@ -1801,6 +2025,92 @@ class PhotoSApp:
 
         _refresh()
 
+    # ── Exposure Analysis ───────────────────────────────────────────────────
+
+    def _show_analysis(self):
+        """Dialog showing exposure / sharpness stats + luminance histogram
+        for the currently selected file (via photo_s.metrics)."""
+        from .metrics import compute_exposure_stats, compute_blur_score
+
+        selected = self.file_tree.selection()
+        if not selected:
+            messagebox.showwarning(self._t("analyze_title"),
+                                   self._t("analyze_none"))
+            return
+        path = selected[0]
+
+        stats = compute_exposure_stats(path)
+        if not stats.get("ok"):
+            messagebox.showerror(self._t("analyze_title"),
+                                 self._t("analyze_err"))
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("{} — {}".format(self._t("analyze_title"),
+                                   os.path.basename(path)))
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+        win.resizable(False, False)
+
+        inner = tk.Frame(win, bg=COLORS["bg"])
+        inner.pack(padx=24, pady=20)
+
+        def stat_row(label, value, color=None):
+            row = tk.Frame(inner, bg=COLORS["bg"])
+            row.pack(anchor="w", fill="x", pady=1)
+            tk.Label(row, text=label, font=FONT_SMALL,
+                     fg=COLORS["text_secondary"], bg=COLORS["bg"],
+                     width=22, anchor="w").pack(side="left")
+            tk.Label(row, text=value, font=FONT_SMALL,
+                     fg=color or COLORS["text"], bg=COLORS["bg"]).pack(side="left")
+
+        stat_row(self._t("analyze_luminance"),
+                 "{:.3f}".format(stats["luminance"]))
+        stat_row(self._t("analyze_over"),
+                 "{:.2f}%".format(stats["overexposed_pct"]),
+                 COLORS["danger"] if stats["overexposed_pct"] > 0
+                 else COLORS["text"])
+        stat_row(self._t("analyze_under"),
+                 "{:.2f}%".format(stats["underexposed_pct"]),
+                 COLORS["warning"] if stats["underexposed_pct"] > 0
+                 else COLORS["text"])
+        try:
+            blur = compute_blur_score(path)
+            stat_row(self._t("analyze_blur"), "{:.1f}".format(blur))
+        except Exception:
+            pass
+
+        # Luminance histogram (from the same grayscale sample)
+        tk.Label(inner, text=self._t("analyze_histogram"),
+                 font=FONT_SECTION, fg=COLORS["text"],
+                 bg=COLORS["bg"]).pack(anchor="w", pady=(14, 6))
+        canvas = tk.Canvas(inner, width=360, height=120, bg=COLORS["card"],
+                           highlightthickness=0, bd=0)
+        canvas.pack()
+
+        from PIL import Image
+        with Image.open(path) as img:
+            sample = img.convert("L").copy()
+            sample.thumbnail((256, 256))
+            hist = sample.histogram()  # 256 bins
+
+        max_bin = max(hist) or 1
+        bins = 64  # aggregate into 64 bars
+        bar_w = 360 / bins
+        for i in range(bins):
+            lo = i * 4
+            hi = lo + 4
+            h = sum(hist[lo:hi]) / max_bin
+            h = max(h * 100, 1.0)  # min visible bar
+            color = COLORS["accent"] if 30 <= lo <= 225 else COLORS["border"]
+            canvas.create_rectangle(i * bar_w, 120 - h,
+                                    (i + 1) * bar_w, 120,
+                                    fill=color, outline="")
+
+        FlatButton(inner, text=self._t("close"), command=win.destroy,
+                   bg=COLORS["accent"], hover_bg=COLORS["accent_hover"],
+                   font=FONT_BUTTON, padx=24, pady=6).pack(pady=(16, 0))
+
     # ── File Management ─────────────────────────────────────────────────────
 
     def _add_files(self):
@@ -2053,6 +2363,20 @@ class PhotoSApp:
             denoise=_to_float(self.denoise.get(), 0.0)
             if self.denoise.get().strip() else None,
             auto_straighten=self.auto_straighten.get(),
+            wb_temp=_to_float(self.wb_temp.get(), 0.0)
+            if self.wb_temp.get().strip() else None,
+            wb_reference=self.wb_reference.get().strip() or None,
+            auto_levels=self.auto_levels.get(),
+            srgb=self.srgb.get(),
+            flatten_cmyk=self.flatten_cmyk.get(),
+            evaluate=self.evaluate.get(),
+            blur_score=self.blur_score.get(),
+            resume=self.resume.get(),
+            print_size=self.print_size.get().strip() or None,
+            date_shift=self.date_shift.get().strip() or None,
+            sync_date=self.sync_date.get(),
+            scrub=self.scrub.get(),
+            gpx_trace=self.gpx_trace.get().strip() or None,
             max_straighten_angle=_to_float(self.max_straighten_angle.get(), 10.0),
             crop=self.crop.get().strip() or None,
             crop_ratio=self.crop_ratio.get().strip() or None,

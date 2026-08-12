@@ -290,6 +290,27 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
                 "input_extensions": sorted(ALL_INPUT_EXTENSIONS),
                 "plugins": [p.name for p in discover_plugins()],
             })
+        elif self.path == "/plugins":
+            from .registry import OFFICIAL_PLUGINS, to_dict
+            from .plugin import discover_plugins
+            from .plugincmd import _installed_version
+            installed_objs = {}
+            for p in discover_plugins():
+                installed_objs[p.name] = p
+            installed = []
+            for name, p in installed_objs.items():
+                installed.append({
+                    "name": name,
+                    "provides": list(getattr(p, "provides", ())),
+                    "version": _installed_version("photo-s-plugin-" + name),
+                })
+            available = []
+            for name, official in OFFICIAL_PLUGINS.items():
+                entry = to_dict(official)
+                entry["installed"] = name in installed_objs
+                available.append(entry)
+            self._send_json(200, {"installed": installed,
+                                  "available": available})
         elif self.path == "/tasks":
             with _TASKS_LOCK:
                 tasks = [{
@@ -421,6 +442,60 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
                 return
             task["cancel"].set()
             self._send_json(200, {"task_id": task_id, "cancelled": True})
+        elif self.path == "/plugins":
+            # Remote plugin management: {"action": "install|uninstall|fetch",
+            # "name": "scunet", "dry_run": bool?}
+            from .registry import get_official
+            from .plugincmd import _pip_run
+            action = data.get("action")
+            name = data.get("name")
+            if action not in ("install", "uninstall", "fetch"):
+                self._send_json(400, {"error": "action must be one of "
+                                                "install|uninstall|fetch"})
+                return
+            official = get_official(name) if name else None
+            if action in ("install", "uninstall") and official is None:
+                self._send_json(400, {"error": "unknown plugin: {}".format(name)})
+                return
+            if action == "fetch":
+                from .plugin import discover_plugins
+                plugin = next((p for p in discover_plugins()
+                               if p.name == name), None)
+                if plugin is None:
+                    self._send_json(400, {"error": "plugin not installed: {}"
+                                          .format(name)})
+                    return
+                try:
+                    from .modelstore import ensure
+                    weights = [ensure(s) for s in plugin.weight_specs()]
+                except RuntimeError as e:
+                    self._send_json(500, {"ok": False, "error": str(e)})
+                    return
+                self._send_json(200, {"ok": True, "name": name,
+                                      "weights": [{"path": w} for w in weights]})
+                return
+
+            dist = official.pypi_distribution
+            if data.get("dry_run"):
+                argv = ["install", "--quiet", dist] if action == "install" \
+                    else ["uninstall", "-y", dist]
+                self._send_json(200, {"ok": True, "name": name,
+                                      "dry_run": True, "pip_argv": argv})
+                return
+            try:
+                proc = _pip_run(["install", "--quiet", dist] if action == "install"
+                                else ["uninstall", "-y", dist])
+            except FileNotFoundError:
+                self._send_json(500, {"ok": False,
+                                      "error": "pip not available"})
+                return
+            if proc.returncode != 0:
+                self._send_json(500, {"ok": False,
+                                      "error": "pip {} failed: {}".format(
+                                          action, (proc.stderr or "").strip()[-300:])})
+                return
+            self._send_json(200, {"ok": True, "name": name,
+                                  "action": action, "distribution": dist})
         else:
             self._send_json(404, {"error": "not found"})
 

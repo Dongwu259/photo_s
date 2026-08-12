@@ -127,7 +127,9 @@ GET  /health  带 Bearer → {"status": "ok", "version": "..."}
 | 方法 / 路径 | 请求体 | 响应 |
 |---|---|---|
 | `GET /health` | — | `{"status", "version"}` |
-| `GET /info` | — | 格式清单 + 已装插件 |
+| `GET /info` | — | 格式清单 + 已装插件 + `optional_features`（可选依赖状态） |
+| `GET /plugins` | — | `{"installed": [{name, provides, version?}], "available": [{name, pypi_distribution, description, min_photo_s_version, requires, installed}]}` |
+| `POST /plugins` | `{"action": "install\|uninstall\|fetch", "name": "scunet", "dry_run"?: bool}` | 远程插件管理：`{"ok", "name", "action", "distribution"}`；`dry_run` → `{"ok", "dry_run", "pip_argv"}`；fetch → `{"ok", "name", "weights": [{path}]}` |
 | `POST /process` | `{"paths": [...], "options": {...}}` | `BatchResult` JSON |
 | `POST /process` (async) | 同上 + `"async": true` | `202 {"task_id", "poll", "total"}` |
 | `POST /process` (dry-run) | 同上 + `"dry_run": true` | `{"dry_run", "count", "paths", "options"}`，不处理 |
