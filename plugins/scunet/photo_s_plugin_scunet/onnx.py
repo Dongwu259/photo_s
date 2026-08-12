@@ -28,8 +28,14 @@ def _ort():
 def _session(path):
     ort = _ort()
     if path not in _SESSIONS:
-        sess = ort.InferenceSession(
-            path, providers=ort.get_available_providers())
+        providers = ort.get_available_providers()
+        try:
+            sess = ort.InferenceSession(path, providers=providers)
+        except Exception:
+            # External-data models can fail to init on some accelerators
+            # (e.g. CoreML); CPU is the reliable fallback.
+            sess = ort.InferenceSession(path,
+                                        providers=["CPUExecutionProvider"])
         _SESSIONS[path] = sess
     return _SESSIONS[path]
 

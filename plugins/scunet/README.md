@@ -27,14 +27,21 @@ photo-s batch ~/highiso/ --denoise 12
 
 ## 模型权重
 
-模型权重（ONNX，约 10-40MB）**不进 wheel**。首次使用时自动从 GitHub Releases
-下载到缓存目录（`~/.cache/photo-s/models/`，可用 `$PHOTOS_CACHE_DIR` 覆盖），
-带 sha256 校验。可预下载：
+使用 SCUNet 彩色降噪 (noise-25) 检查点，由官方 cszn/SCUNet PyTorch 权重
+重新导出为 ONNX（保留上游 MIT 许可），托管于 HuggingFace
+[`Heliosoph/scunet-onnx`](https://huggingface.co/Heliosoph/scunet-onnx)。
+
+权重**不进 wheel**，首次使用时自动下载到缓存目录
+（`~/.cache/photo-s/models/`，可用 `$PHOTOS_CACHE_DIR` 覆盖），带 sha256 校验。
+SCUNet 导出为 **external-data 格式**：图 (`.onnx`，~3.8MB) 与权重
+(`.onnx.data`，~73MB) 两个文件都要下载；两者保持规范文件名以便 onnxruntime
+解析。可预下载：
 
 ```bash
 photo-s plugin fetch scunet
 ```
 
-> 维护者发布前需在 `photo_s_plugin_scunet/__init__.py` 中把
-> `DEFAULT_MODEL_URL` / `DEFAULT_MODEL_SHA256` / `DEFAULT_MODEL_SIZE`
-> 更新为真实 GitHub Release 资产（当前为占位值）。
+> 默认指向社区 HF 镜像。如需第一方托管，可把两个文件重新挂到自己的
+> GitHub Release 并更新 `photo_s_plugin_scunet/__init__.py` 中的
+> `DEFAULT_MODEL_URL/_SHA256/_SIZE` 与 `DEFAULT_DATA_*` 常量
+> （或保留 `PHOTOS_SCUNET_MODEL_*` 环境变量覆盖，测试即用此机制）。
