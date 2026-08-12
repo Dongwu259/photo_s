@@ -25,6 +25,10 @@ class TestMissingMcp:
             mcp_server._mcp()
 
     def test_cli_list_tools_missing_mcp(self, capsys, monkeypatch):
+        # On py3.9 the version guard fires first (mcp SDK needs 3.10+);
+        # on 3.10+ the missing-extra hint fires. Both are graceful rc 1.
+        if sys.version_info < (3, 10):
+            pytest.skip("py3.9 hits the version guard, not the mcp hint")
         monkeypatch.setitem(sys.modules, "mcp", None)
         monkeypatch.setitem(sys.modules, "mcp.server", None)
         monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", None)
