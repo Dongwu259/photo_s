@@ -11,6 +11,16 @@ from typing import Optional, Tuple
 
 from PIL import Image, ImageCms, ImageEnhance
 
+
+def _flattened(img):
+    """Pixel data with Pillow version compat (get_flattened_data in Pillow 12+,
+    getdata fallback for older Pillows / py3.9 → Pillow 11)."""
+    gfd = getattr(img, "get_flattened_data", None)
+    if gfd is not None:
+        return gfd()
+    return img.getdata()
+
+
 # Sepia conversion matrix (classic R=0.393R+0.769G+0.189B coefficients).
 _SEPIA_MATRIX = (0.393, 0.769, 0.189, 0,
                  0.349, 0.686, 0.168, 0,
@@ -180,8 +190,8 @@ def _reference_gains(reference_path: str):
     with Image.open(reference_path) as ref:
         ref = ref.convert("RGB").copy()
         ref.thumbnail((128, 128))
-    # get_flattened_data yields (r, g, b) tuples per pixel for RGB
-    px = list(ref.get_flattened_data())
+    # _flattened yields (r, g, b) tuples per pixel for RGB
+    px = list(_flattened(ref))
     n = len(px)
     if n == 0:
         return (1.0, 1.0, 1.0)
@@ -241,7 +251,7 @@ def _mean_luminance(img: Image.Image) -> float:
     """Mean luminance (0-1) from a small grayscale sample."""
     sample = img.convert("L").copy()
     sample.thumbnail((128, 128))
-    px = list(sample.get_flattened_data())
+    px = list(_flattened(sample))
     return (sum(px) / len(px) / 255.0) if px else 0.5
 
 

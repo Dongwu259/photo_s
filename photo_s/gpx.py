@@ -39,7 +39,12 @@ def parse_gpx(path: str) -> List[Point]:
             ctag = child.tag.rsplit("}", 1)[-1]
             if ctag == "time":
                 try:
-                    ts = datetime.fromisoformat(child.text.strip())
+                    # fromisoformat accepts the trailing 'Z' only on
+                    # Python ≥3.11; normalize to '+00:00' so py3.9/3.10 work
+                    raw = child.text.strip()
+                    if raw.endswith("Z") or raw.endswith("z"):
+                        raw = raw[:-1] + "+00:00"
+                    ts = datetime.fromisoformat(raw)
                     ts = ts.replace(tzinfo=None)  # naive UTC/local frame
                 except (ValueError, AttributeError):
                     ts = None

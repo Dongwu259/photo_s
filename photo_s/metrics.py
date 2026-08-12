@@ -9,6 +9,20 @@ comparison, so the score stays fast even for very large photos.
 from PIL import Image
 
 
+def _flattened(img):
+    """Pixel data with Pillow version compat.
+
+    ``get_flattened_data`` exists in Pillow 12+; older Pillows (down to the
+    ``>=10.4.0`` floor) only have ``getdata``. Both return identical data
+    (per-pixel tuples for RGB, flat ints for L) — fall back to keep py3.9
+    (which resolves to Pillow 11) working.
+    """
+    gfd = getattr(img, "get_flattened_data", None)
+    if gfd is not None:
+        return gfd()
+    return img.getdata()
+
+
 def _load_sample(path: str, sample_size: int) -> Image.Image:
     """Open an image, downscale to ≤sample_size on the longest side, convert to grayscale."""
     with Image.open(path) as img:
@@ -54,9 +68,8 @@ def compute_ssim(path_a: str, path_b: str, sample_size: int = 64,
     if a.size != b.size:
         b = b.resize(a.size, Image.LANCZOS)
 
-    # get_flattened_data replaces getdata (deprecated, removed in Pillow 14)
-    pixels_a = list(a.get_flattened_data())
-    pixels_b = list(b.get_flattened_data())
+    pixels_a = list(_flattened(a))
+    pixels_b = list(_flattened(b))
     width, height = a.size
 
     if win_size < 3 or win_size > min(width, height):
@@ -106,7 +119,7 @@ def compute_blur_score(path: str, sample_size: int = 128) -> float:
     if width < 3 or height < 3:
         return 0.0
 
-    pixels = list(img.get_flattened_data())  # getdata removed in Pillow 14
+    pixels = list(_flattened(img))
     # 3x3 Laplacian kernel [0,1,0; 1,-4,1; 0,1,0]
     values = []
     for y in range(1, height - 1):
@@ -137,7 +150,7 @@ def compute_exposure_stats(path: str, sample_size: int = 256) -> dict:
     except Exception:
         return {"ok": False, "luminance": 0.0,
                 "overexposed_pct": 0.0, "underexposed_pct": 0.0}
-    pixels = list(img.get_flattened_data())
+    pixels = list(_flattened(img))
     n = len(pixels)
     if n == 0:
         return {"ok": False, "luminance": 0.0,

@@ -11,6 +11,15 @@ from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
 
 
+def _flattened(img):
+    """Pixel data with Pillow version compat (get_flattened_data in Pillow 12+,
+    getdata fallback for older Pillows / py3.9 → Pillow 11)."""
+    gfd = getattr(img, "get_flattened_data", None)
+    if gfd is not None:
+        return gfd()
+    return img.getdata()
+
+
 def dhash(image, hash_size: int = 8) -> str:
     """Compute the difference hash (dhash) of an image.
 
@@ -27,7 +36,7 @@ def dhash(image, hash_size: int = 8) -> str:
         Hex string representation of the 64-bit hash.
     """
     img = image.convert("L").resize((hash_size + 1, hash_size))
-    pixels = list(img.get_flattened_data())  # getdata removed in Pillow 14
+    pixels = list(_flattened(img))
 
     hash_bits = []
     for row in range(hash_size):

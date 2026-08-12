@@ -481,10 +481,18 @@ class FlatButton(tk.Label):
         extra = {}
         if border_color:
             extra = {"highlightthickness": 1, "highlightbackground": border_color}
-        super().__init__(
-            master, text=text, font=font or FONT_BUTTON, bg=bg, fg=fg,
-            padx=padx, pady=pady, cursor="pointinghand", **extra,
-        )
+        try:
+            super().__init__(
+                master, text=text, font=font or FONT_BUTTON, bg=bg, fg=fg,
+                padx=padx, pady=pady, cursor="pointinghand", **extra,
+            )
+        except Exception:
+            # Some environments (e.g. headless Xvfb) lack the 'pointinghand'
+            # cursor; degrade to the default cursor instead of failing.
+            super().__init__(
+                master, text=text, font=font or FONT_BUTTON, bg=bg, fg=fg,
+                padx=padx, pady=pady, **extra,
+            )
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
         self.bind("<Button-1>", self._on_click)
