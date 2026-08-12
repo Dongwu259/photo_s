@@ -52,14 +52,26 @@ def _make_tiny_onnx(path):
 
 
 def _setup_env(tmp_path, monkeypatch):
-    """Point the plugin at a local synthetic model in an isolated cache."""
+    """Point the plugin at local synthetic weights in an isolated cache.
+
+    The plugin fetches TWO specs (graph + external-data companion); the tiny
+    model is self-contained, so the .data companion is a dummy file with a
+    matching sha256 (onnxruntime never reads it for a self-contained graph).
+    """
     model_path = _make_tiny_onnx(tmp_path / "scunet.onnx")
-    data = model_path.read_bytes()
+    data_path = tmp_path / "scunet.onnx.data"
+    data_path.write_bytes(b"dummy-external-data")
+    model_data = model_path.read_bytes()
+    dummy_data = data_path.read_bytes()
     monkeypatch.setenv("PHOTOS_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("PHOTOS_SCUNET_MODEL_URL", model_path.as_uri())
     monkeypatch.setenv("PHOTOS_SCUNET_MODEL_SHA256",
-                       hashlib.sha256(data).hexdigest())
-    monkeypatch.setenv("PHOTOS_SCUNET_MODEL_SIZE", str(len(data)))
+                       hashlib.sha256(model_data).hexdigest())
+    monkeypatch.setenv("PHOTOS_SCUNET_MODEL_SIZE", str(len(model_data)))
+    monkeypatch.setenv("PHOTOS_SCUNET_MODEL_DATA_URL", data_path.as_uri())
+    monkeypatch.setenv("PHOTOS_SCUNET_MODEL_DATA_SHA256",
+                       hashlib.sha256(dummy_data).hexdigest())
+    monkeypatch.setenv("PHOTOS_SCUNET_MODEL_DATA_SIZE", str(len(dummy_data)))
     return model_path
 
 
@@ -88,10 +100,13 @@ class TestScunetDenoise:
         plugin = ScunetPlugin()
         plugin.denoise(Image.new("RGB", (64, 64), (50, 50, 50)), 10.0,
                        type("C", (), {})())
-        cached = os.path.join(os.environ["PHOTOS_CACHE_DIR"], "models",
-                              "scunet.onnx")
+        models_dir = os.path.join(os.environ["PHOTOS_CACHE_DIR"], "models")
+        # both graph + companion cached under their canonical names
+        cached = os.path.join(models_dir, "scunet_color_25.onnx")
         assert os.path.isfile(cached)
         assert open(cached, "rb").read() == model_path.read_bytes()
+        assert os.path.isfile(
+            os.path.join(models_dir, "scunet_color_25.onnx.data"))
 
 
 class TestScunetInEngine:
