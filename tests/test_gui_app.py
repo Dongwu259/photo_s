@@ -1,0 +1,124 @@
+"""GUI app-level regression tests (real Tk when a display is available).
+
+Covers bugs found in the full gui.py audit: after-callbacks touching
+destroyed widgets, the FlatButton API contract, _build_options mapping,
+and the file-list dimensions cache.
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pytest
+
+
+def _make_app():
+    import tkinter as tk
+    from photo_s.gui import PhotoSApp
+    try:
+        root = tk.Tk()
+    except Exception as e:
+        pytest.skip("no display: {}".format(e))
+    app = PhotoSApp(root)
+    root.update_idletasks()
+    return root, app
+
+
+class TestCopyText:
+    def test_dialog_closed_before_flash_restore(self):
+        """Closing the dialog within the 1.2s copy-flash window must not
+        raise (regression: TclError 'invalid command name' when the after
+        callback touched the destroyed button)."""
+        import time
+        import tkinter as tk
+        from photo_s.gui import FlatButton
+        root, app = _make_app()
+        win = tk.Toplevel(root)
+        btn = FlatButton(win, text="Copy", command=lambda: None, bg="#111111")
+        btn.pack()
+        root.update()
+        app._copy_text(win, "hello", btn)
+        win.destroy()
+        time.sleep(1.3)   # let the 1.2s after callback come due
+        root.update()     # deliver it (must not raise)
+        root.destroy()
+
+
+class TestFlatButton:
+    def test_state_roundtrip_and_forwarding(self):
+        from photo_s.gui import FlatButton
+        root, app = _make_app()
+        hits = []
+        btn = FlatButton(root, text="Go", command=lambda: hits.append(1),
+                         bg="#111111", fg="#eeeeee")
+        btn.pack()
+        root.update()
+        assert btn.cget("text") == "Go"
+        btn.configure(text="Wait", state="disabled")
+        assert btn.cget("state") == "disabled"
+        btn._on_click(None)
+        assert hits == [], "disabled button must block clicks"
+        btn._on_enter(None)
+        assert btn._label.cget("bg") == "#111111", "no hover while disabled"
+        btn.configure(state="normal")
+        btn._on_click(None)
+        assert hits == [1]
+        root.destroy()
+
+    def test_bordered_geometry(self):
+        """Border = 1px drawn by the wrapper frame around the label."""
+        from photo_s.gui import FlatButton
+        root, app = _make_app()
+        btn = FlatButton(root, text="Abc", command=lambda: None,
+                         bg="#111111", border_color="#ff0000")
+        btn.pack()
+        root.update()
+        assert btn.winfo_width() == btn._label.winfo_width() + 2
+        assert btn.winfo_height() == btn._label.winfo_height() + 2
+        root.destroy()
+
+
+class TestBuildOptions:
+    def test_mapping_smoke(self):
+        """Key tk.Variables must map onto ProcessOptions fields."""
+        root, app = _make_app()
+        app.max_width.set("640")
+        app.max_height.set("480")
+        app.quality.set(72)
+        app.denoise.set("12")
+        app.strip_gps.set(True)
+        app.date_shift.set("-5h")
+        app.wb_temp.set("5600")
+        app.log_curve.set("SLOG3")
+        opts = app._build_options()
+        assert opts.max_width == 640 and opts.max_height == 480
+        assert opts.quality == 72
+        assert opts.denoise == 12.0
+        assert opts.strip_gps is True
+        assert opts.date_shift == "-5h"
+        assert opts.wb_temp == 5600.0
+        assert opts.log_curve == "SLOG3"
+        # blank fields stay off
+        assert opts.crop is None and opts.crop_ratio is None
+        assert opts.auto_exposure is None and opts.gpx_trace is None
+        root.destroy()
+
+
+class TestFileList:
+    def test_dims_cached_across_refreshes(self):
+        """Image dims must be cached per (path, size, mtime) — re-refreshing
+        the list must not re-open every image (RAW open is slow)."""
+        import tempfile
+        from PIL import Image
+        root, app = _make_app()
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "a.jpg")
+            Image.new("RGB", (30, 20)).save(p)
+            app.files = [p]
+            app._refresh_file_list()
+            assert app._dims_cache, "cache must be populated"
+            first = dict(app._dims_cache)
+            app._refresh_file_list()
+            assert app._dims_cache == first, "re-refresh must hit the cache"
+        root.destroy()

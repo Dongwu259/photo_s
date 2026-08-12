@@ -767,6 +767,19 @@ class FlatButton(tk.Frame):
             self._command()
 
 
+def canvas_unbind_safe(widget):
+    """Drop any leftover global mousewheel binding from a destroyed panel.
+
+    bind_all is interp-global: destroying the settings card does not remove
+    its handler, and a stale one would target a destroyed canvas. Called at
+    the top of every settings-panel build.
+    """
+    try:
+        widget.unbind_all("<MouseWheel>")
+    except Exception:
+        pass
+
+
 # ── Main Application ────────────────────────────────────────────────────────
 
 class PhotoSApp:
@@ -855,6 +868,9 @@ class PhotoSApp:
         # Queue + comparison state
         self._queued_files: List[str] = []
         self._last_result = None
+        # (path, size, mtime) -> "WxH" cache for the file list; opening every
+        # image on each refresh freezes the UI on RAW files
+        self._dims_cache: dict = {}
         self.rename_pattern = tk.StringVar(value="")
         self.folder_pattern = tk.StringVar(value="")
         self.jobs = tk.StringVar(value="4")  # parallel workers
@@ -1177,6 +1193,11 @@ class PhotoSApp:
 
     def _build_settings_panel(self, parent):
         """Build the right-side settings panel."""
+        # Defensive: a rebuild (theme/language) destroys the old card while
+        # its Enter/Leave handlers are gone, but any bind_all left behind by
+        # the old panel would target a destroyed canvas. Clear it first.
+        canvas_unbind_safe(parent)
+
         # Card container
         card = tk.Frame(parent, bg=COLORS["card"], highlightbackground=COLORS["border"],
                         highlightthickness=1, bd=0)
@@ -2071,22 +2092,35 @@ class PhotoSApp:
             row.pack(anchor="e", fill="x", pady=(0, 6))
 
             def _run(verb):
+                # pip runs in a background thread (it blocks for seconds
+                # on real installs — freezing the UI otherwise); Tk updates
+                # go back through win.after.
                 _set_status(self._t("plugins_ok", verb))
-                try:
-                    if verb == "install":
-                        proc = _pip_run(["install", "--quiet", dist])
-                    else:
-                        proc = _pip_run(["uninstall", "-y", dist])
-                    if proc.returncode == 0:
-                        _set_status(self._t("plugins_ok", f"{plugin_name} {verb}"))
-                    else:
-                        _set_status(self._t("plugins_err",
-                                            (proc.stderr or "").strip()[-200:]),
-                                    is_err=True)
-                    win.after(600, _refresh)
-                except FileNotFoundError:
-                    _set_status(self._t("plugins_err", "pip not available"),
-                                is_err=True)
+
+                def worker():
+                    try:
+                        if verb == "install":
+                            proc = _pip_run(["install", "--quiet", dist])
+                        else:
+                            proc = _pip_run(["uninstall", "-y", dist])
+                        ok = proc.returncode == 0
+                        detail = (proc.stderr or "").strip()[-200:]
+                    except FileNotFoundError:
+                        ok, detail = False, "pip not available"
+
+                    def finish():
+                        if not win.winfo_exists():
+                            return
+                        if ok:
+                            _set_status(self._t(
+                                "plugins_ok", f"{plugin_name} {verb}"))
+                        else:
+                            _set_status(self._t("plugins_err", detail),
+                                        is_err=True)
+                        win.after(600, _refresh)
+                    win.after(0, finish)
+
+                threading.Thread(target=worker, daemon=True).start()
 
             if installed:
                 FlatButton(row, text=self._t("plugins_uninstall"),
@@ -2284,7 +2318,14 @@ class PhotoSApp:
         win.clipboard_append(text)
         old = btn.cget("text")
         btn.configure(text=self._t("copied"))
-        win.after(1200, lambda: btn.configure(text=old))
+
+        def _restore():
+            # The dialog may have been closed within the 1.2s — the widget
+            # is gone then, and Tk's after is interp-global (destroying the
+            # widget does NOT cancel it), so guard before touching it.
+            if btn.winfo_exists():
+                btn.configure(text=old)
+        win.after(1200, _restore)
 
     def _run_dep_install(self, win, dist, btn, status_lbl, ok_text):
         """Install an optional dependency in a background thread.
@@ -2309,6 +2350,10 @@ class PhotoSApp:
                 ok, detail = False, "pip not available"
 
             def finish():
+                # The dialog may have been closed while pip ran (after is
+                # interp-global — not cancelled by widget destruction).
+                if not win.winfo_exists():
+                    return
                 for b in getattr(self, "_settings_install_btns", []):
                     if b is not None:
                         b.configure(state="normal")
@@ -2545,16 +2590,20 @@ class PhotoSApp:
         for i, path in enumerate(self.files):
             name = os.path.basename(path)
             try:
-                size = format_size(os.path.getsize(path))
+                st = os.stat(path)
+                size = format_size(st.st_size)
+                cache_key = (path, st.st_size, st.st_mtime)
+                dims = self._dims_cache.get(cache_key)
+                if dims is None:
+                    from PIL import Image
+                    with Image.open(path) as img:
+                        dims = f"{img.width}×{img.height}"
+                    self._dims_cache[cache_key] = dims
             except OSError:
-                size = "N/A"
-            fmt = Path(path).suffix.upper().lstrip(".")
-            try:
-                from PIL import Image
-                with Image.open(path) as img:
-                    dims = f"{img.width}×{img.height}"
+                size, dims = "N/A", "—"
             except Exception:
-                dims = "—"
+                size, dims = "N/A", "—"
+            fmt = Path(path).suffix.upper().lstrip(".")
             tag = "even" if i % 2 else ""
             self.file_tree.insert("", "end", iid=path, values=(name, size, fmt, dims),
                                   tags=(tag,) if tag else ())
@@ -2895,7 +2944,7 @@ class PhotoSApp:
             savings = format_size(result.savings_bytes)
             self.progress_label.config(
                 text=self._t("done_status", ok=result.success_count,
-                             total=len(self.files), savings=savings,
+                             total=len(result.results), savings=savings,
                              pct=f"{result.savings_percent:.1f}"),
                 fg=COLORS["success"],
             )
