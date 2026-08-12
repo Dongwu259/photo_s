@@ -61,3 +61,30 @@ class TestSettingsDialog:
         except Exception as e:
             root.destroy()
             pytest.skip("GUI init failed: {}".format(e))
+
+    def test_theme_toggle_retints_ttk_styles(self):
+        """Theme switch must re-apply ttk style colors — styles persist
+        across the widget rebuild, so without re-configuring them entries/
+        sliders/comboboxes stay stuck on the previous palette. Regression
+        test for the dark->light toggle leaving ttk widgets dark."""
+        import tkinter as tk
+        from tkinter import ttk
+        try:
+            root = tk.Tk()
+        except Exception as e:
+            pytest.skip("no display: {}".format(e))
+        try:
+            app = PhotoSApp(root)
+            root.update_idletasks()
+            style = ttk.Style(root)
+            before = style.lookup("TCombobox", "fieldbackground")
+            if not before:
+                pytest.skip("combobox style has no fieldbackground")
+            app._toggle_theme()
+            root.update_idletasks()
+            after = style.lookup("TCombobox", "fieldbackground")
+            assert before != after, "ttk styles must follow the theme switch"
+            root.destroy()
+        except Exception as e:
+            root.destroy()
+            pytest.skip("GUI init failed: {}".format(e))

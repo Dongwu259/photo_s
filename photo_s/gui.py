@@ -911,6 +911,7 @@ class PhotoSApp:
         lives in tk Variables, so nothing is lost."""
         self.dark_mode = not self.dark_mode
         _apply_palette(self.dark_mode)
+        self._configure_ttk_styles()  # styles persist — must follow the palette
         self.root.configure(bg=COLORS["bg"])
         for child in self.root.winfo_children():
             child.destroy()
@@ -927,19 +928,53 @@ class PhotoSApp:
         self._set_language("zh" if display == "中文" else "en")
 
     def _configure_ttk_styles(self):
-        """Tune ttk widget appearance for a cleaner look."""
+        """Tune ttk widget appearance for a cleaner look.
+
+        Runs at startup AND after every theme switch — ttk styles persist
+        across widget rebuilds, so stale style colors would leave widgets
+        (entries, sliders, comboboxes, treeview) stuck on the previous
+        palette. Also switches to the 'clam' theme: the macOS-native
+        'aqua' theme draws most ttk widgets with native controls that
+        follow the OS appearance and ignore style colors entirely.
+        """
         style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass  # clam ships with every Tk; never fail on it
         style.configure("Treeview", rowheight=26, font=FONT_BODY,
                         fieldbackground=COLORS["card"],
+                        background=COLORS["card"],
                         foreground=COLORS["text"])
         style.configure("Treeview.Heading", font=FONT_SMALL, padding=(4, 5),
                         background=COLORS["card"], foreground=COLORS["text"])
         style.map("Treeview", background=[("selected", COLORS["accent"])],
                   foreground=[("selected", "white")])
         style.configure("TCombobox", padding=2, fieldbackground=COLORS["card"],
-                        foreground=COLORS["text"])
-        style.configure("TCheckbutton", background=COLORS["card"])
-        style.configure("TRadiobutton", background=COLORS["card"])
+                        background=COLORS["card"], foreground=COLORS["text"],
+                        arrowcolor=COLORS["text_secondary"])
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", COLORS["card"])],
+                  selectbackground=[("readonly", COLORS["accent"])],
+                  selectforeground=[("readonly", "white")])
+        style.configure("TEntry", fieldbackground=COLORS["card"],
+                        foreground=COLORS["text"],
+                        insertcolor=COLORS["text"],
+                        bordercolor=COLORS["border"],
+                        lightcolor=COLORS["border"],
+                        darkcolor=COLORS["border"])
+        style.configure("TScale", background=COLORS["accent"],
+                        troughcolor=COLORS["border"])
+        style.configure("TCheckbutton", background=COLORS["card"],
+                        foreground=COLORS["text"], focuscolor=COLORS["card"])
+        style.configure("TRadiobutton", background=COLORS["card"],
+                        foreground=COLORS["text"], focuscolor=COLORS["card"])
+        style.configure("Vertical.TScrollbar", background=COLORS["border"],
+                        troughcolor=COLORS["card"],
+                        arrowcolor=COLORS["text_secondary"])
+        style.configure("Horizontal.TScrollbar", background=COLORS["border"],
+                        troughcolor=COLORS["card"],
+                        arrowcolor=COLORS["text_secondary"])
 
     # ── UI Construction ─────────────────────────────────────────────────────
 
