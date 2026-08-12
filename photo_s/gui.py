@@ -127,7 +127,16 @@ def _system_dark_mode() -> bool:
     return False
 
 
-COLORS = _DARK_COLORS if _system_dark_mode() else _LIGHT_COLORS
+# Runtime-mutable palette: widgets read COLORS[key] at build time, so an
+# in-place update followed by a UI rebuild switches the theme instantly.
+COLORS = dict(_DARK_COLORS if _system_dark_mode() else _LIGHT_COLORS)
+
+
+def _apply_palette(dark: bool) -> None:
+    """Switch the active color palette (in-place; existing widgets unaffected
+    until the UI is rebuilt)."""
+    COLORS.clear()
+    COLORS.update(_DARK_COLORS if dark else _LIGHT_COLORS)
 
 
 # ── Cross-platform font detection ─────────────────────────────────────────────
@@ -164,6 +173,7 @@ STRINGS = {
         "window_title": "PhotoS — 图片批量压缩与格式转换",
         "subtitle": "批量图片压缩与格式转换工具",
         "about": "关于",
+        "theme_toggle": "切换深色/浅色模式",
         # Toolbar / file list
         "add_images": "添加图片",
         "add_folder": "添加文件夹",
@@ -289,6 +299,18 @@ STRINGS = {
         "quality_lbl": "质量",
         "cannot_load": "无法加载",
         "close": "关闭",
+        # Plugins
+        "plugins": "插件",
+        "plugins_title": "插件管理",
+        "plugins_installed": "已安装插件",
+        "plugins_available": "官方可用插件",
+        "plugins_none": "（无）",
+        "plugins_install": "安装",
+        "plugins_uninstall": "卸载",
+        "plugins_fetch": "预下载权重",
+        "plugins_refresh": "刷新",
+        "plugins_ok": "✅ {}",
+        "plugins_err": "❌ {}",
         # Watermark
         "sec_watermark": "水印",
         "wm_text": "文字",
@@ -353,6 +375,7 @@ STRINGS = {
         "window_title": "PhotoS — Batch Image Compression & Conversion",
         "subtitle": "Batch Image Compression & Conversion",
         "about": "About",
+        "theme_toggle": "Toggle dark/light mode",
         # Toolbar / file list
         "add_images": "Add Images",
         "add_folder": "Add Folder",
@@ -478,6 +501,18 @@ STRINGS = {
         "quality_lbl": "Quality",
         "cannot_load": "Cannot load",
         "close": "Close",
+        # Plugins
+        "plugins": "Plugins",
+        "plugins_title": "Plugin Manager",
+        "plugins_installed": "Installed plugins",
+        "plugins_available": "Available official plugins",
+        "plugins_none": "(none)",
+        "plugins_install": "Install",
+        "plugins_uninstall": "Uninstall",
+        "plugins_fetch": "Fetch weights",
+        "plugins_refresh": "Refresh",
+        "plugins_ok": "✅ {}",
+        "plugins_err": "❌ {}",
         # Watermark
         "sec_watermark": "Watermark",
         "wm_text": "Text",
@@ -600,6 +635,7 @@ class PhotoSApp:
     def __init__(self, root):
         self.root = root
         self.lang = DEFAULT_LANG
+        self.dark_mode = _system_dark_mode()
         self.root.title(self._t("window_title"))
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         self.root.minsize(MIN_WIDTH, MIN_HEIGHT)
@@ -714,6 +750,23 @@ class PhotoSApp:
             self.progress_label.config(
                 text=self._t("ready"), fg=COLORS["text_secondary"])
 
+    def _toggle_theme(self):
+        """Flip between dark and light palette (manual override of the
+        system appearance). Rebuilds the UI like _set_language — all state
+        lives in tk Variables, so nothing is lost."""
+        self.dark_mode = not self.dark_mode
+        _apply_palette(self.dark_mode)
+        self.root.configure(bg=COLORS["bg"])
+        for child in self.root.winfo_children():
+            child.destroy()
+        self._build_ui()
+        self._refresh_file_list()
+        self._on_mode_change()
+        self._update_stats()
+        if not self.processing:
+            self.progress_label.config(
+                text=self._t("ready"), fg=COLORS["text_secondary"])
+
     def _on_language_selected(self, _event=None):
         display = self.lang_combo.get()
         self._set_language("zh" if display == "中文" else "en")
@@ -767,6 +820,14 @@ class PhotoSApp:
         )
         about_btn.pack(side="right", pady=(6, 0))
 
+        # Plugins button (right side, next to About)
+        plugins_btn = FlatButton(
+            title_frame, text=self._t("plugins"), command=self._show_plugin_manager,
+            bg=COLORS["bg"], fg=COLORS["text_secondary"], hover_bg=COLORS["border"],
+            font=FONT_SMALL, padx=10, pady=4, border_color=COLORS["border"],
+        )
+        plugins_btn.pack(side="right", pady=(6, 0))
+
         # Language selector (right side)
         self.lang_combo = ttk.Combobox(
             title_frame, values=["中文", "English"], state="readonly",
@@ -775,6 +836,16 @@ class PhotoSApp:
         self.lang_combo.current(0 if self.lang == "zh" else 1)
         self.lang_combo.bind("<<ComboboxSelected>>", self._on_language_selected)
         self.lang_combo.pack(side="right", padx=(0, 8), pady=(6, 0))
+
+        # Theme toggle (right side, before language)
+        theme_icon = "☀️" if self.dark_mode else "🌙"
+        theme_btn = FlatButton(
+            title_frame, text=theme_icon, command=self._toggle_theme,
+            bg=COLORS["bg"], fg=COLORS["text_secondary"],
+            hover_bg=COLORS["border"], font=FONT_SMALL, padx=8, pady=4,
+            border_color=COLORS["border"],
+        )
+        theme_btn.pack(side="right", padx=(0, 4), pady=(6, 0))
 
         # ── Main content area (two columns) ─────────────────────────────────
         main_frame = tk.Frame(self.root, bg=COLORS["bg"])
@@ -929,14 +1000,21 @@ class PhotoSApp:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Bind mousewheel for scrolling (only when mouse is over the canvas)
+        # Bind mousewheel for scrolling (only while the pointer is over the
+        # settings canvas). At the scroll boundaries the canvas would keep
+        # accepting scroll events and bounce/jitter — clamp so scrolling past
+        # the top/bottom is a no-op instead of an animated wobble.
         def _on_mousewheel(event):
             # macOS: event.delta is ±1; Windows/Linux: event.delta is ±120
             delta = event.delta
             if abs(delta) < 10:  # macOS trackpad/mouse
-                canvas.yview_scroll(int(-delta), "units")
+                amount = -delta
             else:  # Windows/Linux
-                canvas.yview_scroll(int(-delta / 120), "units")
+                amount = -delta / 120
+            top, bottom = canvas.yview()
+            if (amount < 0 and top <= 0.0) or (amount > 0 and bottom >= 1.0):
+                return  # already at a boundary — do nothing (no bounce)
+            canvas.yview_scroll(int(amount), "units")
 
         def _bind_scroll(event):
             canvas.bind_all("<MouseWheel>", _on_mousewheel)
@@ -1604,6 +1682,124 @@ class PhotoSApp:
         FlatButton(inner, text=self._t("close"), command=win.destroy,
                    bg=COLORS["accent"], hover_bg=COLORS["accent_hover"],
                    font=FONT_BUTTON, padx=24, pady=6).pack()
+
+    # ── Plugin Manager ──────────────────────────────────────────────────────
+
+    def _show_plugin_manager(self):
+        """Dialog to manage official plugins: list installed + available,
+        install / uninstall / pre-fetch weights. Uses the same logic as the
+        `photo-s plugin` CLI (photo_s.plugincmd)."""
+        from .registry import OFFICIAL_PLUGINS, to_dict
+        from .plugincmd import _pip_run, _installed_version
+        from .plugin import discover_plugins
+
+        win = tk.Toplevel(self.root)
+        win.title(self._t("plugins_title"))
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+        win.geometry("560x520")
+
+        status_lbl = tk.Label(win, text="", font=FONT_SMALL,
+                              fg=COLORS["text_secondary"], bg=COLORS["bg"],
+                              wraplength=520, justify="left")
+        status_lbl.pack(fill="x", padx=18, pady=(12, 4))
+
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=18, pady=(0, 10))
+
+        def _section_title(text):
+            tk.Label(body, text=text, font=FONT_SECTION,
+                     fg=COLORS["text"], bg=COLORS["bg"]).pack(anchor="w",
+                                                              pady=(10, 2))
+
+        def _set_status(text, is_err=False):
+            status_lbl.config(text=text,
+                              fg=COLORS["danger"] if is_err
+                              else COLORS["text_secondary"])
+
+        def _row(text, right_text="", right_color=None):
+            """One label row with an optional right-aligned status."""
+            row = tk.Frame(body, bg=COLORS["bg"])
+            row.pack(anchor="w", fill="x")
+            tk.Label(row, text=text, font=FONT_SMALL,
+                     fg=COLORS["text"], bg=COLORS["bg"]).pack(side="left")
+            if right_text:
+                tk.Label(row, text=right_text, font=FONT_SMALL,
+                         fg=right_color or COLORS["text_secondary"],
+                         bg=COLORS["bg"]).pack(side="right")
+
+        def _button_row(plugin_name, dist, installed):
+            """Action buttons for one official plugin."""
+            row = tk.Frame(body, bg=COLORS["bg"])
+            row.pack(anchor="e", fill="x", pady=(0, 6))
+
+            def _run(verb):
+                _set_status(self._t("plugins_ok", verb))
+                try:
+                    if verb == "install":
+                        proc = _pip_run(["install", "--quiet", dist])
+                    else:
+                        proc = _pip_run(["uninstall", "-y", dist])
+                    if proc.returncode == 0:
+                        _set_status(self._t("plugins_ok", f"{plugin_name} {verb}"))
+                    else:
+                        _set_status(self._t("plugins_err",
+                                            (proc.stderr or "").strip()[-200:]),
+                                    is_err=True)
+                    win.after(600, _refresh)
+                except FileNotFoundError:
+                    _set_status(self._t("plugins_err", "pip not available"),
+                                is_err=True)
+
+            if installed:
+                FlatButton(row, text=self._t("plugins_uninstall"),
+                           command=lambda: _run("uninstall"),
+                           bg=COLORS["danger"], hover_bg=COLORS["danger_hover"],
+                           font=FONT_SMALL, padx=12, pady=4).pack(side="right")
+            else:
+                FlatButton(row, text=self._t("plugins_install"),
+                           command=lambda: _run("install"),
+                           bg=COLORS["accent"], hover_bg=COLORS["accent_hover"],
+                           font=FONT_SMALL, padx=12, pady=4).pack(side="right")
+
+        def _refresh():
+            for child in body.winfo_children():
+                child.destroy()
+            _set_status("")
+            installed_names = {p.name for p in discover_plugins()}
+
+            _section_title(self._t("plugins_installed"))
+            if installed_names:
+                for p in discover_plugins():
+                    ver = _installed_version("photo-s-plugin-" + p.name)
+                    ver_str = " (v{})".format(ver) if ver else ""
+                    provides = ", ".join(getattr(p, "provides", ())) or "-"
+                    _row("{}  [{}]{}".format(p.name, provides, ver_str))
+            else:
+                _row(self._t("plugins_none"), right_text="")
+
+            _section_title(self._t("plugins_available"))
+            for name in sorted(OFFICIAL_PLUGINS):
+                entry = to_dict(OFFICIAL_PLUGINS[name])
+                installed = name in installed_names
+                _row("{}  —  {}".format(name, entry["description"]),
+                     right_text="✅" if installed else "")
+                _button_row(name, entry["pypi_distribution"], installed)
+
+        refresh_btn = FlatButton(win, text=self._t("plugins_refresh"),
+                                 command=_refresh,
+                                 bg=COLORS["bg"], fg=COLORS["text"],
+                                 hover_bg=COLORS["border"],
+                                 font=FONT_SMALL, padx=12, pady=4,
+                                 border_color=COLORS["border"])
+        refresh_btn.pack(side="left", padx=(18, 0), pady=(0, 12))
+        FlatButton(win, text=self._t("close"), command=win.destroy,
+                   bg=COLORS["accent"], hover_bg=COLORS["accent_hover"],
+                   font=FONT_BUTTON, padx=20, pady=6).pack(side="right",
+                                                           padx=18,
+                                                           pady=(0, 12))
+
+        _refresh()
 
     # ── File Management ─────────────────────────────────────────────────────
 
