@@ -21,7 +21,7 @@ class TestMissingMcp:
         monkeypatch.setitem(sys.modules, "mcp.server", None)
         monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", None)
         from photo_s import mcp_server
-        with pytest.raises(RuntimeError, match=r"photo-s\[mcp\]"):
+        with pytest.raises(RuntimeError, match=r"photo-s-tools\[mcp\]"):
             mcp_server._mcp()
 
     def test_cli_list_tools_missing_mcp(self, capsys, monkeypatch):
@@ -35,7 +35,7 @@ class TestMissingMcp:
         rc = run_cli(["mcp", "--list-tools"])
         err = capsys.readouterr().err
         assert rc == 1
-        assert "photo-s[mcp]" in err
+        assert "photo-s-tools[mcp]" in err
         assert "Traceback" not in err
 
 

@@ -328,7 +328,7 @@ STRINGS = {
         "set_mcp_desc": "让 Claude Desktop 等 MCP 客户端直接调用 PhotoS 工具",
         "mcp_installed": "已安装",
         "mcp_missing": "未安装",
-        "mcp_install_hint": "安装 Install: pip install 'photo-s[mcp]'",
+        "mcp_install_hint": "安装 Install: pip install 'photo-s-tools[mcp]'",
         "mcp_launch": "启动命令 Launch command",
         "mcp_claude_config": "Claude Desktop 配置 Claude Desktop config",
         "mcp_claude_snippet": (
@@ -381,7 +381,7 @@ STRINGS = {
         "log_curve": "LOG 还原",
         "log_curve_hint": "SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG（空 = 关闭）",
         "denoise": "降噪强度 (0-20)",
-        "denoise_hint": "NLM 降噪（空 = 关闭；需 photo-s[enhance] 或 SCUNet 插件）",
+        "denoise_hint": "NLM 降噪（空 = 关闭；需 photo-s-tools[enhance] 或 SCUNet 插件）",
         "auto_straighten": "自动扶正地平线",
         "max_straighten_angle": "最大扶正角°",
         # White balance / color / evaluation
@@ -584,7 +584,7 @@ STRINGS = {
         "set_mcp_desc": "Let MCP clients (Claude Desktop, agents) call PhotoS tools",
         "mcp_installed": "Installed",
         "mcp_missing": "Not installed",
-        "mcp_install_hint": "Install: pip install 'photo-s[mcp]'",
+        "mcp_install_hint": "Install: pip install 'photo-s-tools[mcp]'",
         "mcp_launch": "Launch command",
         "mcp_claude_config": "Claude Desktop config",
         "mcp_claude_snippet": (
@@ -637,7 +637,7 @@ STRINGS = {
         "log_curve": "LOG recovery",
         "log_curve_hint": "SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG (blank = off)",
         "denoise": "Denoise strength (0-20)",
-        "denoise_hint": "NLM denoise (blank = off; needs photo-s[enhance] or SCUNet plugin)",
+        "denoise_hint": "NLM denoise (blank = off; needs photo-s-tools[enhance] or SCUNet plugin)",
         "auto_straighten": "Auto-straighten horizon",
         "max_straighten_angle": "Max straighten angle°",
         # White balance / color / evaluation

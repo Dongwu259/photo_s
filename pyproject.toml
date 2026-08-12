@@ -3,7 +3,7 @@ requires = ["setuptools>=77.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "photo-s"
+name = "photo-s-tools"
 version = "1.0.0"
 description = "批量图片压缩与格式转换工具 — Batch Image Compression & Format Conversion (CLI + GUI)"
 readme = "README.md"

@@ -13,7 +13,7 @@
 | Python 直调 | 宿主是 Python | `from photo_s.engine import ProcessOptions, batch_process` |
 | `photo-s ... --json` | 一次性脚本 / CI | 每次调用有 ~200-300ms 解释器启动开销 |
 | `photo-s serve` | 跨进程 / 长任务 / 需进度与取消 | stdlib HTTP，同步 + 异步任务两种模式 |
-| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，7 个工具（需 py3.10+ 与 `photo-s[mcp]`） |
+| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，7 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
 
 ---
 
@@ -47,7 +47,7 @@
 `--log-curve NAME`（LOG 还原：SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG，纯 1D LUT）、
 `--auto-straighten`（扶正地平线，`ProcessResult.auto_straightened` 报告是否旋转）、
 `--max-straighten-angle DEG`。`--denoise N` 与 `--auto-straighten` 需要
-`pip install photo-s[enhance]`（opencv-python-headless），未装时该文件报错
+`pip install photo-s-tools[enhance]`（opencv-python-headless），未装时该文件报错
 （错误信息含安装提示），server 端同样经 options 映射生效（enhance 选项缺依赖时按上述规则处理）。
 
 > `--denoise N` 的 provider 语义：安装了官方 `photo-s-plugin-scunet`（SCUNet 强降噪）时
@@ -210,7 +210,7 @@ curl -X POST .../process -H "Authorization: Bearer $TOKEN" \
 
 ## 6. MCP server（Claude Desktop / MCP 客户端）
 
-需要 Python 3.10+ 与可选依赖：`pip install "photo-s[mcp]"`。stdio 协议，
+需要 Python 3.10+ 与可选依赖：`pip install "photo-s-tools[mcp]"`。stdio 协议，
 Claude Desktop 配置（`claude_desktop_config.json`）：
 
 ```json

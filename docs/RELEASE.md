@@ -1,7 +1,7 @@
 # PhotoS 发布清单 — Release Checklist
 
-从源码到可安装的两个发行版：**`photo-s`**（核心）与 **`photo-s-plugin-scunet`**（官方插件）。
-定位 "CLI for AI agents"，发布后 agent 才能 `pip install photo-s`。
+从源码到可安装的两个发行版：**`photo-s-tools`**（核心）与 **`photo-s-plugin-scunet`**（官方插件）。
+定位 "CLI for AI agents"，发布后 agent 才能 `pip install photo-s-tools`。
 
 ## 前置（一次性，需要 GitHub / PyPI 账号）
 
@@ -12,18 +12,19 @@
    ```
    推送前确认 `.gitignore` 已排除 `.claude/`、`*.egg-info/`、`build/`、`dist/`。
 
-2. **PyPI 建项目 `photo-s`**：登录 pypi.org → 右上角 Account settings →
-   Add API token → 或直接「Add a new project」创建 `photo-s`。
+2. **PyPI 配置 Trusted Publishers**（PyPI 没有"新建项目"按钮——项目在首次
+   上传时自动创建）：pypi.org → Account settings → Publishing → Add publisher：
+   PyPI Project 填 **`photo-s-tools`**（项目尚不存在没关系，会成为 pending
+   project）、Owner `Dongwu259`、Repository `photo_s`、Workflow `publish.yml`、
+   Environment **`pypi`**（与 publish.yml 的 `environment: pypi` 一致）。
+   > 发行名为什么是 `photo-s-tools`：`photo-s` 被 PyPI 拒收（与已有 `photos`
+   > 包太相似，防抢注检查无申诉通道）；CLI 命令 `photo-s`、包名 `photo_s` 不变。
 
-3. **PyPI 启用 Trusted Publishers**：PyPI 项目 `photo-s` → Manage →
-   Publishing → 添加 `Dongwu259/photo_s`，环境名 **`pypi`**（与 publish.yml 的
-   `environment: pypi` 一致）。
-
-## 发布核心 `photo-s`（每次发版）
+## 发布核心 `photo-s-tools`（每次发版）
 
 ```bash
 # 1. 本地验证（必须全绿）
-python3 -m pytest tests/ -q                 # 352 个
+python3 -m pytest tests/ -q                 # 378 个
 python3 -m photo_s.cli --help               # CLI 冒烟
 python3 -m photo_s.cli plugin list --json   # 官方插件目录
 
@@ -40,7 +41,7 @@ git tag vX.Y.Z
 git push origin main --tags
 
 # 4. 验证安装
-python3 -m pip install photo-s
+python3 -m pip install photo-s-tools
 photo-s --version
 ```
 

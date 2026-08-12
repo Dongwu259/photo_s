@@ -255,12 +255,12 @@ def _add_transform_args(parser):
     )
     parser.add_argument(
         "--denoise", type=float, default=argparse.SUPPRESS, metavar="N",
-        help="降噪强度（需 photo-s[enhance]）NLM denoise strength 3-20 "
+        help="降噪强度（需 photo-s-tools[enhance]）NLM denoise strength 3-20 "
              "(needs optional opencv)",
     )
     parser.add_argument(
         "--auto-straighten", action="store_true", default=argparse.SUPPRESS,
-        help="自动扶正地平线（需 photo-s[enhance]）Auto-level the horizon "
+        help="自动扶正地平线（需 photo-s-tools[enhance]）Auto-level the horizon "
              "(needs optional opencv)",
     )
     parser.add_argument(

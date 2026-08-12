@@ -6,7 +6,7 @@ clients (Claude Desktop, AI agents) over stdio. Tools call photo_s module
 functions directly (no CLI subprocess) and return JSON-serializable dicts
 whose shapes mirror the `--json` CLI contract.
 
-Requires the optional `mcp` extra: `pip install 'photo-s[mcp]'`
+Requires the optional `mcp` extra: `pip install 'photo-s-tools[mcp]'`
 (mcp>=1.20,<2 — the SDK requires Python >= 3.10).
 
 IMPORTANT: this module must never import mcp at module level. photo-s
@@ -40,7 +40,7 @@ def _mcp():
     except ImportError:
         raise RuntimeError(
             "MCP server requires the optional dependency: "
-            "pip install 'photo-s[mcp]' (mcp>=1.20,<2)")
+            "pip install 'photo-s-tools[mcp]' (mcp>=1.20,<2)")
 
 
 # ── Tool implementations (module-level, individually testable) ──────────────

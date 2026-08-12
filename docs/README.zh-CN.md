@@ -4,12 +4,12 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-378%20passed-brightgreen)]()
-[![PyPI](https://img.shields.io/badge/pypi-photo--s-orange)](https://pypi.org)
+[![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org)
 
 **PhotoS** 是一款跨平台批量图片处理工具，同时提供 **GUI 和 CLI**。为需要按指定尺寸交付图片的摄影师，
 以及需要可靠图片处理管线的 AI agent 而设计。
 
-> 🖥 **GUI** 给人用 — ⌨️ **CLI** 给 AI agent 用 — `pip install photo-s`
+> 🖥 **GUI** 给人用 — ⌨️ **CLI** 给 AI agent 用 — `pip install photo-s-tools`
 
 [English](../README.md) · **中文**
 
@@ -66,7 +66,7 @@
 | 官方插件管理 | — | ✅ | `photo-s plugin list/install/info/fetch` + `pip install photo-s-plugin-scunet` |
 | MCP server | — | ✅ | `photo-s mcp` 向 MCP 客户端（Claude Desktop）暴露 7 个工具 |
 
-> ¹ 降噪 / 自动扶正需要可选依赖：`pip install photo-s[enhance]`（opencv-python-headless）。
+> ¹ 降噪 / 自动扶正需要可选依赖：`pip install photo-s-tools[enhance]`（opencv-python-headless）。
 > 未安装时这两个功能会给出明确的安装提示，不影响其余功能。
 
 ---
@@ -76,17 +76,17 @@
 ### pip 安装（推荐）
 
 ```bash
-pip install photo-s
+pip install photo-s-tools
 
 # 带可选特性
-pip install photo-s[all]       # 全部
-pip install photo-s[heic]      # HEIC 支持
-pip install photo-s[avif]      # AVIF 支持
-pip install photo-s[raw]       # RAW 处理
-pip install photo-s[watch]     # 文件夹监视
-pip install photo-s[exif]      # EXIF 编辑
-pip install photo-s[enhance]   # NLM 降噪 + 自动扶正（opencv）
-pip install photo-s[mcp]       # MCP server（需要 Python 3.10+）
+pip install photo-s-tools[all]       # 全部
+pip install photo-s-tools[heic]      # HEIC 支持
+pip install photo-s-tools[avif]      # AVIF 支持
+pip install photo-s-tools[raw]       # RAW 处理
+pip install photo-s-tools[watch]     # 文件夹监视
+pip install photo-s-tools[exif]      # EXIF 编辑
+pip install photo-s-tools[enhance]   # NLM 降噪 + 自动扶正（opencv）
+pip install photo-s-tools[mcp]       # MCP server（需要 Python 3.10+）
 ```
 
 ### 源码安装
@@ -194,7 +194,7 @@ photo-s          # 启动 GUI（无参数 = GUI）
 photo-s gui      # 显式 GUI 模式
 ```
 
-GUI 特性：中英文切换、拖放（需要 `pip install photo-s[gui]`）、可取消的批量处理、
+GUI 特性：中英文切换、拖放（需要 `pip install photo-s-tools[gui]`）、可取消的批量处理、
 前后对比、关于对话框。
 
 > GUI 变更与接口契约：见 [`docs/GUI_CHANGES.md`](GUI_CHANGES.md)
@@ -295,7 +295,8 @@ class MyPlugin(PhotoSPlugin):
 | 上下文 | 写法 | 说明 |
 |---|---|---|
 | Python 包 / import | `photo_s` | 语法强制：`import photo-s` 非法 |
-| CLI 命令 / PyPI 发行名 | `photo-s` | shell 惯例：`pip install photo-s` |
+| CLI 命令 | `photo-s` | shell 惯例：`photo-s compress *.jpg` |
+| PyPI 发行名 | `photo-s-tools` | `pip install photo-s-tools`（原名 `photo-s` 被 PyPI 拦截：与已有 `photos` 包太相似） |
 | UI 标题 / 品牌 / 文档标题 | `PhotoS` | 人类可读品牌名 |
 
 同一上下文内禁止混用（例如代码示例写 `photo_s compress`、UI 文案写 `photo-s` 都是错的）。
@@ -375,7 +376,7 @@ curl -X POST .../tasks/<id>/cancel
 Desktop / 任意 MCP 客户端直接调用 PhotoS 工具（需要 Python 3.10+ 与可选依赖）：
 
 ```bash
-pip install "photo-s[mcp]"
+pip install "photo-s-tools[mcp]"
 photo-s mcp --list-tools        # 查看 7 个工具及参数 schema（JSON）
 photo-s mcp                     # 启动 stdio MCP server
 ```

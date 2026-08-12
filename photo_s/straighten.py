@@ -6,7 +6,7 @@ rotates the image to level it. Confidence-gated: only rotates when a strong,
 consistent near-horizontal line is found, otherwise leaves the image alone
 (avoids tilting portraits / close-ups).
 
-Requires the optional `enhance` extra: `pip install 'photo-s[enhance]'`.
+Requires the optional `enhance` extra: `pip install 'photo-s-tools[enhance]'`.
 """
 
 import math

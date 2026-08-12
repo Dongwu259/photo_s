@@ -4,11 +4,11 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-378%20passed-brightgreen)]()
-[![PyPI](https://img.shields.io/badge/pypi-photo--s-orange)](https://pypi.org)
+[![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org)
 
 **PhotoS** is a cross-platform batch image processing tool with **both GUI and CLI**. Built for photographers who need to deliver images at specific sizes, and for AI agents that need reliable image processing pipelines.
 
-> 🖥 **GUI** for humans — ⌨️ **CLI** for AI agents — `pip install photo-s`
+> 🖥 **GUI** for humans — ⌨️ **CLI** for AI agents — `pip install photo-s-tools`
 
 **English** · [中文](docs/README.zh-CN.md)
 
@@ -65,7 +65,7 @@
 | Official plugin manager | — | ✅ | `photo-s plugin list/install/info/fetch` + `pip install photo-s-plugin-scunet` |
 | MCP server | — | ✅ | `photo-s mcp` expose 7 tools to MCP clients (Claude Desktop) |
 
-> ¹ Denoise / auto-straighten need an optional dependency: `pip install photo-s[enhance]` (opencv-python-headless).
+> ¹ Denoise / auto-straighten need an optional dependency: `pip install photo-s-tools[enhance]` (opencv-python-headless).
 > When missing, these features give a clear install hint and the rest keeps working.
 
 ---
@@ -75,17 +75,17 @@
 ### pip install (recommended)
 
 ```bash
-pip install photo-s
+pip install photo-s-tools
 
 # With optional features
-pip install photo-s[all]       # everything
-pip install photo-s[heic]      # HEIC support
-pip install photo-s[avif]      # AVIF support
-pip install photo-s[raw]       # RAW processing
-pip install photo-s[watch]     # folder watching
-pip install photo-s[exif]      # EXIF editing
-pip install photo-s[enhance]   # NLM denoise + auto-straighten (opencv)
-pip install photo-s[mcp]       # MCP server (Python 3.10+)
+pip install photo-s-tools[all]       # everything
+pip install photo-s-tools[heic]      # HEIC support
+pip install photo-s-tools[avif]      # AVIF support
+pip install photo-s-tools[raw]       # RAW processing
+pip install photo-s-tools[watch]     # folder watching
+pip install photo-s-tools[exif]      # EXIF editing
+pip install photo-s-tools[enhance]   # NLM denoise + auto-straighten (opencv)
+pip install photo-s-tools[mcp]       # MCP server (Python 3.10+)
 ```
 
 ### From source
@@ -193,7 +193,7 @@ photo-s          # Launch GUI (no args = GUI)
 photo-s gui      # Explicit GUI mode
 ```
 
-GUI features: Chinese/English language switch, drag-and-drop (needs `pip install photo-s[gui]`),
+GUI features: Chinese/English language switch, drag-and-drop (needs `pip install photo-s-tools[gui]`),
 cancellable batch processing, before/after comparison, and an About dialog.
 
 > GUI changes & interface contract: [`docs/GUI_CHANGES.md`](docs/GUI_CHANGES.md)
@@ -295,7 +295,8 @@ See [docs/PLUGINS.md](docs/PLUGINS.md) for the full API, including operation pro
 | Context | Form | Notes |
 |---|---|---|
 | Python package / import | `photo_s` | syntax-enforced: `import photo-s` is invalid |
-| CLI command / PyPI distribution | `photo-s` | shell convention: `pip install photo-s` |
+| CLI command | `photo-s` | shell convention: `photo-s compress *.jpg` |
+| PyPI distribution | `photo-s-tools` | `pip install photo-s-tools` (the obvious `photo-s` is blocked by PyPI — too similar to the existing `photos` package) |
 | UI title / brand / doc headings | `PhotoS` | human-readable brand name |
 
 Don't mix forms within the same context (e.g. `photo_s compress` in code examples, or `photo-s` in
@@ -378,7 +379,7 @@ Desktop / any MCP client call PhotoS tools directly (needs Python 3.10+ and
 the optional extra):
 
 ```bash
-pip install "photo-s[mcp]"
+pip install "photo-s-tools[mcp]"
 photo-s mcp --list-tools        # inspect the 7 tools + schemas (JSON)
 photo-s mcp                     # start the stdio MCP server
 ```

@@ -94,7 +94,7 @@ FlatButton(master, text, command, bg, fg="white", hover_bg=None,
 ### 2.3 `pyproject.toml`
 
 - 新增可选依赖：`gui = ["tkinterdnd2>=0.3.0"]`，并已并入 `all`。
-- `pip install photo-s[gui]` 启用拖放；未安装时 GUI 正常降级（隐藏拖放提示）。
+- `pip install photo-s-tools[gui]` 启用拖放；未安装时 GUI 正常降级（隐藏拖放提示）。
 
 ---
 

@@ -2,7 +2,7 @@
 PhotoS - Denoising (OpenCV non-local means, optional dependency)
 
 Classic NLM denoise for high-ISO / low-light photos. Requires the optional
-`enhance` extra: `pip install 'photo-s[enhance]'` (opencv-python-headless).
+`enhance` extra: `pip install 'photo-s-tools[enhance]'` (opencv-python-headless).
 """
 
 import numpy as np
@@ -16,7 +16,7 @@ def _cv2():
     except ImportError:
         raise RuntimeError(
             "denoise requires the optional dependency: "
-            "pip install 'photo-s[enhance]' (opencv-python-headless)")
+            "pip install 'photo-s-tools[enhance]' (opencv-python-headless)")
 
 
 def apply_denoise(img: Image.Image, strength: float = 10.0) -> Image.Image:
