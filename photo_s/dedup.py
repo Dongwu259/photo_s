@@ -57,9 +57,12 @@ def hamming_distance(hash1: str, hash2: str) -> int:
     # Convert hex to integers
     n1 = int(hash1, 16)
     n2 = int(hash2, 16)
-    # XOR and count bits
+    # XOR and count bits (int.bit_count is Python 3.10+; fall back for 3.9)
     xor = n1 ^ n2
-    return xor.bit_count()
+    bc = getattr(xor, "bit_count", None)
+    if bc is not None:
+        return bc()
+    return bin(xor).count("1")
 
 
 def _load_image_safe(path: str):

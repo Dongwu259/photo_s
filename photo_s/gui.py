@@ -790,11 +790,16 @@ class PhotoSApp:
         # Double-click a row → before/after comparison for that file
         self.file_tree.bind("<Double-1>", self._on_tree_double_click)
 
-        # Register drag-and-drop targets (requires tkinterdnd2)
+        # Register drag-and-drop targets (requires tkinterdnd2 AND a TkinterDnD
+        # root; with a plain tk.Tk() root — e.g. headless smoke tests — the
+        # tkdnd Tcl commands aren't loaded, so degrade gracefully)
         if DND_AVAILABLE:
-            for widget in (card, self.file_tree):
-                widget.drop_target_register(DND_FILES)
-                widget.dnd_bind("<<Drop>>", self._on_drop)
+            try:
+                for widget in (card, self.file_tree):
+                    widget.drop_target_register(DND_FILES)
+                    widget.dnd_bind("<<Drop>>", self._on_drop)
+            except Exception:
+                pass
 
         # File list hint
         hint_text = self._t("hint_dnd" if DND_AVAILABLE else "hint_no_dnd")
