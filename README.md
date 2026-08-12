@@ -10,6 +10,8 @@
 
 > 🖥 **GUI** for humans — ⌨️ **CLI** for AI agents — `pip install photo-s`
 
+**English** · [中文](docs/README.zh-CN.md)
+
 ---
 
 ## ✨ Features
@@ -62,8 +64,8 @@
 | Plugin system | — | ✅ | Third-party plugin support |
 | Official plugin manager | — | ✅ | `photo-s plugin list/install/info/fetch` + `pip install photo-s-plugin-scunet` |
 
-> ¹ 降噪 / 自动扶正需要可选依赖：`pip install photo-s[enhance]`（opencv-python-headless）。
-> 未安装时这两个功能会给出明确的安装提示，不影响其余功能。
+> ¹ Denoise / auto-straighten need an optional dependency: `pip install photo-s[enhance]` (opencv-python-headless).
+> When missing, these features give a clear install hint and the rest keeps working.
 
 ---
 
@@ -87,8 +89,8 @@ pip install photo-s[enhance]   # NLM denoise + auto-straighten (opencv)
 ### From source
 
 ```bash
-git clone https://github.com/yourname/photo-s.git
-cd photo-s
+git clone https://github.com/Dongwu259/photo_s.git
+cd photo_s
 pip install -e .
 ```
 
@@ -110,39 +112,39 @@ photo-s info                    # Supported formats
 photo-s --version               # Show version
 ```
 
-### 摄影师工作流示例
+### Photographer workflows
 
 ```bash
-# 筛选：找出过曝/欠曝的照片
+# Cull: find over/under-exposed shots
 photo-s cull ~/shoot/ -r --overexposed-max 2% --underexposed-max 2% --list
 
-# 打标 + 按打标筛选（核心工作流）
-photo-s exif ~/shoot/ -r --rating 4 --keywords "keep,beach"   # 批量打标
-photo-s exif ~/shoot/ -r --show --rating-min 4 --list         # 筛出 ≥4 星
-photo-s exif ~/shoot/ -r --show --keywords beach --json        # 关键词筛选
-photo-s exif --from-csv meta.csv                               # 从表格批量写元数据
+# Tag + filter by tags (core workflow)
+photo-s exif ~/shoot/ -r --rating 4 --keywords "keep,beach"   # batch tag
+photo-s exif ~/shoot/ -r --show --rating-min 4 --list         # pick >=4-star paths
+photo-s exif ~/shoot/ -r --show --keywords beach --json        # filter by keyword
+photo-s exif --from-csv meta.csv                               # batch write from CSV
 photo-s batch $(photo-s exif ~/shoot/ -r --show --rating-min 4 --list) -o /deliver/
 
-# 归档：生成 + 校验 SHA-256 清单
+# Archive: generate + verify a SHA-256 manifest
 photo-s hash ~/archive/ -r -o manifest.csv
 photo-s hash --verify manifest.csv
 
-# 连拍选图：每组保留最清晰
+# Burst selection: keep the sharpest of each group
 photo-s dedup ~/burst/ --action keep-sharpest --dry-run
 
-# 交付：HTML 画廊 / 打印尺寸 / 白平衡
-photo-s gallery ~/shoot/ -o gallery/ --title "2026 川西"
+# Delivery: HTML gallery / print size / white balance
+photo-s gallery ~/shoot/ -o gallery/ --title "2026 Sichuan"
 photo-s batch ~/shoot/ --print-size 8x10@300dpi
 photo-s batch ~/shoot/ --wb 5600 --auto-levels
 
-# 全局校正：曝光 / LOG 还原 / 降噪 / 扶正
+# Global correction: exposure / LOG recovery / denoise / straighten
 photo-s batch ~/shoot/ --ev +0.5 --auto-exposure 0.45
-photo-s batch ~/log/    --log-curve SLOG3 --wb 5600        # LOG 片还原
-photo-s batch ~/highiso/ --denoise 12 --ev -0.3            # 高ISO降噪
+photo-s batch ~/log/    --log-curve SLOG3 --wb 5600        # LOG footage recovery
+photo-s batch ~/highiso/ --denoise 12 --ev -0.3            # high-ISO denoise
 photo-s batch ~/tilted/ --auto-straighten --max-straighten-angle 8
 ```
 
-### Common Examples
+### Common examples
 
 ```bash
 # Compress to ~5MB with auto-tune, 8 threads, JSON output (AI agent)
@@ -151,7 +153,7 @@ photo-s compress *.jpg --target-size 5MB -j 8 --json
 # Convert to AVIF with parallel workers
 photo-s convert *.jpg -f AVIF -q 60 -j 4
 
-# Organize by date+camera, add watermark
+# Organize by date+camera, add a watermark
 photo-s batch ~/photos/ --organize date-camera --watermark-text "© Me" -j 4
 
 # Smart rename with EXIF metadata
@@ -161,11 +163,11 @@ photo-s compress *.jpg --rename "{date}_{camera}_{seq}"
 photo-s dedup ~/photos/ --action report
 ```
 
-### JSON Output (for AI agents)
+### JSON output (for AI agents)
 
-`--json` 输出纯净 JSON 到 stdout（进度/诊断走 stderr），所有面向 agent 的子命令都支持：
-`compress`/`batch`/`convert`（批处理结果）、`check`/`dedup`（检查报告）、
-`rename`（重命名结果）、`contact-sheet`、`info`（格式清单）、`--dry-run`（预览配置）。
+`--json` prints pure JSON to stdout (progress/diagnostics go to stderr). All agent-facing subcommands support it:
+`compress`/`batch`/`convert` (batch results), `check`/`dedup` (reports), `rename`, `contact-sheet`,
+`info`, and `--dry-run` (config preview).
 
 ```json
 {
@@ -176,9 +178,9 @@ photo-s dedup ~/photos/ --action report
 
 Use with any AI agent: `photo-s compress *.jpg --json --target-size 5MB | your-agent`
 
-> 退出码约定：批处理/重命名/检查失败 → `1`；`dedup` **发现重复 → `1`**（无重复 → `0`），
-> agent 可据此分支。`--json` 模式下 `--remove-original` / `dedup --action move|delete`
-> 跳过交互确认（agent 显式请求即视为确认），不会因无 stdin 而挂起。
+> Exit-code convention: failures in batch/rename/check → `1`; `dedup` returns `1` **when duplicates are
+> found** (0 otherwise), so agents can branch on it. Under `--json`, `--remove-original` /
+> `dedup --action move|delete` skip interactive confirmation (an explicit agent request is taken as consent).
 
 ---
 
@@ -192,7 +194,7 @@ photo-s gui      # Explicit GUI mode
 GUI features: Chinese/English language switch, drag-and-drop (needs `pip install photo-s[gui]`),
 cancellable batch processing, before/after comparison, and an About dialog.
 
-> 面向开发/Agent 的 GUI 变更与接口文档：[`docs/GUI_CHANGES.md`](docs/GUI_CHANGES.md)
+> GUI changes & interface contract: [`docs/GUI_CHANGES.md`](docs/GUI_CHANGES.md)
 
 ### Screenshots
 
@@ -220,32 +222,33 @@ Third-party plugins extend PhotoS via Python `entry_points`.
 
 ```bash
 pip install photo-s-plugin-s3    # Example: auto-upload to S3
-photo-s compress *.jpg           # 插件自动生效 plugins auto-apply
+photo-s compress *.jpg           # plugins auto-apply
 ```
 
-### Official plugins (官方可选插件)
+### Official plugins
 
-PhotoS 维护的官方插件是独立 PyPI 发行版 `photo-s-plugin-<name>`，安装双通道
-（插件管理器或 pip）。首个官方插件是 **SCUNet 强降噪**——比内置 NLM 更强的高 ISO
-降噪，安装后 `--denoise N` 自动优先使用它（否则回退 NLM）：
+Official plugins are separate PyPI distributions `photo-s-plugin-<name>`. Install via either the
+plugin manager or pip. The first official plugin is **SCUNet strong denoise** — stronger high-ISO
+denoising than the built-in NLM. Once installed, `--denoise N` prefers it automatically
+(and falls back to NLM otherwise):
 
 ```bash
-# 通道一：插件管理器（agent 友好，--json）
+# Channel 1: plugin manager (agent-friendly, --json)
 photo-s plugin list
 photo-s plugin install scunet --json
-photo-s plugin fetch scunet          # 预下载 ONNX 权重（~10-40MB，sha256 校验）
+photo-s plugin fetch scunet          # pre-download the ONNX weights (~10-40MB, sha256-verified)
 photo-s plugin info scunet
 
-# 通道二：传统 pip
+# Channel 2: plain pip
 pip install photo-s-plugin-scunet
 
-# 使用（有 scunet 插件时自动走 SCUNet，否则 NLM）
+# Usage (auto uses SCUNet when installed, else NLM)
 photo-s batch ~/highiso/ --denoise 12
 ```
 
-> 模型权重**不进 wheel**：首次使用时从 GitHub Releases 下载到
-> `~/.cache/photo-s/models/`（`$PHOTOS_CACHE_DIR` 可覆盖），带 sha256 校验。
-> 其他官方插件同样遵循"独立发行版 + 权重外置"模式。
+> Model weights are **not shipped in the wheel**: downloaded on first use to
+> `~/.cache/photo-s/models/` (override with `$PHOTOS_CACHE_DIR`), sha256-verified.
+> All official plugins follow the "separate distribution + external weights" model.
 
 ### Writing a plugin
 
@@ -264,7 +267,8 @@ class MyPlugin(PhotoSPlugin):
         print(f"Processed: {result.output_path}")
 ```
 
-See [docs/PLUGINS.md](docs/PLUGINS.md) for full API documentation.
+See [docs/PLUGINS.md](docs/PLUGINS.md) for the full API, including operation providers
+(e.g. a `denoise` slot provider) and model-weight handling.
 
 ---
 
@@ -284,27 +288,28 @@ See [docs/PLUGINS.md](docs/PLUGINS.md) for full API documentation.
 
 ---
 
-## ✏️ 命名约定 Naming Convention
+## ✏️ Naming Convention
 
-| 上下文 | 写法 | 说明 |
+| Context | Form | Notes |
 |---|---|---|
-| Python 包 / import | `photo_s` | 语法强制：`import photo-s` 非法，包名用下划线 |
-| CLI 命令 / PyPI 发行名 | `photo-s` | shell 惯例：`pip install photo-s`、`photo-s compress ...` |
-| UI 标题 / 品牌 / 文档标题 | `PhotoS` | 人类可读品牌名 |
+| Python package / import | `photo_s` | syntax-enforced: `import photo-s` is invalid |
+| CLI command / PyPI distribution | `photo-s` | shell convention: `pip install photo-s` |
+| UI title / brand / doc headings | `PhotoS` | human-readable brand name |
 
-同上下文内禁止混用（例如代码示例写 `photo_s compress`、UI 文案写 `photo-s` 都是错的）。
-这是 Python 生态标准模式（scikit-learn→sklearn、Pillow→PIL 同理），请勿"统一"。
+Don't mix forms within the same context (e.g. `photo_s compress` in code examples, or `photo-s` in
+UI copy, are both wrong). This is the standard Python-ecosystem pattern
+(scikit-learn→sklearn, Pillow→PIL); please don't "unify" them.
 
 ---
 
-## 🤖 Agent / 应用集成（供其他软件调用）
+## 🤖 Agent / Application Integration
 
-> 完整对接契约（CLI JSON shape、退出码、serve 端点、异步任务、配置文件优先级）见
-> [`docs/AGENT_API.md`](docs/AGENT_API.md) —— agent 对接只看这一份。
+> The complete integration contract (CLI JSON shapes, exit codes, `serve` endpoints, async tasks,
+> config precedence) lives in [`docs/AGENT_API.md`](docs/AGENT_API.md) — agents only need that one doc.
 
-PhotoS 提供三种集成方式，按推荐程度排序：
+PhotoS offers three integration paths, by recommendation:
 
-### 1. Python 库直调（推荐 — 宿主是 Python）
+### 1. Python library (recommended when the host is Python)
 
 ```python
 from photo_s.engine import ProcessOptions, batch_process
@@ -313,7 +318,7 @@ options = ProcessOptions(
     output_dir="compressed/",
     quality=70,
     max_pixels=8000,
-    strip_gps=True,          # 隐私
+    strip_gps=True,          # privacy
     evaluate=True,           # SSIM
 )
 result = batch_process(["/path/a.jpg", "/path/b.jpg"], options, jobs=4)
@@ -321,58 +326,59 @@ for r in result.results:
     print(r.output_path, r.ssim)
 ```
 
-无 IPC 开销；打包时把 `photo_s` 包放进应用即可。
+No IPC overhead; just vendor the `photo_s` package into your app.
 
-### 2. REST API（`photo-s serve` — 非 Python 宿主 / 跨进程）
+### 2. REST API (`photo-s serve` — non-Python host / cross-process)
 
 ```bash
 photo-s serve --port 0 --token auto --ready-file ./photo-s.ready.json
 ```
 
-- `--port 0` = 随机空闲端口；`--token auto` = 自动生成随机 token；
-  `--ready-file` 在监听成功后原子写入 `{"port", "token", "pid"}` ——
-  **宿主 agent 轮询该文件**（而非解析 stdout，Windows 下更稳），然后：
-  `GET /health` 就绪探测 → `POST /process` `{"paths": [...], "options": {...}}`
-  → 拿 BatchResult JSON（含 ssim / blur_score）。
+- `--port 0` = random free port; `--token auto` = random token;
+  `--ready-file` atomically writes `{"port", "token", "pid"}` after listening starts —
+  the host agent polls that file (more reliable than parsing stdout, also on Windows), then:
+  `GET /health` readiness probe → `POST /process` `{"paths": [...], "options": {...}}`
+  → get BatchResult JSON (with ssim / blur_score).
 
-**长批处理 / 进度 / 取消**（`POST /process` 带 `"async": true`）：
+**Long batches / progress / cancel** (`POST /process` with `"async": true`):
 
 ```bash
-# 1. 提交异步任务
+# 1. Submit an async task
 curl -X POST .../process -H "Authorization: Bearer $TOKEN" \
      -d '{"paths": ["/photos/*.jpg"], "async": true}'
 # → 202 {"task_id": "...", "poll": "/tasks/<id>", ...}
 
-# 2. 轮询进度/结果
+# 2. Poll progress
 curl .../tasks/<id>
 # → {"status": "running|done|cancelled|error", "current": N, "total": M,
 #     "current_path": "...", "result": {BatchResult JSON when done}}
 
-# 3. 取消（进行中的图片完成后停止排队的）
+# 3. Cancel (queued files stop after the in-flight one finishes)
 curl -X POST .../tasks/<id>/cancel
 ```
 
-`POST /process` 另支持 `"dry_run": true`（返回将处理的 paths/options，不处理）与
-`options.output_sizes`（多尺寸，`[["thumb",480,None], ...]`）和 `options.pad`（= `pad_ratio`）。
-- Windows 无环境变量：用 PyInstaller 把 photo-s 打成 `photo-s.exe`，
-  宿主用绝对路径拉起子进程，不依赖 PATH。
-- 进程生命周期由宿主管理（退出时 terminate 子进程）。
+`POST /process` also supports `"dry_run": true` (returns the paths/options that would be processed,
+no work done) and `options.output_sizes` (multi-size, `[["thumb",480,None], ...]`) and
+`options.pad` (= `pad_ratio`).
+- On Windows without a Python env: use PyInstaller to bundle `photo-s.exe`
+  (see below), spawn it by absolute path — no PATH dependency.
+- The host manages the process lifecycle (terminate the child on exit).
 
-### 3. CLI 子进程（一次性脚本 / CI）
+### 3. CLI subprocess (one-off scripts / CI)
 
-`photo-s compress a.jpg -q 80 --json` → stdout JSON。每次调用有 Python
-解释器启动开销（~200-300ms），高频批量场景不推荐。
+`photo-s compress a.jpg -q 80 --json` → stdout JSON. Each call has a Python
+interpreter startup cost (~200-300ms); not recommended for high-frequency batch.
 
-### Windows 打包（无 Python/PATH 环境）
+### Windows packaging (no Python/PATH env)
 
 ```bash
-pip install pyinstaller piexif pillow-heif   # 可选特性一起打包
+pip install pyinstaller piexif pillow-heif   # optional features too
 python packaging/build.py                    # → dist/photo-s/photo-s.exe
-python packaging/build.py --onefile          # 或单个 exe（启动稍慢）
+python packaging/build.py --onefile          # or a single exe (slower first start)
 ```
 
-宿主用**绝对路径**拉起，不依赖任何环境变量（见上面的 spawn 模式）。
-CI 已配置 `windows-latest` 构建产物（.github/workflows/ci.yml）。
+The host launches by **absolute path**, no environment variables needed (see the spawn mode above).
+CI builds a `windows-latest` artifact (`.github/workflows/ci.yml`).
 
 ---
 
