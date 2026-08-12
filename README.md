@@ -25,11 +25,11 @@
 | Resize / Scale | ✅ | ✅ | Max dimensions, percentage, or longest-side cap |
 | Tone & color | ✅ | ✅ | Brightness/contrast/saturation/gamma/sharpen, B&W, sepia |
 | White balance | — | ✅ | `--wb 5600` Kelvin, or `--wb-from ref.jpg` sample a gray card |
-| Exposure | — | ✅ | `--ev +1` stops, or `--auto-exposure 0.45` normalize to target |
+| Exposure | ✅ | ✅ | `--ev +1` stops, or `--auto-exposure 0.45` normalize to target |
 | Auto levels | — | ✅ | `--auto-levels` 2% clip histogram stretch |
-| LOG recovery | — | ✅ | `--log-curve SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG` (1D LUT, no deps) |
-| Denoise | — | ✅¹ | `--denoise 10` NLM (`[enhance]` extra) |
-| Auto-straighten | — | ✅¹ | `--auto-straighten` level the horizon, confidence-gated (`[enhance]` extra) |
+| LOG recovery | ✅ | ✅ | `--log-curve SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG` (1D LUT, no deps) |
+| Denoise | ✅ | ✅¹ | `--denoise 10` NLM (`[enhance]` extra) |
+| Auto-straighten | ✅ | ✅¹ | `--auto-straighten` level the horizon, confidence-gated (`[enhance]` extra) |
 | Crop / Rotate / Flip / Pad | ✅ | ✅ | `--crop 800x600+0+0`, `--rotate 90`, `--flip h`, `--pad 16:9` |
 | Print size | — | ✅ | `--print-size 8x10@300dpi` center-crop + exact print pixels |
 | Smart rename | ✅ | ✅ | `{date}_{camera}_{seq}` templates |

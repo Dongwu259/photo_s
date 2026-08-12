@@ -263,6 +263,18 @@ STRINGS = {
         "pad": "留白比例",
         "pad_bg": "留白底色",
         "pad_hint": "e.g. 16:9, 1:1（空 = 不补边）",
+        # Correction (exposure / LOG / denoise / straighten)
+        "sec_correction": "校正",
+        "ev": "曝光补偿 (EV)",
+        "ev_hint": "EV 档位，2^EV 增益（0 = 不变）",
+        "auto_exposure": "自动曝光目标 (0-1)",
+        "auto_exposure_hint": "均值亮度归一化（空 = 关闭）",
+        "log_curve": "LOG 还原",
+        "log_curve_hint": "SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG（空 = 关闭）",
+        "denoise": "降噪强度 (0-20)",
+        "denoise_hint": "NLM 降噪（空 = 关闭；需 photo-s[enhance] 或 SCUNet 插件）",
+        "auto_straighten": "自动扶正地平线",
+        "max_straighten_angle": "最大扶正角°",
         "cmp_no_result": "无对比结果",
         "cmp_no_result_body": "该文件尚未处理或处理失败。\nProcess this file first to compare before/after.",
         # About
@@ -440,6 +452,18 @@ STRINGS = {
         "pad": "Pad ratio",
         "pad_bg": "Pad bg",
         "pad_hint": "e.g. 16:9, 1:1 (blank = no padding)",
+        # Correction (exposure / LOG / denoise / straighten)
+        "sec_correction": "Correction",
+        "ev": "Exposure (EV)",
+        "ev_hint": "EV stops, 2^EV gain (0 = unchanged)",
+        "auto_exposure": "Auto-exposure target (0-1)",
+        "auto_exposure_hint": "Normalize mean luminance (blank = off)",
+        "log_curve": "LOG recovery",
+        "log_curve_hint": "SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG (blank = off)",
+        "denoise": "Denoise strength (0-20)",
+        "denoise_hint": "NLM denoise (blank = off; needs photo-s[enhance] or SCUNet plugin)",
+        "auto_straighten": "Auto-straighten horizon",
+        "max_straighten_angle": "Max straighten angle°",
         "cmp_no_result": "No comparison",
         "cmp_no_result_body": "This file was not processed yet (or failed).\nProcess it first to compare before/after.",
         # About
@@ -566,6 +590,13 @@ class PhotoSApp:
         self.sharpen = tk.DoubleVar(value=1.0)
         self.grayscale = tk.BooleanVar(value=False)
         self.sepia = tk.BooleanVar(value=False)
+        # Correction (exposure / LOG / denoise / straighten)
+        self.ev = tk.DoubleVar(value=0.0)
+        self.auto_exposure = tk.StringVar(value="")
+        self.log_curve = tk.StringVar(value="")
+        self.denoise = tk.StringVar(value="")
+        self.auto_straighten = tk.BooleanVar(value=False)
+        self.max_straighten_angle = tk.StringVar(value="10")
         # Composition
         self.crop = tk.StringVar(value="")
         self.crop_ratio = tk.StringVar(value="")
@@ -1268,6 +1299,79 @@ class PhotoSApp:
                  bg=COLORS["card"]).grid(
             row=8, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
+        # ── Correction (exposure / LOG / denoise / straighten) ───────────────
+        self._add_section_label(settings_frame, self._t("sec_correction"),
+                                row=36)
+        corr_frame = tk.Frame(settings_frame, bg=COLORS["card"])
+        corr_frame.grid(row=38, sticky="ew", **pad)
+        corr_frame.columnconfigure(1, weight=1)
+
+        # EV exposure slider (-2..+2 stops)
+        tk.Label(corr_frame, text=self._t("ev"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=0, column=0, sticky="w")
+        ev_lbl = tk.Label(corr_frame, text="{:+.2f}".format(self.ev.get()),
+                          font=FONT_SMALL, fg=COLORS["text_secondary"],
+                          bg=COLORS["card"], width=5)
+        ev_lbl.grid(row=0, column=2, sticky="e")
+        ttk.Scale(corr_frame, from_=-2.0, to=2.0, variable=self.ev,
+                  command=lambda v, lbl=ev_lbl: lbl.config(
+                      text="{:+.2f}".format(float(v)))).grid(
+            row=0, column=1, sticky="ew", padx=(8, 0))
+        tk.Label(corr_frame, text=self._t("ev_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
+        # Auto-exposure target (blank = off)
+        tk.Label(corr_frame, text=self._t("auto_exposure"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=2, column=0, sticky="w")
+        ttk.Entry(corr_frame, textvariable=self.auto_exposure,
+                  font=FONT_BODY, width=8).grid(
+            row=2, column=1, sticky="w", padx=(8, 0))
+        tk.Label(corr_frame, text=self._t("auto_exposure_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
+        # LOG recovery curve (blank = off)
+        tk.Label(corr_frame, text=self._t("log_curve"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=4, column=0, sticky="w")
+        log_combo = ttk.Combobox(
+            corr_frame, textvariable=self.log_curve, state="readonly",
+            font=FONT_SMALL, width=8,
+            values=["", "SLOG3", "CLOG3", "LOGC3", "DLOG", "VLOG", "HLG"])
+        log_combo.grid(row=4, column=1, sticky="w", padx=(8, 0))
+        tk.Label(corr_frame, text=self._t("log_curve_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=5, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
+        # Denoise strength (blank = off)
+        tk.Label(corr_frame, text=self._t("denoise"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=6, column=0, sticky="w")
+        ttk.Entry(corr_frame, textvariable=self.denoise,
+                  font=FONT_BODY, width=8).grid(
+            row=6, column=1, sticky="w", padx=(8, 0))
+        tk.Label(corr_frame, text=self._t("denoise_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=7, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
+        # Auto-straighten + max angle
+        self._add_checkbox(corr_frame, self._t("auto_straighten"),
+                           self.auto_straighten, row=8)
+        tk.Label(corr_frame, text=self._t("max_straighten_angle"),
+                 font=FONT_SMALL, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=9, column=0, sticky="w")
+        ttk.Entry(corr_frame, textvariable=self.max_straighten_angle,
+                  font=FONT_BODY, width=8).grid(
+            row=9, column=1, sticky="w", padx=(8, 0))
+
     def _browse_watermark_image(self):
         """Pick a watermark overlay image via file dialog."""
         from tkinter import filedialog
@@ -1687,6 +1791,14 @@ class PhotoSApp:
             sharpen=_to_float(self.sharpen.get(), 1.0),
             grayscale=self.grayscale.get(),
             sepia=self.sepia.get(),
+            ev=_to_float(self.ev.get(), 0.0),
+            auto_exposure=_to_float(self.auto_exposure.get(), 0.0)
+            if self.auto_exposure.get().strip() else None,
+            log_curve=self.log_curve.get() or None,
+            denoise=_to_float(self.denoise.get(), 0.0)
+            if self.denoise.get().strip() else None,
+            auto_straighten=self.auto_straighten.get(),
+            max_straighten_angle=_to_float(self.max_straighten_angle.get(), 10.0),
             crop=self.crop.get().strip() or None,
             crop_ratio=self.crop_ratio.get().strip() or None,
             rotate_degrees=_to_float(self.rotate.get(), 0.0),

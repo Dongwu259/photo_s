@@ -41,6 +41,28 @@ jobs:
           print("GUI smoke OK")
           EOF
 
+  plugin-test:
+    name: Plugin test (SCUNet, real inference)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install core + SCUNet plugin + onnx
+        run: |
+          pip install -e ".[all]"
+          pip install -e plugins/scunet   # brings onnxruntime via its deps
+          pip install onnx pytest          # onnx → importorskip no longer skips
+      - name: Run FULL suite with plugin installed
+        # The editable plugin is installed so tests/test_scunet_plugin.py runs
+        # real onnxruntime inference (not skipped). Running the full suite also
+        # proves the installed plugin doesn't break other tests (they are
+        # hermetic against discover_plugins).
+        run: python -m pytest tests/ -q
+
   bundle:
     name: Bundle (Windows exe)
     runs-on: windows-latest

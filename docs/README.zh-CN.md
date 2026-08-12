@@ -26,11 +26,11 @@
 | 缩放 / 比例 | ✅ | ✅ | 最大尺寸、百分比或最长边上限 |
 | 影调与色彩 | ✅ | ✅ | 亮度/对比度/饱和度/伽马/锐化，黑白、复古 |
 | 白平衡 | — | ✅ | `--wb 5600` 色温，或 `--wb-from ref.jpg` 采样灰卡 |
-| 曝光 | — | ✅ | `--ev +1` 档，或 `--auto-exposure 0.45` 归一化到目标 |
+| 曝光 | ✅ | ✅ | `--ev +1` 档，或 `--auto-exposure 0.45` 归一化到目标 |
 | 自动色阶 | — | ✅ | `--auto-levels` 2% 裁切直方图拉伸 |
-| LOG 还原 | — | ✅ | `--log-curve SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG`（1D LUT，零依赖） |
-| 降噪 | — | ✅¹ | `--denoise 10` NLM（`[enhance]` 可选依赖） |
-| 自动扶正 | — | ✅¹ | `--auto-straighten` 校正地平线，置信度门控（`[enhance]` 可选依赖） |
+| LOG 还原 | ✅ | ✅ | `--log-curve SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG`（1D LUT，零依赖） |
+| 降噪 | ✅ | ✅¹ | `--denoise 10` NLM（`[enhance]` 可选依赖） |
+| 自动扶正 | ✅ | ✅¹ | `--auto-straighten` 校正地平线，置信度门控（`[enhance]` 可选依赖） |
 | 裁剪 / 旋转 / 翻转 / 留边 | ✅ | ✅ | `--crop 800x600+0+0`、`--rotate 90`、`--flip h`、`--pad 16:9` |
 | 打印尺寸 | — | ✅ | `--print-size 8x10@300dpi` 中心裁剪 + 精确打印像素 |
 | 智能重命名 | ✅ | ✅ | `{date}_{camera}_{seq}` 模板 |
