@@ -14,6 +14,7 @@ Features:
 """
 
 import os
+import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -56,8 +57,13 @@ MIN_WIDTH = 980
 MIN_HEIGHT = 640
 SETTINGS_WIDTH = 400
 
-# Color scheme (light mode, macOS-friendly)
-COLORS = {
+# Color scheme — picked at import time from the system appearance.
+# ttk controls on macOS use the native aqua theme and follow the system
+# dark/light mode; a hardcoded light palette made dark-mode systems render
+# dark native controls on a light background (the "black boxes" report).
+# So the layout palette must match the system: light or dark.
+
+_LIGHT_COLORS = {
     "bg": "#f5f5f7",
     "card": "#ffffff",
     "border": "#d2d2d7",
@@ -72,6 +78,56 @@ COLORS = {
     "row_alt": "#f7f7fa",
     "progress_bg": "#e5e5ea",
 }
+
+_DARK_COLORS = {
+    "bg": "#1e1e1e",
+    "card": "#2c2c2e",
+    "border": "#48484a",
+    "text": "#f5f5f7",
+    "text_secondary": "#a1a1a6",
+    "accent": "#0a84ff",
+    "accent_hover": "#409cff",
+    "danger": "#ff453a",
+    "danger_hover": "#ff6b61",
+    "success": "#30d158",
+    "warning": "#ff9f0a",
+    "row_alt": "#262628",
+    "progress_bg": "#3a3a3c",
+}
+
+
+def _system_dark_mode() -> bool:
+    """Detect the OS appearance: True for dark mode.
+
+    macOS: `defaults read -g AppleInterfaceStyle` → "Dark".
+    Windows: AppsUseLightTheme registry value == 0.
+    Linux/unknown: falls back to light, override with $PHOTOS_DARK=1.
+    """
+    env = os.environ.get("PHOTOS_DARK")
+    if env is not None:
+        return env.lower() in ("1", "true", "yes", "on")
+    if sys.platform == "darwin":
+        try:
+            out = subprocess.run(
+                ["defaults", "read", "-g", "AppleInterfaceStyle"],
+                capture_output=True, text=True, timeout=5).stdout.strip()
+            return out == "Dark"
+        except Exception:
+            return False
+    if sys.platform == "win32":
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return val == 0
+        except Exception:
+            return False
+    return False
+
+
+COLORS = _DARK_COLORS if _system_dark_mode() else _LIGHT_COLORS
 
 
 # ── Cross-platform font detection ─────────────────────────────────────────────
@@ -666,11 +722,14 @@ class PhotoSApp:
         """Tune ttk widget appearance for a cleaner look."""
         style = ttk.Style(self.root)
         style.configure("Treeview", rowheight=26, font=FONT_BODY,
-                        fieldbackground=COLORS["card"])
-        style.configure("Treeview.Heading", font=FONT_SMALL, padding=(4, 5))
+                        fieldbackground=COLORS["card"],
+                        foreground=COLORS["text"])
+        style.configure("Treeview.Heading", font=FONT_SMALL, padding=(4, 5),
+                        background=COLORS["card"], foreground=COLORS["text"])
         style.map("Treeview", background=[("selected", COLORS["accent"])],
                   foreground=[("selected", "white")])
-        style.configure("TCombobox", padding=2)
+        style.configure("TCombobox", padding=2, fieldbackground=COLORS["card"],
+                        foreground=COLORS["text"])
         style.configure("TCheckbutton", background=COLORS["card"])
         style.configure("TRadiobutton", background=COLORS["card"])
 
