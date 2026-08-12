@@ -60,22 +60,31 @@ class TestFlatButton:
         btn._on_click(None)
         assert hits == [], "disabled button must block clicks"
         btn._on_enter(None)
-        assert btn._label.cget("bg") == "#111111", "no hover while disabled"
+        assert btn.cget("bg") == "#111111", "no hover while disabled"
         btn.configure(state="normal")
         btn._on_click(None)
         assert hits == [1]
+        # hover swaps the rendered fill
+        btn.configure(hover_bg="#555555")
+        btn._on_enter(None)
+        assert btn.cget("bg") == "#555555"
+        btn._on_leave(None)
+        assert btn.cget("bg") == "#111111"
         root.destroy()
 
-    def test_bordered_geometry(self):
-        """Border = 1px drawn by the wrapper frame around the label."""
+    def test_pill_drawn(self):
+        """The canvas must hold a rounded shape + text, sized to the label."""
         from photo_s.gui import FlatButton
         root, app = _make_app()
         btn = FlatButton(root, text="Abc", command=lambda: None,
                          bg="#111111", border_color="#ff0000")
         btn.pack()
         root.update()
-        assert btn.winfo_width() == btn._label.winfo_width() + 2
-        assert btn.winfo_height() == btn._label.winfo_height() + 2
+        assert btn.winfo_width() > 10 and btn.winfo_height() > 10
+        assert len(btn.find_all()) == 2, "one rounded rect + one text item"
+        btn.configure(text="A much longer label")
+        root.update()
+        assert btn.winfo_reqwidth() > 60, "canvas must resize with the text"
         root.destroy()
 
 

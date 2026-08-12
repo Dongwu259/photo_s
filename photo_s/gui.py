@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 from typing import List
@@ -68,6 +69,7 @@ _LIGHT_COLORS = {
     "bg": "#f5f5f7",
     "card": "#ffffff",
     "border": "#d2d2d7",
+    "divider": "#e8e8ed",  # hairline separators / scroll troughs
     "text": "#1d1d1f",
     "text_secondary": "#6e6e73",
     "accent": "#007aff",
@@ -84,6 +86,7 @@ _DARK_COLORS = {
     "bg": "#1e1e1e",
     "card": "#2c2c2e",
     "border": "#48484a",
+    "divider": "#3a3a3c",  # hairline separators / scroll troughs
     "text": "#f5f5f7",
     "text_secondary": "#a1a1a6",
     "accent": "#0a84ff",
@@ -687,80 +690,113 @@ STRINGS = {
 
 # ── Flat button (renders colors correctly on macOS Aqua) ─────────────────────
 
-class FlatButton(tk.Frame):
-    """A flat button that honors bg/fg colors on every platform.
+class FlatButton(tk.Canvas):
+    """A flat, rounded-pill button that honors colors on every platform.
 
-    tk.Button on macOS Aqua ignores custom colors entirely (white text on
-    a light native button becomes unreadable), so a Frame+Label button is
-    used instead. The optional 1px border is drawn by the wrapper frame
-    itself (frame bg = border color, label inset by 1px) — pixel-exact on
-    every platform, unlike highlightthickness which macOS renders offset
-    from the widget. Supports hover feedback and a disabled state that
-    blocks clicks.
+    tk.Button on macOS Aqua ignores custom colors entirely, so the button is
+    drawn on a Canvas: a rounded rectangle (polygon with smooth corners)
+    plus centered text. Hover swaps the fill, a disabled state greys the
+    button and blocks clicks. ``configure(text=..., bg=..., fg=...,
+    state=...)`` keeps the classic widget API so callers (e.g. the
+    copy-flash in the settings dialog) need no changes.
     """
-
-    _LABEL_OPTS = ("text", "bg", "fg")
 
     def __init__(self, master, text, command, bg, fg="white",
                  hover_bg=None, font=None, padx=16, pady=7,
                  border_color=None):
         self._command = command
         self._bg = bg
+        self._fg = fg
         self._hover_bg = hover_bg or bg
-        # tk.Frame has no -state option (tk.Label did), so keep it in Python.
+        self._border = border_color
+        self._font = font or FONT_BUTTON
+        self._padx, self._pady = padx, pady
         self._state = "normal"
-        super().__init__(master, bg=border_color or bg, bd=0,
-                         highlightthickness=0)
+        self._text = text
+        self._fill = bg  # current rendered fill (hover-aware)
         try:
-            self._label = tk.Label(
-                self, text=text, font=font or FONT_BUTTON, bg=bg, fg=fg,
-                padx=padx, pady=pady, cursor="pointinghand",
+            super().__init__(
+                master, bg=master.cget("bg"), highlightthickness=0, bd=0,
+                cursor="pointinghand",
             )
         except Exception:
             # Some environments (e.g. headless Xvfb) lack the 'pointinghand'
             # cursor; degrade to the default cursor instead of failing.
-            self._label = tk.Label(
-                self, text=text, font=font or FONT_BUTTON, bg=bg, fg=fg,
-                padx=padx, pady=pady,
+            super().__init__(
+                master, bg=master.cget("bg"), highlightthickness=0, bd=0,
             )
-        inset = 1 if border_color else 0
-        self._label.pack(padx=inset, pady=inset)
-        for widget in (self, self._label):
-            widget.bind("<Enter>", self._on_enter)
-            widget.bind("<Leave>", self._on_leave)
-            widget.bind("<Button-1>", self._on_click)
+        self._measure_and_redraw()
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+
+    # ── internals ─────────────────────────────────────────────────────────
+
+    def _measure_and_redraw(self):
+        """Size the canvas to the text, then (re)draw the pill + label."""
+        f = tkfont.Font(font=self._font)
+        w = f.measure(self._text) + 2 * self._padx + 4
+        h = f.metrics("linespace") + 2 * self._pady
+        # bypass the FlatButton.configure override (avoid recursion)
+        tk.Canvas.configure(self, width=w, height=h)
+        self.delete("all")
+        radius = h // 2  # full pill
+        pts = [radius, 1, w - radius, 1, w - 1, 1, w - 1, radius,
+               w - 1, h - radius, w - 1, h - 1, w - radius, h - 1,
+               radius, h - 1, 1, h - 1, 1, h - radius, 1, radius, 1, 1]
+        fill = COLORS["border"] if self._state == "disabled" else self._fill
+        outline = self._border or fill
+        self.create_polygon(pts, smooth=True, fill=fill, outline=outline)
+        text_color = (COLORS["text_secondary"] if self._state == "disabled"
+                      else self._fg)
+        self.create_text(w / 2, h / 2, text=self._text, fill=text_color,
+                         font=self._font)
 
     def configure(self, cnf=None, **kw):
         if isinstance(cnf, dict):
             kw.update(cnf)
-        state = kw.pop("state", None)
-        if state is not None:
-            self._state = state
-        label_kw = {k: v for k, v in kw.items() if k in self._LABEL_OPTS}
-        rest = {k: v for k, v in kw.items() if k not in self._LABEL_OPTS}
-        if label_kw:
-            self._label.configure(**label_kw)
-        if rest:
-            super().configure(**rest)
+        changed = bool(kw)
+        old_bg, old_hover = self._bg, self._hover_bg
+        for key in ("text", "bg", "fg", "hover_bg", "border_color"):
+            if key in kw:
+                setattr(self, "_" + key, kw.pop(key))
+        # keep the rendered fill in sync with new colors
+        if self._fill == old_bg:
+            self._fill = self._bg  # idle → follow the new base color
+        if self._fill == old_hover:
+            self._fill = self._hover_bg  # hovering → new hover color
+        if "state" in kw:
+            self._state = kw.pop("state")
+        if kw:
+            tk.Canvas.configure(self, **kw)
+        if changed:
+            self._measure_and_redraw()
 
     config = configure
 
     def cget(self, key):
         if key == "state":
             return self._state
-        if key in self._LABEL_OPTS:
-            return self._label.cget(key)
+        if key == "text":
+            return self._text
+        if key == "bg":
+            return self._fill
+        if key == "fg":
+            return self._fg
         return super().cget(key)
 
     def _is_enabled(self):
-        return str(self.cget("state")) != "disabled"
+        return self._state != "disabled"
 
     def _on_enter(self, _event):
-        if self._is_enabled():
-            self.configure(bg=self._hover_bg)
+        if self._is_enabled() and self._fill != self._hover_bg:
+            self._fill = self._hover_bg
+            self._measure_and_redraw()
 
     def _on_leave(self, _event):
-        self.configure(bg=self._bg)
+        if self._fill != self._bg:
+            self._fill = self._bg
+            self._measure_and_redraw()
 
     def _on_click(self, _event):
         if self._is_enabled() and self._command:
@@ -961,14 +997,17 @@ class PhotoSApp:
         style.configure("Treeview", rowheight=26, font=FONT_BODY,
                         fieldbackground=COLORS["card"],
                         background=COLORS["card"],
-                        foreground=COLORS["text"])
+                        foreground=COLORS["text"],
+                        relief="flat", borderwidth=0)
         style.configure("Treeview.Heading", font=FONT_SMALL, padding=(4, 5),
-                        background=COLORS["card"], foreground=COLORS["text"])
+                        background=COLORS["card"], foreground=COLORS["text"],
+                        relief="flat")
         style.map("Treeview", background=[("selected", COLORS["accent"])],
                   foreground=[("selected", "white")])
         style.configure("TCombobox", padding=2, fieldbackground=COLORS["card"],
                         background=COLORS["card"], foreground=COLORS["text"],
-                        arrowcolor=COLORS["text_secondary"])
+                        arrowcolor=COLORS["text_secondary"],
+                        bordercolor=COLORS["border"])
         style.map("TCombobox",
                   fieldbackground=[("readonly", COLORS["card"])],
                   selectbackground=[("readonly", COLORS["accent"])],
@@ -980,17 +1019,31 @@ class PhotoSApp:
                         lightcolor=COLORS["border"],
                         darkcolor=COLORS["border"])
         style.configure("TScale", background=COLORS["accent"],
-                        troughcolor=COLORS["border"])
+                        troughcolor=COLORS["divider"])
         style.configure("TCheckbutton", background=COLORS["card"],
                         foreground=COLORS["text"], focuscolor=COLORS["card"])
         style.configure("TRadiobutton", background=COLORS["card"],
                         foreground=COLORS["text"], focuscolor=COLORS["card"])
-        style.configure("Vertical.TScrollbar", background=COLORS["border"],
-                        troughcolor=COLORS["card"],
-                        arrowcolor=COLORS["text_secondary"])
-        style.configure("Horizontal.TScrollbar", background=COLORS["border"],
-                        troughcolor=COLORS["card"],
-                        arrowcolor=COLORS["text_secondary"])
+        style.configure("TProgressbar", background=COLORS["accent"],
+                        troughcolor=COLORS["progress_bg"],
+                        bordercolor=COLORS["progress_bg"],
+                        lightcolor=COLORS["accent"],
+                        darkcolor=COLORS["accent"])
+        # Arrow-less slim scrollbars (modern look): redefine the clam layout
+        # to trough + thumb only.
+        for orient in ("Vertical", "Horizontal"):
+            style.layout(
+                orient + ".TScrollbar",
+                [(orient + ".Scrollbar.trough",
+                  {"children": [(orient + ".Scrollbar.thumb",
+                                 {"expand": "1", "sticky": "nswe"})],
+                   "sticky": "ns" if orient == "Vertical" else "we"})])
+            style.configure(
+                orient + ".TScrollbar", background=COLORS["border"],
+                troughcolor=COLORS["card"],
+                arrowcolor=COLORS["text_secondary"],
+                bordercolor=COLORS["card"], lightcolor=COLORS["card"],
+                darkcolor=COLORS["card"])
 
     # ── UI Construction ─────────────────────────────────────────────────────
 
@@ -1021,24 +1074,24 @@ class PhotoSApp:
         # About button (right side)
         about_btn = FlatButton(
             title_frame, text=self._t("about"), command=self._show_about,
-            bg=COLORS["bg"], fg=COLORS["text_secondary"], hover_bg=COLORS["border"],
-            font=FONT_SMALL, padx=10, pady=4, border_color=COLORS["border"],
+            bg=COLORS["bg"], fg=COLORS["text_secondary"],
+            hover_bg=COLORS["divider"], font=FONT_SMALL, padx=10, pady=4,
         )
         about_btn.pack(side="right", pady=(6, 0))
 
         # Plugins button (right side, next to About)
         plugins_btn = FlatButton(
             title_frame, text=self._t("plugins"), command=self._show_plugin_manager,
-            bg=COLORS["bg"], fg=COLORS["text_secondary"], hover_bg=COLORS["border"],
-            font=FONT_SMALL, padx=10, pady=4, border_color=COLORS["border"],
+            bg=COLORS["bg"], fg=COLORS["text_secondary"],
+            hover_bg=COLORS["divider"], font=FONT_SMALL, padx=10, pady=4,
         )
         plugins_btn.pack(side="right", pady=(6, 0))
 
         # Settings button (right side)
         settings_btn = FlatButton(
             title_frame, text=self._t("settings"), command=self._show_settings,
-            bg=COLORS["bg"], fg=COLORS["text_secondary"], hover_bg=COLORS["border"],
-            font=FONT_SMALL, padx=10, pady=4, border_color=COLORS["border"],
+            bg=COLORS["bg"], fg=COLORS["text_secondary"],
+            hover_bg=COLORS["divider"], font=FONT_SMALL, padx=10, pady=4,
         )
         settings_btn.pack(side="right", pady=(6, 0))
 
@@ -1056,8 +1109,7 @@ class PhotoSApp:
         theme_btn = FlatButton(
             title_frame, text=theme_icon, command=self._toggle_theme,
             bg=COLORS["bg"], fg=COLORS["text_secondary"],
-            hover_bg=COLORS["border"], font=FONT_SMALL, padx=8, pady=4,
-            border_color=COLORS["border"],
+            hover_bg=COLORS["divider"], font=FONT_SMALL, padx=8, pady=4,
         )
         theme_btn.pack(side="right", padx=(0, 4), pady=(6, 0))
 
@@ -1088,8 +1140,7 @@ class PhotoSApp:
     def _build_file_panel(self, parent):
         """Build the left-side file list panel."""
         # Card container
-        card = tk.Frame(parent, bg=COLORS["card"], highlightbackground=COLORS["border"],
-                        highlightthickness=1, bd=0)
+        card = tk.Frame(parent, bg=COLORS["card"], bd=0, highlightthickness=0)
         card.pack(fill="both", expand=True)
 
         # Toolbar
@@ -1199,8 +1250,7 @@ class PhotoSApp:
         canvas_unbind_safe(parent)
 
         # Card container
-        card = tk.Frame(parent, bg=COLORS["card"], highlightbackground=COLORS["border"],
-                        highlightthickness=1, bd=0)
+        card = tk.Frame(parent, bg=COLORS["card"], bd=0, highlightthickness=0)
         card.pack(fill="both", expand=True)
 
         # Scrollable settings area
@@ -1880,8 +1930,7 @@ class PhotoSApp:
     def _build_bottom_panel(self, parent):
         """Build bottom progress and action bar."""
         # Card container
-        card = tk.Frame(parent, bg=COLORS["card"], highlightbackground=COLORS["border"],
-                        highlightthickness=1, bd=0)
+        card = tk.Frame(parent, bg=COLORS["card"], bd=0, highlightthickness=0)
         card.pack(fill="x")
 
         inner = tk.Frame(card, bg=COLORS["card"])
@@ -1943,7 +1992,7 @@ class PhotoSApp:
         """Add a section header label."""
         # Thin separator
         if row > 0:
-            sep = tk.Frame(parent, bg=COLORS["border"], height=1)
+            sep = tk.Frame(parent, bg=COLORS["divider"], height=1)
             sep.grid(row=row, sticky="ew", padx=18, pady=(12, 8), columnspan=2)
 
         label = tk.Label(
@@ -3037,8 +3086,7 @@ class PhotoSApp:
         max_w, max_h = 400, 320
         for label, path in [(self._t("before"), r.input_path),
                             (self._t("after"), r.output_path)]:
-            col = tk.Frame(img_frame, bg=COLORS["card"], highlightbackground=COLORS["border"],
-                           highlightthickness=1)
+            col = tk.Frame(img_frame, bg=COLORS["card"], bd=0, highlightthickness=0)
             col.pack(side="left", fill="both", expand=True, padx=8)
 
             tk.Label(col, text=label, font=(PLATFORM_FONTS["body"], 11, "bold"),
