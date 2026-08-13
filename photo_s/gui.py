@@ -187,7 +187,8 @@ STRINGS = {
         "clear": "清除全部",
         "files_count": "{n} 个文件",
         "files_count_checked": "{n} 个文件 · 已勾选 {m} 个",
-        "check_none": "请先勾选要处理的图片（点击文件列表第一列切换勾选，点表头全选/全不选）",
+        "check_none": "请先勾选要处理的图片（勾选框切换，用「全选/全不选」按钮批量切换）",
+        "check_toggle_all": "全选/全不选",
         "hint_dnd": "将图片或文件夹拖入列表，或使用上方按钮添加",
         "hint_no_dnd": "使用上方按钮添加图片文件（安装 tkinterdnd2 可启用拖放）",
         "col_name": "文件名",
@@ -493,7 +494,8 @@ STRINGS = {
         "clear": "Clear All",
         "files_count": "{n} files",
         "files_count_checked": "{n} files · {m} checked",
-        "check_none": "Check the images to process first (click the first column to toggle, the header for all/none)",
+        "check_none": "Check the images to process first (use the checkboxes, or the check-all button)",
+        "check_toggle_all": "Check all / none",
         "hint_dnd": "Drag & drop images/folders into the list, or use the buttons above",
         "hint_no_dnd": "Use the buttons above to add images (install tkinterdnd2 for drag & drop)",
         "col_name": "Name",
@@ -905,35 +907,6 @@ class FlatButton(tk.Canvas):
             self._command()
 
 
-def _make_check_images():
-    """Checked/unchecked checkbox glyphs for the file-list check column.
-
-    Treeview cells are text-only, so a real checkbox look is drawn as
-    16px PhotoImages (per-item ``image`` option). Colors follow the
-    current palette; callers regenerate them on every rebuild so theme
-    switches stay consistent. Returns (on_tk, off_tk, on_pil, off_pil) —
-    keep the PhotoImage references alive on the app; the PIL sources are
-    for pixel-level assertions.
-    """
-    from PIL import Image, ImageDraw, ImageTk
-
-    def _rgb(hex_color):
-        h = hex_color.lstrip("#")
-        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
-
-    size = 16
-    on = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(on)
-    d.rounded_rectangle([1, 1, size - 2, size - 2], radius=4,
-                        fill=_rgb(COLORS["accent"]) + (255,))
-    d.line([4, 8, 7, 11, 12, 5], fill=(255, 255, 255, 255), width=2)
-    off = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(off)
-    d.rounded_rectangle([1, 1, size - 2, size - 2], radius=4,
-                        outline=_rgb(COLORS["border"]) + (255,), width=1)
-    return (ImageTk.PhotoImage(on), ImageTk.PhotoImage(off), on, off)
-
-
 def canvas_unbind_safe(widget):
     """Drop any leftover global mousewheel binding from a destroyed panel.
 
@@ -974,6 +947,11 @@ class PhotoSApp:
         # ephemeral multi-select for remove/analyze). New files are
         # checked by default. Survives language/theme rebuilds.
         self._checked: set = set()
+        # Ephemeral row selection (highlight) for remove/analyze/compare.
+        # Distinct from _checked on purpose: checks define the action
+        # scope, selection is a temporary multi-mark like the old
+        # Treeview selection.
+        self._selected_rows: set = set()
         self.processing = False
         self.cancel_requested = False
         self.output_dir = tk.StringVar(value="")
@@ -1309,6 +1287,13 @@ class PhotoSApp:
         )
         remove_btn.pack(side="left", padx=(8, 0))
 
+        FlatButton(
+            toolbar, text=self._t("check_toggle_all"),
+            command=self._toggle_all_checks,
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+        ).pack(side="left", padx=(8, 0))
+
         clear_btn = FlatButton(
             toolbar, text=self._t("clear"), command=self._clear_files,
             bg=COLORS["card"], fg=COLORS["text_secondary"], hover_bg=COLORS["bg"],
@@ -1357,61 +1342,79 @@ class PhotoSApp:
         )
         self.file_count_label.pack(side="right", padx=(0, 12))
 
-        # File list (Treeview)
+        # File list: scrollable rows with real ttk.Checkbuttons — the
+        # same widget as the settings panel. (Treeview cells cannot host
+        # widgets, and its per-item image column proved unreliable, so
+        # the list is a canvas of row frames instead.)
         list_frame = tk.Frame(card, bg=COLORS["card"])
         list_frame.pack(fill="both", expand=True, padx=14, pady=12)
 
-        columns = ("check", "name", "size", "format", "dims")
-        self.file_tree = ttk.Treeview(
-            list_frame, columns=columns, show="headings",
-            selectmode="extended", height=12,
-        )
-
-        self.file_tree.heading("check", text="✓",
-                               command=self._toggle_all_checks)
-        self.file_tree.heading("name", text=self._t("col_name"))
-        self.file_tree.heading("size", text=self._t("col_size"))
-        self.file_tree.heading("format", text=self._t("col_format"))
-        self.file_tree.heading("dims", text=self._t("col_dims"))
-
-        self.file_tree.column("check", width=36, minwidth=36,
-                              anchor="center", stretch=False)
-        self.file_tree.column("name", width=300, minwidth=140)
-        self.file_tree.column("size", width=100, minwidth=80, anchor="center")
-        self.file_tree.column("format", width=80, minwidth=60, anchor="center")
-        self.file_tree.column("dims", width=140, minwidth=90, anchor="center")
-
-        # Zebra striping for readability
-        self.file_tree.tag_configure("even", background=COLORS["row_alt"])
-
-        # Checkbox glyphs for the first column (regenerated on every
-        # rebuild so theme switches re-tint them)
-        (self._check_on_img, self._check_off_img,
-         self._check_on_src, self._check_off_src) = _make_check_images()
-
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.file_tree.yview)
-        self.file_tree.configure(yscrollcommand=scrollbar.set)
-
-        self.file_tree.pack(side="left", fill="both", expand=True)
+        self.file_list_canvas = tk.Canvas(
+            list_frame, bg=COLORS["card"], highlightthickness=0,
+            borderwidth=0)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical",
+                                  command=self.file_list_canvas.yview)
+        self.file_list_canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
+        self.file_list_canvas.pack(side="left", fill="both", expand=True)
 
-        # Bind delete key
-        self.file_tree.bind("<BackSpace>", lambda e: self._remove_selected())
-        self.file_tree.bind("<Delete>", lambda e: self._remove_selected())
+        self.file_rows_frame = tk.Frame(self.file_list_canvas,
+                                        bg=COLORS["card"])
+        self._rows_win = self.file_list_canvas.create_window(
+            (0, 0), window=self.file_rows_frame, anchor="nw")
 
-        # Click on the check column toggles the checkbox (clicks on other
-        # columns keep their normal selection behavior)
-        self.file_tree.bind("<Button-1>", self._on_tree_click)
+        def _sync_width(event=None):
+            self.file_list_canvas.itemconfigure(
+                self._rows_win,
+                width=self.file_list_canvas.winfo_width())
 
-        # Double-click a row → before/after comparison for that file
-        self.file_tree.bind("<Double-1>", self._on_tree_double_click)
+        self.file_list_canvas.bind("<Configure>", _sync_width)
+
+        def _sync_scroll(event=None):
+            self.file_list_canvas.configure(
+                scrollregion=self.file_list_canvas.bbox("all"))
+
+        self.file_rows_frame.bind("<Configure>", _sync_scroll)
+
+        # Mousewheel: same pattern as the settings panel (card-scoped
+        # bind_all + boundary snapping + momentum debounce)
+        _last_boundary = [0.0]
+
+        def _on_mousewheel(event):
+            delta = event.delta
+            amount = -delta if abs(delta) < 10 else -delta / 120
+            if time.monotonic() - _last_boundary[0] < 0.15:
+                return  # momentum tail right after a boundary hit
+            top, bottom = self.file_list_canvas.yview()
+            if amount > 0:
+                if bottom >= 1.0 - 1e-9:
+                    _last_boundary[0] = time.monotonic()
+                    self.file_list_canvas.yview_moveto(1.0)
+                    return
+            elif amount < 0:
+                if top <= 1e-9:
+                    _last_boundary[0] = time.monotonic()
+                    self.file_list_canvas.yview_moveto(0.0)
+                    return
+            self.file_list_canvas.yview_scroll(amount, "units")
+
+        def _bind_scroll(event):
+            self.file_list_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_scroll(event):
+            self.file_list_canvas.unbind_all("<MouseWheel>")
+
+        for w in (list_frame, self.file_list_canvas):
+            w.bind("<Enter>", _bind_scroll)
+            w.bind("<Leave>", _unbind_scroll)
 
         # Register drag-and-drop targets (requires tkinterdnd2 AND a TkinterDnD
         # root; with a plain tk.Tk() root — e.g. headless smoke tests — the
         # tkdnd Tcl commands aren't loaded, so degrade gracefully)
         if DND_AVAILABLE:
             try:
-                for widget in (card, self.file_tree):
+                for widget in (card, self.file_list_canvas,
+                               self.file_rows_frame):
                     widget.drop_target_register(DND_FILES)
                     widget.dnd_bind("<<Drop>>", self._on_drop)
             except Exception:
@@ -2607,7 +2610,7 @@ class PhotoSApp:
         for the currently selected file (via photo_s.metrics)."""
         from .metrics import compute_exposure_stats, compute_blur_score
 
-        selected = self.file_tree.selection()
+        selected = list(self._selected_rows)
         if not selected:
             messagebox.showwarning(self._t("analyze_title"),
                                    self._t("analyze_none"))
@@ -3548,46 +3551,79 @@ class PhotoSApp:
         """Checked files in list order (the set all workflow actions use)."""
         return [p for p in self.files if p in self._checked]
 
+    def _update_count_label(self):
+        """File-count label in the toolbar (shows the checked subset
+        when only some files are checked)."""
+        if self._checked and len(self._checked) < len(self.files):
+            self.file_count_label.config(text=self._t(
+                "files_count_checked", n=len(self.files),
+                m=len(self._checked)))
+        else:
+            self.file_count_label.config(
+                text=self._t("files_count", n=len(self.files)))
+
+    def _make_check_cb(self, path):
+        """Checkbutton command: keep self._checked in sync with the
+        clicked checkbox (Tk flips the variable before the command)."""
+
+        def on_toggle():
+            if self._row_vars[path].get():
+                self._checked.add(path)
+            else:
+                self._checked.discard(path)
+            self._update_count_label()
+
+        return on_toggle
+
     def _toggle_check(self, path):
-        """Toggle the checkbox for one row and re-render the list."""
+        """Toggle the checkbox for one row (programmatic / test seam).
+        Syncs the row's variable in place — no full re-render."""
         if path in self._checked:
             self._checked.discard(path)
         else:
             self._checked.add(path)
-        self._refresh_file_list()
+        var = self._row_vars.get(path)
+        if var is not None:
+            var.set(path in self._checked)
+        self._update_count_label()
 
     def _toggle_all_checks(self):
-        """Header click: uncheck all when everything is checked, else
-        check all."""
+        """Uncheck all when everything is checked, else check all."""
         if self._checked and len(self._checked) == len(self.files):
             self._checked.clear()
         else:
             self._checked = set(self.files)
         self._refresh_file_list()
 
-    def _on_tree_click(self, event):
-        """Treeview click: toggle the check column; ignore other columns
-        (normal selection keeps working there)."""
-        try:
-            if (self.file_tree.identify_region(event.x, event.y) == "cell"
-                    and self.file_tree.identify_column(event.x) == "#1"):
-                iid = self.file_tree.identify_row(event.y)
-                if iid:
-                    self._toggle_check(iid)
-        except tk.TclError:
-            pass
+    def _select_row(self, path):
+        """Click on a row toggles its ephemeral selection highlight
+        (remove/analyze/compare scope — distinct from the checkbox)."""
+        if path in self._selected_rows:
+            self._selected_rows.discard(path)
+        else:
+            self._selected_rows.add(path)
+        self._highlight_row(path)
+
+    def _highlight_row(self, path):
+        """Apply/clear the selection highlight for one row."""
+        w = self._row_widgets.get(path)
+        if not w:
+            return
+        on = path in self._selected_rows
+        bg = COLORS["accent"] if on else w["base_bg"]
+        w["row"].configure(bg=bg)
+        for lbl, base_fg in w["labels"]:
+            lbl.configure(bg=bg, fg="white" if on else base_fg)
 
     def _remove_selected(self):
-        """Remove selected files from the list.
-
-        Treeview item IDs are the full file paths, so removal is exact
-        even when two folders contain files with the same name.
-        """
-        selected = self.file_tree.selection()
+        """Remove the selected rows from the list (exact by full path,
+        so same-name files in different folders never collide)."""
+        selected = list(self._selected_rows)
         if not selected:
             return
 
         remove_paths = set(selected)
+        self._selected_rows -= remove_paths
         self.files = [f for f in self.files if f not in remove_paths]
         self._checked -= remove_paths
         self._refresh_file_list()
@@ -3602,7 +3638,8 @@ class PhotoSApp:
         fresh = []
         for p in new_paths:
             if os.path.isdir(p):
-                for img in scan_directory(p, recursive=False):
+                # recursive: a folder may hold the photos in subfolders
+                for img in scan_directory(p, recursive=True):
                     if img not in self.files:
                         self.files.append(img)
                         fresh.append(img)
@@ -3651,12 +3688,16 @@ class PhotoSApp:
             self._update_stats()
 
     def _refresh_file_list(self):
-        """Refresh the file treeview."""
-        # Clear existing items
-        for item in self.file_tree.get_children():
-            self.file_tree.delete(item)
+        """Refresh the file list (rebuilds all rows from self.files).
+        Checkbox state comes from self._checked — the tk.Variables are
+        recreated per build, so language/theme rebuilds keep the checks.
+        """
+        # Clear existing rows
+        for w in self.file_rows_frame.winfo_children():
+            w.destroy()
+        self._row_vars = {}
+        self._row_widgets = {}
 
-        # Add files
         for i, path in enumerate(self.files):
             name = os.path.basename(path)
             try:
@@ -3674,22 +3715,42 @@ class PhotoSApp:
             except Exception:
                 size, dims = "N/A", "—"
             fmt = Path(path).suffix.upper().lstrip(".")
-            tag = "even" if i % 2 else ""
-            check_img = (self._check_on_img if path in self._checked
-                         else self._check_off_img)
-            self.file_tree.insert(
-                "", "end", iid=path,
-                values=(name, size, fmt, dims),
-                image=(check_img,),
-                tags=(tag,) if tag else ())
+            base_bg = COLORS["row_alt"] if i % 2 else COLORS["card"]
 
-        if self._checked and len(self._checked) < len(self.files):
-            self.file_count_label.config(text=self._t(
-                "files_count_checked", n=len(self.files),
-                m=len(self._checked)))
-        else:
-            self.file_count_label.config(
-                text=self._t("files_count", n=len(self.files)))
+            row = tk.Frame(self.file_rows_frame, bg=base_bg, bd=0,
+                           highlightthickness=0)
+            row.pack(fill="x")
+            row.pack_propagate(True)
+
+            var = tk.BooleanVar(value=path in self._checked)
+            cb = ttk.Checkbutton(row, variable=var,
+                                 command=self._make_check_cb(path))
+            cb.pack(side="left", padx=(10, 8), pady=3)
+
+            name_lbl = tk.Label(row, text=name, anchor="w", font=FONT_BODY,
+                                fg=COLORS["text"], bg=base_bg)
+            name_lbl.pack(side="left", fill="x", expand=True)
+            labels = [(name_lbl, COLORS["text"])]
+            for text, width in ((size, 10), (fmt, 6), (dims, 12)):
+                lbl = tk.Label(row, text=text, width=width, anchor="e",
+                               font=FONT_SMALL,
+                               fg=COLORS["text_secondary"], bg=base_bg)
+                lbl.pack(side="left", padx=(8, 0))
+                labels.append((lbl, COLORS["text_secondary"]))
+
+            # interactions: click selects, double-click compares,
+            # BackSpace/Delete removes the selected rows
+            for w in (row, name_lbl):
+                w.bind("<Button-1>", lambda e, p=path: self._select_row(p))
+                w.bind("<Double-1>", lambda e, p=path: self._open_compare(p))
+                w.bind("<BackSpace>", lambda e: self._remove_selected())
+                w.bind("<Delete>", lambda e: self._remove_selected())
+
+            self._row_vars[path] = var
+            self._row_widgets[path] = {"row": row, "labels": labels,
+                                       "base_bg": base_bg}
+
+        self._update_count_label()
 
     def _browse_output_dir(self):
         """Browse for output directory."""
@@ -4188,22 +4249,18 @@ class PhotoSApp:
                    bg=COLORS["accent"], hover_bg=COLORS["accent_hover"],
                    font=FONT_BUTTON, padx=24, pady=6).pack(pady=12)
 
-    def _on_tree_double_click(self, event):
+    def _open_compare(self, path):
         """Double-click a file row → before/after comparison for that file."""
-        iid = self.file_tree.identify_row(event.y)
-        if not iid:
-            return
         if self._last_result is None:
             messagebox.showinfo(self._t("cmp_no_result"),
                                 self._t("cmp_no_result_body"))
             return
         for r in self._last_result.results:
-            if r.input_path == iid and r.success:
+            if r.input_path == path and r.success:
                 self._show_comparison_for(r)
                 return
-        if iid:
-            messagebox.showinfo(self._t("cmp_no_result"),
-                                self._t("cmp_no_result_body"))
+        messagebox.showinfo(self._t("cmp_no_result"),
+                            self._t("cmp_no_result_body"))
 
     def _update_stats(self, result: BatchResult = None):
         """Update stats label at the bottom."""
@@ -4253,7 +4310,8 @@ class PhotoSApp:
         except Exception:
             pass
         for child in widget.winfo_children():
-            if child in (self.file_tree, self.progress_bar, self.progress_label):
+            if child in (self.file_rows_frame, self.file_list_canvas,
+                         self.progress_bar, self.progress_label):
                 continue
             self._set_state_recursive(child, state)
 

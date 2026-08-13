@@ -179,7 +179,7 @@ class TestDedupHelpers:
         app.files = [f for f in app.files if os.path.exists(f)]
         app._refresh_file_list()
         assert app.files == [a]
-        assert app.file_tree.get_children() == (a,)
+        assert list(app._row_widgets) == [a]
         root.destroy()
 
 
@@ -296,6 +296,19 @@ class TestCheckList:
         assert app._checked == {a, b}, "new files start checked"
         root.destroy()
 
+    def test_append_folder_scans_subfolders(self, tmp_path):
+        """Regression: adding a folder used to scan only the top level —
+        a folder whose photos live in subfolders reported 'no images'."""
+        root, app = _make_app()
+        sub = tmp_path / "作业" / "子文件夹"
+        sub.mkdir(parents=True)
+        top = _img(tmp_path / "作业" / "顶层.jpg", seed=1)
+        deep = _img(sub / "深层.jpg", seed=2)
+        assert app._append_files([str(tmp_path / "作业")]) == 2
+        assert set(app.files) == {top, deep}
+        assert app._checked == {top, deep}
+        root.destroy()
+
     def test_toggle_and_checked_files(self, tmp_path):
         root, app = _make_app()
         a = _img(tmp_path / "a.jpg")
@@ -318,41 +331,50 @@ class TestCheckList:
         assert app._checked_files() == [a, b]
         root.destroy()
 
-    def test_refresh_renders_marks(self, tmp_path):
+    def test_refresh_renders_checkbox_rows(self, tmp_path):
+        from tkinter import ttk
         root, app = _make_app()
         a = _img(tmp_path / "a.jpg")
         b = _img(tmp_path / "b.jpg", seed=2)
         app._append_files([a, b])
         app._toggle_check(b)
-        # the check column renders checkbox glyph images (checked vs not)
-        img_a = app.file_tree.item(a, "image")
-        img_b = app.file_tree.item(b, "image")
-        assert img_a and img_a[0] != ""
-        assert img_b and img_b[0] != ""
-        assert img_a[0] != img_b[0], "checked/unchecked glyphs must differ"
+        # one real ttk.Checkbutton per row, state from self._checked
+        assert len(app._row_vars) == 2
+        assert app._row_vars[a].get() is True
+        assert app._row_vars[b].get() is False
+        row = app._row_widgets[a]["row"]
+        assert any(isinstance(c, ttk.Checkbutton)
+                   for c in row.winfo_children()), \
+            "rows must host real ttk.Checkbuttons (settings-panel look)"
         assert "已勾选 1" in app.file_count_label.cget("text")
         root.destroy()
 
-    def test_check_glyphs_retinted_on_theme_toggle(self):
-        """Regression for the same class of bug as the dark->light ttk
-        stuck-colors issue: the checkbox glyphs are PhotoImages and must
-        be regenerated when the palette changes."""
+    def test_palette_applied_per_instance(self):
+        """Regression: COLORS is a module-global palette and used to be
+        left flipped by a previous app instance — a second instance then
+        built with the wrong palette. Each PhotoSApp must apply the
+        palette for its own dark_mode."""
+        from photo_s.gui import COLORS, _system_dark_mode
         root, app = _make_app()
-        px = app._check_on_src.getpixel((8, 3))     # inside the accent fill
-        app._toggle_theme()
-        px2 = app._check_on_src.getpixel((8, 3))
-        assert px != px2, "checked glyph must be re-tinted after theme switch"
+        app._toggle_theme()          # leave the global palette flipped
+        root2, app2 = _make_app()
+        assert app2.dark_mode == _system_dark_mode()
+        light = COLORS["accent"] == "#007aff"
+        assert light == (not app2.dark_mode), \
+            "COLORS must match the fresh instance's dark_mode"
         root.destroy()
+        root2.destroy()
 
     def test_remove_selected_discards(self, tmp_path):
         root, app = _make_app()
         a = _img(tmp_path / "a.jpg")
         b = _img(tmp_path / "b.jpg", seed=2)
         app._append_files([a, b])
-        app.file_tree.selection_set(a)
+        app._selected_rows = {a}
         app._remove_selected()
         assert app._checked == {b}
         assert app.files == [b]
+        assert app._selected_rows == set()
         root.destroy()
 
     def test_clear_files_resets(self, tmp_path, monkeypatch):
