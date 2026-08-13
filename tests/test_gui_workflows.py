@@ -309,6 +309,101 @@ class TestFileDialogWorkarounds:
         root.destroy()
 
 
+class TestRawPreview:
+    def test_open_image_safe_pil_path(self, tmp_path):
+        from photo_s.gui import _open_image_safe
+        root, app = _make_app()
+        p = _img(tmp_path / "a.jpg")
+        img = _open_image_safe(p)
+        assert img.size == (64, 48)
+        root.destroy()
+
+    def test_open_image_safe_raw_fallback(self, tmp_path, monkeypatch):
+        """PIL cannot open RAW — the helper must fall back to the engine
+        loader (regression: the review dialog showed 'cannot load' for
+        RAW files)."""
+        import photo_s.engine as engine_mod
+        from PIL import Image
+        from photo_s.gui import _open_image_safe
+        fake = tmp_path / "x.cr2"
+        fake.write_bytes(b"not really raw")
+        calls = []
+        real = engine_mod._get_image
+
+        def fake_get_image(path, options=None):
+            calls.append(path)
+            return Image.new("RGB", (10, 10), (1, 2, 3))
+        monkeypatch.setattr(engine_mod, "_get_image", fake_get_image)
+        img = _open_image_safe(str(fake))
+        assert img.size == (10, 10)
+        assert calls == [str(fake)]
+        # a normal JPEG must not touch the engine loader
+        p = _img(tmp_path / "a.jpg")
+        monkeypatch.setattr(engine_mod, "_get_image", real)
+        img2 = _open_image_safe(p)
+        assert img2.size == (64, 48)
+
+
+class TestGlobalShortcuts:
+    def test_bindings_registered(self):
+        root, app = _make_app()
+        for seq in ("<Command-o>", "<Control-o>", "<Command-r>",
+                    "<Control-r>", "<Command-p>", "<Command-e>",
+                    "<Command-d>", "<Command-g>", "<Escape>"):
+            assert root.bind(seq), f"{seq} must be bound"
+        root.destroy()
+
+    def test_shortcut_dispatches(self, monkeypatch):
+        from photo_s.gui import PhotoSApp
+        calls = []
+        # the bindings capture the method reference at __init__ time,
+        # so patch the class BEFORE creating the app
+        monkeypatch.setattr(PhotoSApp, "_preview",
+                            lambda self: calls.append("preview"))
+        root, app = _make_app()
+        root.update()
+        root.focus_force()   # synthesized key events need a key window
+        root.update()
+        root.event_generate("<Control-p>")
+        assert calls == ["preview"]
+        root.destroy()
+
+    def test_shortcut_locked_during_processing(self, monkeypatch):
+        from photo_s import gui as gui_mod
+        from photo_s.gui import PhotoSApp
+        dedup_calls = []
+        monkeypatch.setattr(PhotoSApp, "_show_dedup",
+                            lambda self: dedup_calls.append(1))
+        root, app = _make_app()
+        app.processing = True
+        monkeypatch.setattr(gui_mod.filedialog, "askopenfilenames",
+                            lambda **k: [])
+        root.update()
+        root.focus_force()
+        root.update()
+        root.event_generate("<Control-d>")
+        assert dedup_calls == [], "review/dedup shortcuts lock during batch"
+        root.event_generate("<Control-o>")
+        assert app.processing is True, "add-files stays available"
+        root.destroy()
+
+    def test_escape_cancels_processing(self, monkeypatch):
+        root, app = _make_app()
+        cancels = []
+        monkeypatch.setattr(app, "_cancel_processing",
+                            lambda: cancels.append(1))
+        app.processing = False
+        root.update()
+        root.focus_force()
+        root.update()
+        root.event_generate("<Escape>")
+        assert cancels == [], "Esc is a no-op when idle"
+        app.processing = True
+        root.event_generate("<Escape>")
+        assert cancels == [1], "Esc cancels a running batch"
+        root.destroy()
+
+
 class TestProcessingLockout:
     def test_workflow_buttons_state_during_processing(self):
         root, app = _make_app()

@@ -227,7 +227,7 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 
 新增 `tests/test_gui_workflows.py`（15 个）：同步 helper 全覆盖 +
 对话框冒烟（有界 `root.update()` 轮询，不点启动按钮、不挂线程）。
-全量 422 个。
+全量 428 个。
 
 ### 8.8 勾选式文件列表（替代选中集）
 
@@ -273,3 +273,17 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   重开对话框（Tk 8.6.18 仍存在）。`_after_file_dialog(btn)`（重置 hover 填充
   + 400ms 冷却门 `_dlg_guard_until`）+ `_dlg_cooldown_active()` 入口守卫，
   应用到添加图片/文件夹与全部浏览按钮（输出目录/白平衡/GPX/水印/画廊）。
+
+### 8.10 修复轮：RAW 预览 / 全局快捷键（v1.1.0 内）
+
+- **RAW 预览**：`_open_image_safe(path)` 模块 helper（PIL 打不开时回退
+  `engine._get_image`（rawpy/HEIC））——审查灯箱、去重缩略图、前后对比、
+  曝光分析直方图全部改走它；文件列表尺寸列对 RAW 走 rawpy 头部快读
+  （`rawpy.imread(...).sizes`，不全量解码，防列表卡死）。
+- **全局快捷键**（root 级绑定，跨语言/主题重建存活；⌘/Ctrl 双绑）：
+  O 添加图片、⇧O 添加文件夹、R 开始处理、P 预览、E 审查、D 去重、
+  G 画廊、**Esc 取消处理中任务**（空闲时无操作；Toplevel 事件不触达
+  root 绑定，对话框自身 Esc 不受影响）。处理中仅添加类可用（与工具栏
+  锁定一致）。About 对话框新增快捷键清单（`shortcuts_text`）。
+- 注意：root 绑定在 `__init__` 时捕获方法引用——测试补丁需在建 app 前
+  改类方法；macOS 合成按键事件需 `focus_force()`。

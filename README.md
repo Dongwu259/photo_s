@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-422%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-428%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **PhotoS** is a cross-platform batch image processing tool with **both GUI and CLI**. Built for photographers who need to deliver images at specific sizes, and for AI agents that need reliable image processing pipelines.
@@ -193,7 +193,9 @@ photo-s gui      # Explicit GUI mode
 ```
 
 GUI features: Chinese/English language switch, drag-and-drop (needs `pip install photo-s-tools[gui]`),
-cancellable batch processing, before/after comparison, a **checkbox file list** (every row has a
+cancellable batch processing, before/after comparison, global shortcuts
+(⌘/Ctrl+O add, ⌘/Ctrl+R start, Esc cancel, ⌘/Ctrl+E review, ⌘/Ctrl+D dedup, ⌘/Ctrl+G gallery),
+a **checkbox file list** (every row has a
 real checkbox; all actions — process, review, dedup, gallery — run on the checked files;
 adding a folder scans subfolders), a **review & rate lightbox**
 (←/→ navigation, 0-5 stars, keywords/title, rating & keyword filters — writes EXIF),

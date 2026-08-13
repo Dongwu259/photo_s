@@ -38,6 +38,7 @@ from .engine import (
     SUPPORTED_FORMATS,
     INPUT_EXTENSIONS,
     ALL_INPUT_EXTENSIONS,
+    RAW_EXTENSIONS,
 )
 
 
@@ -189,6 +190,8 @@ STRINGS = {
         "files_count_checked": "{n} 个文件 · 已勾选 {m} 个",
         "check_none": "请先勾选要处理的图片（勾选框切换，用「全选/全不选」按钮批量切换）",
         "check_toggle_all": "全选/全不选",
+        "about_shortcuts": "快捷键 Shortcuts",
+        "shortcuts_text": "⌘O / Ctrl+O 添加图片\n⌘⇧O / Ctrl+Shift+O 添加文件夹\n⌘R / Ctrl+R 开始处理（Esc 取消）\n⌘P / Ctrl+P 预览参数\n⌘E / Ctrl+E 审查打分\n⌘D / Ctrl+D 去重查看\n⌘G / Ctrl+G 导出画廊\n（审查窗口内：←/→ 翻页，0-5 评分，Esc 关闭）",
         "dlg_skipped": "已导入 {n} 张图片，跳过 {m} 个不支持的文件",
         "dlg_no_supported": "未找到支持的图片（跳过 {m} 个不支持的文件）",
         "hint_dnd": "将图片或文件夹拖入列表，或使用上方按钮添加",
@@ -498,6 +501,8 @@ STRINGS = {
         "files_count_checked": "{n} files · {m} checked",
         "check_none": "Check the images to process first (use the checkboxes, or the check-all button)",
         "check_toggle_all": "Check all / none",
+        "about_shortcuts": "Shortcuts 快捷键",
+        "shortcuts_text": "⌘O / Ctrl+O Add images\n⌘⇧O / Ctrl+Shift+O Add folder\n⌘R / Ctrl+R Start processing (Esc cancels)\n⌘P / Ctrl+P Preview options\n⌘E / Ctrl+E Review & rate\n⌘D / Ctrl+D Duplicates\n⌘G / Ctrl+G Export gallery\n(In review: ←/→ navigate, 0-5 rate, Esc close)",
         "dlg_skipped": "Imported {n} images, skipped {m} unsupported files",
         "dlg_no_supported": "No supported images found (skipped {m} unsupported files)",
         "hint_dnd": "Drag & drop images/folders into the list, or use the buttons above",
@@ -911,6 +916,18 @@ class FlatButton(tk.Canvas):
             self._command()
 
 
+def _open_image_safe(path):
+    """Open a PhotoS-supported image for GUI display (PIL cannot open
+    RAW — falls back to the engine loader which handles rawpy/HEIC
+    with fallbacks). Raises on anything unreadable; callers catch."""
+    from PIL import Image
+    try:
+        return Image.open(path)
+    except Exception:
+        from .engine import _get_image
+        return _get_image(path)
+
+
 def canvas_unbind_safe(widget):
     """Drop any leftover global mousewheel binding from a destroyed panel.
 
@@ -1039,6 +1056,7 @@ class PhotoSApp:
 
         # Build UI
         self._build_ui()
+        self._bind_global_shortcuts()
 
         # Periodic update for progress polling
         self._progress_lock = threading.Lock()
@@ -1080,6 +1098,48 @@ class PhotoSApp:
         if not self.processing:
             self.progress_label.config(
                 text=self._t("ready"), fg=COLORS["text_secondary"])
+
+    def _bind_global_shortcuts(self):
+        """App-wide accelerator keys (Cmd on macOS / Ctrl elsewhere —
+        both bound since Tk accepts either). Modifier chords never
+        collide with typing in entries. Review/dedup/gallery/start are
+        locked out during processing (the toolbar buttons are too);
+        add-file/add-folder stay available for queueing. Root bindings
+        survive language/theme rebuilds (the root is never destroyed)."""
+
+        def wrap(fn, allow_during_processing=False):
+            def handler(event=None):
+                if self.processing and not allow_during_processing:
+                    return
+                fn()
+            return handler
+
+        binds = [
+            ("<Command-o>", self._add_files, True),
+            ("<Control-o>", self._add_files, True),
+            ("<Command-O>", self._add_folder, True),
+            ("<Control-O>", self._add_folder, True),
+            ("<Command-r>", lambda: self._start_processing(), False),
+            ("<Control-r>", lambda: self._start_processing(), False),
+            ("<Command-p>", self._preview, False),
+            ("<Control-p>", self._preview, False),
+            ("<Command-e>", self._show_review, False),
+            ("<Control-e>", self._show_review, False),
+            ("<Command-d>", self._show_dedup, False),
+            ("<Control-d>", self._show_dedup, False),
+            ("<Command-g>", self._show_gallery_export, False),
+            ("<Control-g>", self._show_gallery_export, False),
+        ]
+        for seq, fn, allow in binds:
+            self.root.bind(seq, wrap(fn, allow))
+        self.root.bind("<Escape>", self._on_global_escape)
+
+    def _on_global_escape(self, event=None):
+        """Esc cancels a running batch from the main window. Events in
+        Toplevels never reach the root binding, so dialog-level Escape
+        handlers keep working."""
+        if self.processing:
+            self._cancel_processing()
 
     def _toggle_theme(self):
         """Flip between dark and light palette (manual override of the
@@ -2281,6 +2341,11 @@ class PhotoSApp:
             tk.Label(row, text=status, font=FONT_SMALL,
                      fg=color, bg=COLORS["bg"]).pack(side="left", padx=(8, 0))
 
+        section(self._t("about_shortcuts"))
+        tk.Label(inner, text=self._t("shortcuts_text"),
+                 font=FONT_SMALL, fg=COLORS["text_secondary"], justify="left",
+                 bg=COLORS["bg"]).pack(anchor="w")
+
         tk.Label(inner, text=self._t("about_license"),
                  font=FONT_TINY, fg=COLORS["text_secondary"],
                  bg=COLORS["bg"]).pack(anchor="w", pady=(16, 12))
@@ -2680,10 +2745,10 @@ class PhotoSApp:
         canvas.pack()
 
         from PIL import Image
-        with Image.open(path) as img:
-            sample = img.convert("L").copy()
-            sample.thumbnail((256, 256))
-            hist = sample.histogram()  # 256 bins
+        img = _open_image_safe(path)
+        sample = img.convert("L").copy()
+        sample.thumbnail((256, 256))
+        hist = sample.histogram()  # 256 bins
 
         max_bin = max(hist) or 1
         bins = 64  # aggregate into 64 bars
@@ -3021,7 +3086,7 @@ class PhotoSApp:
                     cell = tk.Frame(row, bg=COLORS["card"])
                     cell.pack(side="left", padx=6)
                     try:
-                        img = Image.open(p)
+                        img = _open_image_safe(p).convert("RGB")
                         img.thumbnail((150, 150), Image.LANCZOS)
                         photo = ImageTk.PhotoImage(img)
                         lbl = tk.Label(cell, image=photo, bg=COLORS["bg"],
@@ -3420,7 +3485,7 @@ class PhotoSApp:
             state["photo"] = None
             try:
                 from PIL import Image, ImageTk
-                img = Image.open(p)
+                img = _open_image_safe(p).convert("RGB")
                 img.thumbnail((900, 540), Image.LANCZOS)
                 photo = ImageTk.PhotoImage(img)
                 img_lbl.configure(image=photo, text="")
@@ -3797,8 +3862,16 @@ class PhotoSApp:
                 dims = self._dims_cache.get(cache_key)
                 if dims is None:
                     from PIL import Image
-                    with Image.open(path) as img:
-                        dims = f"{img.width}×{img.height}"
+                    if Path(path).suffix.lower() in RAW_EXTENSIONS:
+                        # header-only read — decoding every RAW for a
+                        # dims column would freeze the list
+                        import rawpy
+                        with rawpy.imread(path) as raw:
+                            dims = (f"{raw.sizes.width}"
+                                    f"×{raw.sizes.height}")
+                    else:
+                        with Image.open(path) as img:
+                            dims = f"{img.width}×{img.height}"
                     self._dims_cache[cache_key] = dims
             except OSError:
                 size, dims = "N/A", "—"
@@ -4318,7 +4391,7 @@ class PhotoSApp:
                      fg=COLORS["text"], bg=COLORS["card"]).pack(pady=(8, 0))
 
             try:
-                img = Image.open(path)
+                img = _open_image_safe(path).convert("RGB")
                 w, h = img.size
                 ratio = min(max_w / w, max_h / h, 1.0)
                 img = img.resize((max(1, int(w * ratio)), max(1, int(h * ratio))),
