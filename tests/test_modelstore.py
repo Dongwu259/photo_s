@@ -29,9 +29,12 @@ def _spec(name="m.onnx", url="", sha="", size=0):
 
 class TestCacheDir:
     def test_photos_cache_dir(self, monkeypatch):
+        from pathlib import Path
         monkeypatch.setenv("PHOTOS_CACHE_DIR", "/tmp/photos-cache")
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-        assert modelstore.cache_dir() == "/tmp/photos-cache/models"
+        # pathlib comparison — separator-agnostic (Windows CI uses \\)
+        assert modelstore.cache_dir() == str(Path("/tmp/photos-cache")
+                                             / "models")
 
     def test_xdg(self, monkeypatch, tmp_path):
         monkeypatch.delenv("PHOTOS_CACHE_DIR", raising=False)
