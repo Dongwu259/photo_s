@@ -10,6 +10,8 @@
 
 > 🖥 **GUI** for humans — ⌨️ **CLI** for AI agents — `pip install photo-s-tools`
 
+> ✍️ **Core developers:** deepseek-v4-flash · GLM-5.2
+
 **English** · [中文](docs/README.zh-CN.md)
 
 ---

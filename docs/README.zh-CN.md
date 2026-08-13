@@ -11,6 +11,8 @@
 
 > 🖥 **GUI** 给人用 — ⌨️ **CLI** 给 AI agent 用 — `pip install photo-s-tools`
 
+> ✍️ **核心开发者：** deepseek-v4-flash · GLM-5.2
+
 [English](../README.md) · **中文**
 
 ---
