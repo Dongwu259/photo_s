@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-416%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-422%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **PhotoS** 是一款跨平台批量图片处理工具，同时提供 **GUI 和 CLI**。为需要按指定尺寸交付图片的摄影师，
@@ -22,7 +22,7 @@
 | 批量压缩 | ✅ | ✅ | JPEG/WebP/HEIC/AVIF 质量调优 |
 | 目标体积模式 | ✅ | ✅ | 自动调优质量以控制在目标文件体积以内 |
 | 格式转换 | ✅ | ✅ | JPEG / PNG / WebP / TIFF / BMP / HEIC / AVIF |
-| RAW 解码 | ✅ | ✅ | 22+ 种相机 RAW 格式（rawpy） |
+| RAW 解码 | ✅ | ✅ | 22+ 种相机 RAW 格式，内置支持（rawpy/libraw） |
 | 缩放 / 比例 | ✅ | ✅ | 最大尺寸、百分比或最长边上限 |
 | 影调与色彩 | ✅ | ✅ | 亮度/对比度/饱和度/伽马/锐化，黑白、复古 |
 | 白平衡 | — | ✅ | `--wb 5600` 色温，或 `--wb-from ref.jpg` 采样灰卡 |
@@ -82,7 +82,6 @@ pip install photo-s-tools
 pip install photo-s-tools[all]       # 全部
 pip install photo-s-tools[heic]      # HEIC 支持
 pip install photo-s-tools[avif]      # AVIF 支持
-pip install photo-s-tools[raw]       # RAW 处理
 pip install photo-s-tools[watch]     # 文件夹监视
 pip install photo-s-tools[exif]      # EXIF 编辑
 pip install photo-s-tools[enhance]   # NLM 降噪 + 自动扶正（opencv）
@@ -291,7 +290,7 @@ class MyPlugin(PhotoSPlugin):
 | TIFF | ✅ | ✅ | LZW 压缩 |
 | BMP | ✅ | ✅ | |
 | ICO | ✅ | ✅ | |
-| RAW（22+ 格式） | ✅ | — | 通过 `rawpy`（libraw） |
+| RAW（22+ 格式） | ✅ | — | 内置支持（`rawpy`/libraw） |
 
 ---
 

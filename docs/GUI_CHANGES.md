@@ -227,7 +227,7 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 
 新增 `tests/test_gui_workflows.py`（15 个）：同步 helper 全覆盖 +
 对话框冒烟（有界 `root.update()` 轮询，不点启动按钮、不挂线程）。
-全量 416 个。
+全量 422 个。
 
 ### 8.8 勾选式文件列表（替代选中集）
 
@@ -260,3 +260,16 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 - 修复：`PhotoSApp.__init__` 现在按本实例 `dark_mode` 重新 `_apply_palette`
   （COLORS 是模块级全局，前一个实例的切换会残留；同进程二次实例化或测试
   场景下第二个 app 会以错误的调色板构建）。
+
+### 8.9 修复轮：跳过提醒 / 原生 RAW / 文件对话框焦点（v1.1.0 内）
+
+- **跳过不支持文件**：`_append_files` 过滤 `ALL_INPUT_EXTENSIONS` 之外的文件
+  （目录用 os.walk 计数、隐藏文件不计），计数进 `self._last_skipped`；
+  `_add_folder`/`_add_files`/`_on_drop` 按通道弹窗：有跳过 → `dlg_skipped`
+  （n=导入 m=跳过），全部不支持 → `dlg_no_supported`，不再直接报「没有图片」。
+- **RAW 原生化**：`rawpy>=0.18.0` 从 `[raw]` extra 提升为核心依赖（三平台
+  wheel）；`raw = []` 空 extra 保持 `pip install photo-s-tools[raw]` 兼容。
+- **macOS Tk 文件对话框焦点 bug**：对话框关闭后按钮卡 hover 灰 + 任意点击
+  重开对话框（Tk 8.6.18 仍存在）。`_after_file_dialog(btn)`（重置 hover 填充
+  + 400ms 冷却门 `_dlg_guard_until`）+ `_dlg_cooldown_active()` 入口守卫，
+  应用到添加图片/文件夹与全部浏览按钮（输出目录/白平衡/GPX/水印/画廊）。

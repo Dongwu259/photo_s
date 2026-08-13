@@ -270,6 +270,45 @@ class TestDialogSmokes:
         root.destroy()
 
 
+class TestFileDialogWorkarounds:
+    """macOS Tk native file-dialog focus bugs: after the dialog closes,
+    the button stays stuck in its hover fill and any click can re-open
+    the dialog until the window loses focus."""
+
+    def test_dialog_cooldown_blocks_reattempt(self, tmp_path, monkeypatch):
+        from photo_s import gui as gui_mod
+        calls = []
+        monkeypatch.setattr(gui_mod.filedialog, "askopenfilenames",
+                            lambda **k: calls.append(1) or [])
+        root, app = _make_app()
+        app._dlg_guard_until = time.monotonic() + 1.0   # dialog just closed
+        app._add_files()
+        assert calls == [], "re-entry within the cooldown must be a no-op"
+        root.destroy()
+
+    def test_after_file_dialog_resets_hover(self):
+        from photo_s.gui import FlatButton, COLORS
+        root, app = _make_app()
+        btn = FlatButton(root, text="Add", command=lambda: None,
+                         bg="#111111", hover_bg="#555555")
+        btn.pack()
+        root.update()
+        btn._on_enter(None)
+        assert btn.cget("bg") == "#555555", "hover fill applied"
+        app._after_file_dialog(btn)
+        assert btn.cget("bg") == "#111111", "hover must reset after dialog"
+        assert app._dlg_cooldown_active()
+        root.destroy()
+
+    def test_after_file_dialog_sets_cooldown_then_expires(self):
+        root, app = _make_app()
+        app._after_file_dialog()
+        assert app._dlg_cooldown_active()
+        app._dlg_guard_until = time.monotonic() - 0.1
+        assert not app._dlg_cooldown_active()
+        root.destroy()
+
+
 class TestProcessingLockout:
     def test_workflow_buttons_state_during_processing(self):
         root, app = _make_app()
@@ -307,6 +346,48 @@ class TestCheckList:
         assert app._append_files([str(tmp_path / "作业")]) == 2
         assert set(app.files) == {top, deep}
         assert app._checked == {top, deep}
+        root.destroy()
+
+    def test_append_skips_unsupported_and_counts(self, tmp_path):
+        """Unsupported files are skipped (not fatal); hidden files are
+        not counted; the count lands in _last_skipped for the caller."""
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        (tmp_path / "说明.txt").write_bytes(b"not an image")
+        (tmp_path / ".DS_Store").write_bytes(b"junk")
+        added = app._append_files([str(tmp_path)])
+        assert added == 1
+        assert app.files == [a]
+        assert app._last_skipped == 1, "txt counted, hidden file not"
+        root.destroy()
+
+    def test_append_unsupported_file_paths_skipped(self, tmp_path):
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        txt = tmp_path / "readme.txt"
+        txt.write_bytes(b"x")
+        added = app._append_files([a, str(txt)])
+        assert added == 1
+        assert app.files == [a]
+        assert app._last_skipped == 1
+        root.destroy()
+
+    def test_add_folder_notifies_skipped(self, tmp_path, monkeypatch):
+        """Adding a folder with mixed content imports the images and
+        pops a reminder about the skipped files."""
+        from photo_s import gui as gui_mod
+        a = _img(tmp_path / "a.jpg")
+        (tmp_path / "x.txt").write_bytes(b"nope")
+        shown = []
+        monkeypatch.setattr(gui_mod.filedialog, "askdirectory",
+                            lambda **k: str(tmp_path))
+        monkeypatch.setattr(gui_mod.messagebox, "showinfo",
+                            lambda *a, **k: shown.append(a))
+        root, app = _make_app()
+        app._add_folder()
+        assert app.files == [a]
+        assert len(shown) == 1
+        assert "跳过 1" in shown[0][1] or "skipped 1" in shown[0][1]
         root.destroy()
 
     def test_toggle_and_checked_files(self, tmp_path):

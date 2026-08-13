@@ -189,6 +189,8 @@ STRINGS = {
         "files_count_checked": "{n} 个文件 · 已勾选 {m} 个",
         "check_none": "请先勾选要处理的图片（勾选框切换，用「全选/全不选」按钮批量切换）",
         "check_toggle_all": "全选/全不选",
+        "dlg_skipped": "已导入 {n} 张图片，跳过 {m} 个不支持的文件",
+        "dlg_no_supported": "未找到支持的图片（跳过 {m} 个不支持的文件）",
         "hint_dnd": "将图片或文件夹拖入列表，或使用上方按钮添加",
         "hint_no_dnd": "使用上方按钮添加图片文件（安装 tkinterdnd2 可启用拖放）",
         "col_name": "文件名",
@@ -496,6 +498,8 @@ STRINGS = {
         "files_count_checked": "{n} files · {m} checked",
         "check_none": "Check the images to process first (use the checkboxes, or the check-all button)",
         "check_toggle_all": "Check all / none",
+        "dlg_skipped": "Imported {n} images, skipped {m} unsupported files",
+        "dlg_no_supported": "No supported images found (skipped {m} unsupported files)",
         "hint_dnd": "Drag & drop images/folders into the list, or use the buttons above",
         "hint_no_dnd": "Use the buttons above to add images (install tkinterdnd2 for drag & drop)",
         "col_name": "Name",
@@ -2087,29 +2091,38 @@ class PhotoSApp:
 
     def _browse_wb_reference(self):
         """Pick a white-balance reference image (gray card)."""
+        if self._dlg_cooldown_active():
+            return
         from tkinter import filedialog
         path = filedialog.askopenfilename(
             title=self._t("wb_reference"),
             filetypes=[("图片 Images", "*.jpg *.jpeg *.png *.webp *.tif *.tiff")])
+        self._after_file_dialog()
         if path:
             self.wb_reference.set(path)
 
     def _browse_gpx(self):
         """Pick a GPX track file."""
+        if self._dlg_cooldown_active():
+            return
         from tkinter import filedialog
         path = filedialog.askopenfilename(
             title=self._t("gpx_trace"),
             filetypes=[("GPX", "*.gpx"), ("All Files", "*.*")])
+        self._after_file_dialog()
         if path:
             self.gpx_trace.set(path)
 
     def _browse_watermark_image(self):
         """Pick a watermark overlay image via file dialog."""
+        if self._dlg_cooldown_active():
+            return
         from tkinter import filedialog
         path = filedialog.askopenfilename(
             title=self._t("wm_image"),
             filetypes=[("图片 Images", "*.png *.jpg *.jpeg *.webp"),
                        ("All files", "*.*")])
+        self._after_file_dialog()
         if path:
             self.watermark_image.set(path)
 
@@ -2747,11 +2760,17 @@ class PhotoSApp:
         out_var = tk.StringVar(value=self.output_dir.get())
         ttk.Entry(out_row, textvariable=out_var, font=FONT_BODY).pack(
             side="left", fill="x", expand=True)
+
+        def _browse_out():
+            if self._dlg_cooldown_active():
+                return
+            picked = filedialog.askdirectory(title=self._t("gallery_out"))
+            self._after_file_dialog()
+            if picked:
+                out_var.set(picked)
+
         FlatButton(
-            out_row, text=self._t("browse"),
-            command=lambda: out_var.set(
-                filedialog.askdirectory(title=self._t("gallery_out"))
-                or out_var.get()),
+            out_row, text=self._t("browse"), command=_browse_out,
             bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
             font=FONT_SMALL, padx=10, pady=3,
             border_color=COLORS["border"]).pack(side="left", padx=(8, 0))
@@ -3491,8 +3510,24 @@ class PhotoSApp:
         win.protocol("WM_DELETE_WINDOW", on_close)
         threading.Thread(target=scan_thread, daemon=True).start()
 
+    def _after_file_dialog(self, btn=None):
+        """Work around the macOS Tk native-file-dialog focus bug: after
+        the dialog closes, Tk can re-deliver the closing click into the
+        window (re-opening the dialog on the next click anywhere) and
+        leaves the button stuck in its hover fill (the Leave event was
+        eaten by the dialog). Reset the hover look and gate dialog
+        re-entry for a short cooldown."""
+        if btn is not None:
+            btn._on_leave(None)
+        self._dlg_guard_until = time.monotonic() + 0.4
+
+    def _dlg_cooldown_active(self) -> bool:
+        return time.monotonic() < getattr(self, "_dlg_guard_until", 0.0)
+
     def _add_files(self):
         """Open file dialog to add image files."""
+        if self._dlg_cooldown_active():
+            return
         extensions = []
         for ext in sorted(INPUT_EXTENSIONS):
             extensions.append(f"*{ext}")
@@ -3515,27 +3550,52 @@ class PhotoSApp:
             title=self._t("add_images"),
             filetypes=filetypes,
         )
+        self._after_file_dialog(self.add_files_btn)
 
         if paths:
-            self._append_files(list(paths))
-
-    def _add_folder(self):
-        """Open folder dialog and scan for images."""
-        folder = filedialog.askdirectory(title=self._t("add_folder"))
-        if folder:
-            images = scan_directory(folder, recursive=False)
-            if not images:
+            added = self._append_files(list(paths))
+            if added == 0 and self._last_skipped:
                 messagebox.showinfo(
                     self._t("dlg_no_images_title"),
-                    self._t("dlg_no_images"),
-                )
+                    self._t("dlg_no_supported", m=self._last_skipped))
+            elif self._last_skipped:
+                messagebox.showinfo(
+                    self._t("dlg_added_title"),
+                    self._t("dlg_skipped", n=added, m=self._last_skipped))
+
+    def _add_folder(self):
+        """Open folder dialog and scan for images (recursively)."""
+        if self._dlg_cooldown_active():
+            return
+        folder = filedialog.askdirectory(title=self._t("add_folder"))
+        self._after_file_dialog(self.add_folder_btn)
+        if folder:
+            images = scan_directory(folder, recursive=True)
+            skipped = self._count_unsupported(folder)
+            if not images:
+                if skipped:
+                    messagebox.showinfo(
+                        self._t("dlg_no_images_title"),
+                        self._t("dlg_no_supported", m=skipped))
+                else:
+                    messagebox.showinfo(
+                        self._t("dlg_no_images_title"),
+                        self._t("dlg_no_images"))
                 return
             added = self._append_files(images)
             if added == 0:
                 messagebox.showinfo(
+                    self._t("dlg_no_images_title"),
+                    self._t("dlg_no_images"))
+                return
+            if skipped:
+                messagebox.showinfo(
                     self._t("dlg_added_title"),
-                    self._t("dlg_added", n=len(images)),
-                )
+                    self._t("dlg_skipped", n=added, m=skipped))
+            else:
+                messagebox.showinfo(
+                    self._t("dlg_added_title"),
+                    self._t("dlg_added", n=added))
 
     def _total_size(self) -> int:
         """Total size of listed files, ignoring files that no longer exist."""
@@ -3629,25 +3689,45 @@ class PhotoSApp:
         self._refresh_file_list()
         self._update_stats()
 
+    def _count_unsupported(self, directory) -> int:
+        """Count non-hidden files under ``directory`` that PhotoS cannot
+        read (anything outside engine.ALL_INPUT_EXTENSIONS)."""
+        count = 0
+        for root, dirs, files in os.walk(directory):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for f in files:
+                if f.startswith("."):
+                    continue
+                if os.path.splitext(f)[1].lower() not in ALL_INPUT_EXTENSIONS:
+                    count += 1
+        return count
+
     def _append_files(self, new_paths: List[str]) -> int:
         """Dedupe-append paths to the file list (queued when processing).
 
-        Returns the number of newly added paths.
+        Unsupported files are skipped (counted into ``self._last_skipped``
+        for the caller to notify). Returns the number of newly added paths.
         """
+        self._last_skipped = 0
         added = 0
         fresh = []
         for p in new_paths:
             if os.path.isdir(p):
                 # recursive: a folder may hold the photos in subfolders
+                self._last_skipped += self._count_unsupported(p)
                 for img in scan_directory(p, recursive=True):
                     if img not in self.files:
                         self.files.append(img)
                         fresh.append(img)
                         added += 1
-            elif os.path.isfile(p) and p not in self.files:
-                self.files.append(p)
-                fresh.append(p)
-                added += 1
+            elif os.path.isfile(p):
+                if os.path.splitext(p)[1].lower() not in ALL_INPUT_EXTENSIONS:
+                    self._last_skipped += 1
+                    continue
+                if p not in self.files:
+                    self.files.append(p)
+                    fresh.append(p)
+                    added += 1
 
         if fresh:
             # new files start checked (default: process everything added)
@@ -3661,6 +3741,7 @@ class PhotoSApp:
                     if p not in self._queued_files:
                         self._queued_files.append(p)
         return added
+        return added
 
     def _on_drop(self, event):
         """Handle drag-and-drop of files/folders onto the file list."""
@@ -3670,11 +3751,20 @@ class PhotoSApp:
             paths = event.data.split()
 
         if paths:
-            if not self._append_files(list(paths)):
+            added = self._append_files(list(paths))
+            if added == 0:
+                if self._last_skipped:
+                    messagebox.showinfo(
+                        self._t("dlg_no_images_title"),
+                        self._t("dlg_no_supported", m=self._last_skipped))
+                else:
+                    messagebox.showinfo(
+                        self._t("dlg_no_images_title"),
+                        self._t("dlg_drop_none"))
+            elif self._last_skipped:
                 messagebox.showinfo(
-                    self._t("dlg_no_images_title"),
-                    self._t("dlg_drop_none"),
-                )
+                    self._t("dlg_added_title"),
+                    self._t("dlg_skipped", n=added, m=self._last_skipped))
 
     def _clear_files(self):
         """Clear all files from the list."""
@@ -3754,7 +3844,10 @@ class PhotoSApp:
 
     def _browse_output_dir(self):
         """Browse for output directory."""
+        if self._dlg_cooldown_active():
+            return
         folder = filedialog.askdirectory(title=self._t("sec_output"))
+        self._after_file_dialog()
         if folder:
             self.output_dir.set(folder)
 

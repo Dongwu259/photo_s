@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-416%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-422%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **PhotoS** is a cross-platform batch image processing tool with **both GUI and CLI**. Built for photographers who need to deliver images at specific sizes, and for AI agents that need reliable image processing pipelines.
@@ -21,7 +21,7 @@
 | Batch compress | ✅ | ✅ | JPEG/WebP/HEIC/AVIF quality tuning |
 | Target size mode | ✅ | ✅ | Auto-tune quality to fit under a target file size |
 | Format convert | ✅ | ✅ | JPEG / PNG / WebP / TIFF / BMP / HEIC / AVIF |
-| RAW decode | ✅ | ✅ | 22+ camera RAW formats via rawpy |
+| RAW decode | ✅ | ✅ | 22+ camera RAW formats, built-in (rawpy/libraw) |
 | Resize / Scale | ✅ | ✅ | Max dimensions, percentage, or longest-side cap |
 | Tone & color | ✅ | ✅ | Brightness/contrast/saturation/gamma/sharpen, B&W, sepia |
 | White balance | — | ✅ | `--wb 5600` Kelvin, or `--wb-from ref.jpg` sample a gray card |
@@ -81,7 +81,6 @@ pip install photo-s-tools
 pip install photo-s-tools[all]       # everything
 pip install photo-s-tools[heic]      # HEIC support
 pip install photo-s-tools[avif]      # AVIF support
-pip install photo-s-tools[raw]       # RAW processing
 pip install photo-s-tools[watch]     # folder watching
 pip install photo-s-tools[exif]      # EXIF editing
 pip install photo-s-tools[enhance]   # NLM denoise + auto-straighten (opencv)
@@ -292,7 +291,7 @@ See [docs/PLUGINS.md](docs/PLUGINS.md) for the full API, including operation pro
 | TIFF | ✅ | ✅ | LZW compression |
 | BMP | ✅ | ✅ | |
 | ICO | ✅ | ✅ | |
-| RAW (22+ formats) | ✅ | — | via `rawpy` (libraw) |
+| RAW (22+ formats) | ✅ | — | built-in via `rawpy` (libraw) |
 
 ---
 
