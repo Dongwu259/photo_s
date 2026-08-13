@@ -1512,10 +1512,14 @@ def _parse_usercomment(text: str) -> dict:
     if _USERCOMMENT_PREFIX not in text:
         return out
     seg = text.split(_USERCOMMENT_PREFIX, 1)[1]
-    for pair in seg.split():
-        if "=" not in pair:
+    tokens = seg.split()
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if "=" not in tok:
+            i += 1
             continue
-        k, _, v = pair.partition("=")
+        k, _, v = tok.partition("=")
         v = v.strip()
         if k == "rating":
             try:
@@ -1525,7 +1529,10 @@ def _parse_usercomment(text: str) -> dict:
         elif k == "keywords":
             out["keywords"] = [x.strip() for x in v.split(",") if x.strip()]
         elif k == "title":
-            out["title"] = v
+            # title is written last and may contain spaces: join the rest
+            out["title"] = " ".join([v] + tokens[i + 1:]).strip()
+            break
+        i += 1
     return out
 
 

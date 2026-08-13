@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-384%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-406%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **PhotoS** is a cross-platform batch image processing tool with **both GUI and CLI**. Built for photographers who need to deliver images at specific sizes, and for AI agents that need reliable image processing pipelines.
@@ -36,13 +36,13 @@
 | Auto folder organize | ✅ | ✅ | `--organize date-camera` subfolder creation |
 | Watermark | ✅ | ✅ | Text + image overlay, 7 positions |
 | Multi-size output | ✅ | ✅ | `--sizes thumb:480x,screen:1920x` |
-| Metadata tagging | — | ✅ | `exif --rating` / `--keywords` / `--caption` batch tag (UserComment) |
-| Metadata filter | — | ✅ | `exif --show --rating-min 3 --keywords beach` find tagged photos |
+| Metadata tagging | ✅ | ✅ | `exif --rating` / `--keywords` / `--caption` batch tag (UserComment) |
+| Metadata filter | ✅ | ✅ | `exif --show --rating-min 3 --keywords beach` find tagged photos |
 | Metadata import | — | ✅ | `exif --from-csv meta.csv` batch write from spreadsheet |
 | Culling | — | ✅ | `photo-s cull` exposure/sharpness filter |
-| Burst keep-sharpest | — | ✅ | `dedup --action keep-sharpest` pick the sharpest of a burst |
+| Burst keep-sharpest | ✅ | ✅ | `dedup --action keep-sharpest` pick the sharpest of a burst |
 | Checksum manifest | — | ✅ | `photo-s hash` SHA-256 archive integrity + `--verify` |
-| HTML gallery | — | ✅ | `photo-s gallery` self-contained index.html + thumbs |
+| HTML gallery | ✅ | ✅ | `photo-s gallery` self-contained index.html + thumbs |
 | Presets | ✅ | ✅ | Save/load named configs |
 | Multi-profile batch | — | ✅ | `--profiles web,thumb` one input set, N outputs |
 | Parallel processing | ✅ | ✅ | `-j 8` multi-threaded |
@@ -194,7 +194,11 @@ photo-s gui      # Explicit GUI mode
 ```
 
 GUI features: Chinese/English language switch, drag-and-drop (needs `pip install photo-s-tools[gui]`),
-cancellable batch processing, before/after comparison, and an About dialog.
+cancellable batch processing, before/after comparison, a **review & rate lightbox**
+(←/→ navigation, 0-5 stars, keywords/title, rating & keyword filters — writes EXIF),
+a **duplicate viewer** (side-by-side groups with sharpness scores, keep-checkboxes,
+move-to-trash instead of delete), and **HTML gallery export**. Tagged photos can then be
+filtered in the CLI (`photo-s exif --rating-min 4 --list`) or used by AI agents.
 
 > GUI changes & interface contract: [`docs/GUI_CHANGES.md`](docs/GUI_CHANGES.md)
 

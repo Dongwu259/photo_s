@@ -1,6 +1,6 @@
 # PhotoS GUI 变更文档（供其他 Agent 对接）
 
-> 本文档记录 GUI 三轮改动的全部内容、接口契约和后续开发约定。
+> 本文档记录 GUI 六轮改动的全部内容、接口契约和后续开发约定。
 > 涉及文件：`photo_s/gui.py`（重写）、`photo_s/engine.py`（取消支持）、
 > `pyproject.toml`（gui 可选依赖）、`tests/test_engine.py`（新增测试）。
 
@@ -14,6 +14,8 @@
 | 第二轮 | UI 重做 | 修复右侧设置栏遮挡、去除全部 emoji、FlatButton、ttk 原生控件 |
 | 第三轮 | 国际化 | 中/英语言切换、关于窗口、文案全部抽到 STRINGS 字典 |
 | 第四轮 | 工具箱补全 | 4 个新区块（水印/多尺寸/影调/构图）、双击对比、处理队列追加 |
+| 第五轮 | 界面现代化 | FlatButton 改 Canvas 药丸、卡片化布局、clam 主题（主题切换全量重染 ttk）、滚动抖动修复（卡片级绑定 + 边界吸附 + 去抖）、设置/MCP 对话框、插件管理器 |
+| 第六轮 | 工作流补全 | 审查打分灯箱、去重查看器、画廊导出、摘要对话框可滚动（v1.1.0，见 §8） |
 
 ---
 
@@ -169,3 +171,60 @@ python3 -m pytest tests/ -q     # 218 passed（Sprint 3 后）
 3. Treeview 行 iid 必须是完整路径
 4. 设置面板新增区块遵守 grid 行号分配与 canvas 宽度同步机制
 5. 改 engine 批处理逻辑时保持 `cancel_checker`/`progress_callback` 向后兼容
+
+---
+
+## 8. 第六轮：工作流对话框（v1.1.0）
+
+### 8.1 工具栏与处理期间锁定
+
+文件面板第二行新增三个工作流按钮：`review_btn`（审查打分，主色）、
+`dedup_btn`（去重）、`gallery_btn`（画廊）。`_set_state_recursive` 豁免元组
+新增 `gallery_btn`（只读导出，处理期间可用）；`review_btn`/`dedup_btn`
+处理期间自动禁用（EXIF 写入/文件移动会与管线竞争）。
+
+### 8.2 审查打分灯箱（`_show_review`）
+
+- 入口：选中树行 → 只审查选中；无选中 → 全部文件。
+- **同步 helper（测试直接调用，无 Tk）**：
+  `_review_scan(paths, progress_cb) -> {path: meta}`、
+  `_review_save(path, rating, keywords, title) -> (ok, msg)`（差异计算 →
+  `engine.apply_exif_tags` 部分更新：只改传入字段，其余 PhotoS: 段保留；
+  PNG/无 piexif 逐文件捕获错误返回，不抛）。
+- 交互：←/→ 导航、0-5 数字键评分（焦点在 Entry 时忽略）、关键词/标题、
+  最低评分 + 关键词过滤（语义与 CLI `exif --show` 一致：`(rating or 0)`
+  比较、关键词子串任一命中）、Escape/关闭前自动保存差异。
+- 引擎修复：`_parse_usercomment` 多词标题回环（title 段为末段，剩余 token 合并）。
+
+### 8.3 去重查看器（`_show_dedup`）
+
+- **同步 helper**：`_dedup_scan(paths, threshold, progress_cb) -> (groups, scores)`
+  （`dedup.find_duplicates` + 每图 `metrics.compute_blur_score`）、
+  `_dedup_trash_path`/`_dedup_move_to_trash`（碰撞后缀 `a_1.jpg` 逻辑同
+  dedup.py，移入首图目录的 `_duplicates_trash/`，**不删除**）。
+- 交互：后台扫描（进度）→ 分组卡片（缩略图 + 清晰度 + ★最锐预勾选保留）
+  → 执行：未勾选移入回收子文件夹（确认对话框）→ 主窗口 `self.files`
+  同步剔除 + `_refresh_file_list`。
+
+### 8.4 画廊导出（`_show_gallery_export`）
+
+标题 / 缩略图尺寸（240-600）/ 输出目录 → 后台 `_gallery_build`（同步包装
+`gallery.build_gallery`，测试可直接调）→ 完成显示路径 + 浏览器打开按钮。
+
+### 8.5 摘要对话框（`_show_summary`）
+
+messagebox → 可滚动只读 `tk.Text` Toplevel（长错误列表不再截断）+
+「查看前后对比」按钮（`sum_view_compare`）。
+
+### 8.6 线程约定（重要）
+
+worker 线程**禁止**任何 Tk 调用（含 `win.after`——非主循环下会抛
+`RuntimeError: main thread is not in main loop`）。统一模式：
+worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费；
+对话框销毁后 drain 自动停止（`winfo_exists` 守卫）。
+
+### 8.7 测试
+
+新增 `tests/test_gui_workflows.py`（15 个）：同步 helper 全覆盖 +
+对话框冒烟（有界 `root.update()` 轮询，不点启动按钮、不挂线程）。
+全量 406 个。

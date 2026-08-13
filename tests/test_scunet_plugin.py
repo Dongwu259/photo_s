@@ -31,15 +31,19 @@ from photo_s import plugin as plugin_mod
 from photo_s_plugin_scunet import ScunetPlugin
 
 
-def _make_tiny_onnx(path):
-    """Build a tiny identity 1x1-Conv ONNX model (~200 bytes)."""
+def _make_tiny_onnx(path, scale=1.0):
+    """Build a tiny scale*identity 1x1-Conv ONNX model (~200 bytes).
+
+    ``scale=1`` is the identity (output == input); ``scale=2`` doubles every
+    pixel so strength-blend tests can assert exact mix ratios.
+    """
     import numpy as np
     from onnx import helper, numpy_helper, TensorProto
 
     X = helper.make_tensor_value_info("X", TensorProto.FLOAT, [1, 3, 64, 64])
     Y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, [1, 3, 64, 64])
     W = numpy_helper.from_array(
-        np.eye(3, dtype=np.float32).reshape(3, 3, 1, 1), name="W")
+        np.eye(3, dtype=np.float32).reshape(3, 3, 1, 1) * scale, name="W")
     node = helper.make_node("Conv", ["X", "W"], ["Y"],
                             kernel_shape=[1, 1], pads=[0, 0, 0, 0])
     graph = helper.make_graph([node], "tiny", [X], [Y], initializer=[W])
@@ -51,14 +55,14 @@ def _make_tiny_onnx(path):
     return path
 
 
-def _setup_env(tmp_path, monkeypatch):
+def _setup_env(tmp_path, monkeypatch, scale=1.0):
     """Point the plugin at local synthetic weights in an isolated cache.
 
     The plugin fetches TWO specs (graph + external-data companion); the tiny
     model is self-contained, so the .data companion is a dummy file with a
     matching sha256 (onnxruntime never reads it for a self-contained graph).
     """
-    model_path = _make_tiny_onnx(tmp_path / "scunet.onnx")
+    model_path = _make_tiny_onnx(tmp_path / "scunet.onnx", scale=scale)
     data_path = tmp_path / "scunet.onnx.data"
     data_path.write_bytes(b"dummy-external-data")
     model_data = model_path.read_bytes()
@@ -107,6 +111,70 @@ class TestScunetDenoise:
         assert open(cached, "rb").read() == model_path.read_bytes()
         assert os.path.isfile(
             os.path.join(models_dir, "scunet_color_25.onnx.data"))
+
+    def test_strength_zero_returns_original(self, tmp_path, monkeypatch):
+        """t(0)=0: the blend must return the untouched input."""
+        _setup_env(tmp_path, monkeypatch, scale=2.0)
+        plugin = ScunetPlugin()
+        img = Image.new("RGB", (64, 64), (120, 100, 80))
+        out = plugin.denoise(img, 0.0, type("C", (), {})())
+        px = out.getpixel((30, 30))
+        assert abs(px[0] - 120) <= 3 and abs(px[1] - 100) <= 3 \
+            and abs(px[2] - 80) <= 3
+
+    def test_strength_full_returns_model_output(self, tmp_path, monkeypatch):
+        """t(15)=1: the full 2x model output must come through."""
+        _setup_env(tmp_path, monkeypatch, scale=2.0)
+        plugin = ScunetPlugin()
+        img = Image.new("RGB", (64, 64), (120, 100, 80))
+        out = plugin.denoise(img, 15.0, type("C", (), {})())
+        px = out.getpixel((30, 30))
+        assert abs(px[0] - 240) <= 3 and abs(px[1] - 200) <= 3 \
+            and abs(px[2] - 160) <= 3
+
+    def test_strength_half_blends_50_50(self, tmp_path, monkeypatch):
+        """t(7.5)=0.5: output must sit exactly between input and model."""
+        _setup_env(tmp_path, monkeypatch, scale=2.0)
+        plugin = ScunetPlugin()
+        img = Image.new("RGB", (64, 64), (120, 100, 80))
+        out = plugin.denoise(img, 7.5, type("C", (), {})())
+        px = out.getpixel((30, 30))
+        assert abs(px[0] - 180) <= 3 and abs(px[1] - 150) <= 3 \
+            and abs(px[2] - 120) <= 3
+
+    def test_strength_out_of_range_clamped(self, tmp_path, monkeypatch):
+        """t clamps: strength 99 == 15 (full), -3 == 0 (original)."""
+        _setup_env(tmp_path, monkeypatch, scale=2.0)
+        plugin = ScunetPlugin()
+        img = Image.new("RGB", (64, 64), (120, 100, 80))
+        full = plugin.denoise(img, 99.0, type("C", (), {})()).getpixel((30, 30))
+        orig = plugin.denoise(img, -3.0, type("C", (), {})()).getpixel((30, 30))
+        assert abs(full[0] - 240) <= 3
+        assert abs(orig[0] - 120) <= 3
+
+    def test_img_info_preserved(self, tmp_path, monkeypatch):
+        """EXIF/ICC in img.info must survive the blend (contract parity)."""
+        _setup_env(tmp_path, monkeypatch)
+        plugin = ScunetPlugin()
+        img = Image.new("RGB", (64, 64), (120, 100, 80))
+        img.info["icc_profile"] = b"fake-icc"
+        out = plugin.denoise(img, 10.0, type("C", (), {})())
+        assert out.info.get("icc_profile") == b"fake-icc"
+
+
+class TestBlend:
+    """Pure math of the strength→t mapping (no model, no runtime)."""
+
+    def test_blend_mapping(self):
+        import numpy as np
+        import photo_s_plugin_scunet.onnx as onnx_mod
+        orig = np.full((2, 2, 3), 0.4, dtype=np.float32)
+        den = np.full((2, 2, 3), 0.8, dtype=np.float32)
+        assert np.allclose(onnx_mod._blend(orig, den, 0.0), 0.4)
+        assert np.allclose(onnx_mod._blend(orig, den, 7.5), 0.6)
+        assert np.allclose(onnx_mod._blend(orig, den, 15.0), 0.8)
+        assert np.allclose(onnx_mod._blend(orig, den, 99.0), 0.8)   # clamp up
+        assert np.allclose(onnx_mod._blend(orig, den, -3.0), 0.4)   # clamp down
 
 
 class TestScunetInEngine:

@@ -39,6 +39,15 @@ class TestExifTagAndFilter:
         assert m["keywords"] == ["beach", "trip"]
         assert m["title"] == "Summer"
 
+    def test_write_and_read_multiword_title(self, tmp_path):
+        """Multi-word titles round-trip: title= is the last UserComment
+        segment, so the parser must join the remaining tokens."""
+        img = _img(tmp_path / "a.jpg")
+        rc = run_cli(["exif", img, "--title", "Summer Trip 2026"])
+        assert rc == 0
+        m = read_exif_metadata(img)
+        assert m["title"] == "Summer Trip 2026"
+
     def test_roundtrip_via_subprocess_persists(self, tmp_path):
         """Regression: running as `python -m photo_s.cli` (__main__) used to
         truncate the written EXIF; the console-script path is equivalent."""

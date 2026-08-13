@@ -2,8 +2,12 @@
 PhotoS SCUNet plugin - ONNX inference (onnxruntime, optional dependency).
 
 SCUNet is a fixed-noise-level blind denoiser: one model handles a range of
-ISO/noise levels, so ``--denoise N`` acts as the on/off trigger (strength is
-accepted and currently passed through but not used to scale the model).
+ISO/noise levels, so the model itself has no strength knob. ``--denoise N``
+is therefore mapped onto a linear blend between the original and the fully
+denoised output: ``out = orig * (1 - t) + denoised * t`` with
+``t = clip(N / 15, 0, 1)`` — N >= 15 gives the full model output, N = 0 the
+untouched original (the core NLM's useful range is ~3-20, so 15+ = "strong"
+feels consistent).
 
 Contract mirrors photo_s/denoise.py: alpha preserved, ``img.info`` (EXIF/ICC)
 copied onto the result. Raises RuntimeError if onnxruntime is missing.
@@ -13,6 +17,17 @@ import numpy as np
 from PIL import Image
 
 _SESSIONS = {}
+
+
+def _blend(orig, denoised, strength):
+    """Linear mix of the original and denoised float arrays by strength.
+
+    ``t = clip(strength / 15, 0, 1)``: strength 0 keeps the original
+    untouched, strength >= 15 returns the full model output. Strength is
+    clamped, so out-of-range values degrade gracefully.
+    """
+    t = min(max(strength / 15.0, 0.0), 1.0)
+    return orig * (1.0 - t) + denoised * t
 
 
 def _ort():
@@ -43,9 +58,10 @@ def _session(path):
 def run_scunet(img: Image.Image, strength: float, model_path: str) -> Image.Image:
     """Denoise ``img`` through the SCUNet ONNX model at ``model_path``.
 
-    ``strength`` is accepted for interface parity; SCUNet is a fixed-noise
-    model so it currently just triggers denoising. Alpha is preserved;
-    EXIF/ICC in ``img.info`` is copied onto the result.
+    ``strength`` scales the effect by linearly blending the model output
+    with the original (see :func:`_blend`): 0 = untouched, >= 15 = full
+    model output. Alpha is preserved; EXIF/ICC in ``img.info`` is copied
+    onto the result.
     """
     alpha = None
     if img.mode == "RGBA":
@@ -64,9 +80,10 @@ def run_scunet(img: Image.Image, strength: float, model_path: str) -> Image.Imag
     input_name = sess.get_inputs()[0].name
     out = sess.run(None, {input_name: tensor})[0]
 
-    # [1,C,H,W] → [H,W,C], clamp, back to 0..255 uint8
-    out = np.transpose(out[0], (1, 2, 0))
-    out = np.clip(out, 0.0, 1.0) * 255.0
+    # [1,C,H,W] → [H,W,C], mix by strength, clamp, back to 0..255 uint8
+    denoised = np.transpose(out[0], (1, 2, 0))
+    mixed = _blend(arr, denoised, float(strength))
+    out = np.clip(mixed, 0.0, 1.0) * 255.0
     result = Image.fromarray(out.astype(np.uint8), mode="RGB")
     result.info = dict(img.info)
 

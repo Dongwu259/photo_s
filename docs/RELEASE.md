@@ -24,7 +24,7 @@
 
 ```bash
 # 1. 本地验证（必须全绿）
-python3 -m pytest tests/ -q                 # 378 个
+python3 -m pytest tests/ -q                 # 406 个
 python3 -m photo_s.cli --help               # CLI 冒烟
 python3 -m photo_s.cli plugin list --json   # 官方插件目录
 
@@ -60,7 +60,7 @@ HuggingFace `Heliosoph/scunet-onnx`（MIT，由官方 cszn/SCUNet 权重重新�
 
 # 2. 打 tag 即发布（publish.yml 的 publish-plugin job，
 #    在 plugins/scunet/ 下 python -m build，wheel 不带权重）
-git tag scunet-v0.1.0 && git push origin scunet-v0.1.0
+git tag scunet-v0.2.0 && git push origin scunet-v0.2.0
 
 # 3. 验证：安装后 photo-s 能看到 provider
 pip install photo-s-tools photo-s-plugin-scunet

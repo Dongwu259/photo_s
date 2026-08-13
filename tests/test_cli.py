@@ -279,10 +279,11 @@ class TestCliJsonCoverage:
         assert not os.path.exists(str(out))  # nothing processed
 
     def test_version_flag(self, capsys):
+        from photo_s import __version__
         with pytest.raises(SystemExit) as exc:
             run_cli(["--version"])
         assert exc.value.code == 0
-        assert "photo-s 1.0.0" in capsys.readouterr().out
+        assert "photo-s {}".format(__version__) in capsys.readouterr().out
 
     def test_convert_format_case_insensitive(self, tmp_path, capsys):
         # regression: -f png (lowercase) used to be rejected by choices

@@ -25,6 +25,10 @@ photo-s plugin info scunet
 photo-s batch ~/highiso/ --denoise 12
 ```
 
+> 强度语义：SCUNet 是固定噪声级盲降噪模型，`N` 映射为原始图与全量降噪
+> 输出的线性混合 `t = clip(N/15, 0, 1)`——`N=0` 原图不动，`N>=15` 全量
+> 模型输出，中间线性过渡（与核心 NLM 的 ~3-20 有效区间手感一致）。
+
 ## 模型权重
 
 使用 SCUNet 彩色降噪 (noise-25) 检查点，由官方 cszn/SCUNet PyTorch 权重

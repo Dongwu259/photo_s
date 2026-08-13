@@ -14,10 +14,12 @@ Features:
 """
 
 import os
+import queue
 import subprocess
 import sys
 import threading
 import time
+import webbrowser
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk, filedialog, messagebox
@@ -52,7 +54,7 @@ except ImportError:
 # ── Constants ───────────────────────────────────────────────────────────────
 
 APP_NAME = "PhotoS"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 WINDOW_WIDTH = 1120
 WINDOW_HEIGHT = 720
 MIN_WIDTH = 980
@@ -295,6 +297,7 @@ STRINGS = {
         "sum_compressed": "压缩后",
         "sum_saved": "节省",
         "sum_ask_compare": "显示压缩对比？",
+        "sum_view_compare": "查看前后对比",
         "compare_title": "压缩对比",
         "compare_header": "压缩前后对比",
         "before": "原始",
@@ -317,6 +320,53 @@ STRINGS = {
         "plugins_err": "❌ {}",
         # Exposure analysis
         "analyze": "曝光分析",
+        "review_btn": "审查打分",
+        "dedup_btn": "去重",
+        "gallery_btn": "画廊",
+        "gallery_title": "导出画廊",
+        "gallery_name": "画廊标题",
+        "gallery_thumb": "缩略图尺寸",
+        "gallery_out": "输出目录",
+        "gallery_generate": "生成画廊",
+        "gallery_generating": "生成中…",
+        "gallery_done": "已生成 {count} 张 → {path}",
+        "gallery_open": "在浏览器打开",
+        "gallery_need_files": "请先添加图片",
+        "gallery_need_dir": "请选择输出目录",
+        "gallery_error": "生成失败: {err}",
+        "op_failed": "操作失败: {err}",
+        "dedup_title": "去重查看",
+        "dedup_scanning": "扫描中… {n}/{total}",
+        "dedup_none": "未发现重复图片",
+        "dedup_group": "第 {i} 组",
+        "dedup_keep": "保留",
+        "dedup_sharpest": "★最锐",
+        "dedup_blur": "锐度",
+        "dedup_execute": "移入回收子文件夹",
+        "dedup_moving": "移动中…",
+        "dedup_moved": "已移动 {n} 张到 {dir}",
+        "dedup_rescan": "重新扫描",
+        "dedup_confirm": "将 {n} 张图片移动到回收子文件夹（不会删除），继续？",
+        "dedup_none_selected": "没有要清理的图片（每组至少保留一张）",
+        "review_title": "审查打分",
+        "review_pos": "{i} / {n}",
+        "review_loading": "读取元数据… {n}/{total}",
+        "review_rating": "评分",
+        "review_keywords": "关键词",
+        "review_title_lbl": "标题",
+        "review_save": "保存",
+        "review_saved": "已保存",
+        "review_save_failed": "写入失败: {err}",
+        "review_filter": "过滤",
+        "review_min_rating": "最低评分",
+        "review_filter_kw": "关键词包含",
+        "review_apply_filter": "应用过滤",
+        "review_clear_filter": "清除过滤",
+        "review_empty": "没有匹配的图片",
+        "review_no_piexif": "⚠️ 未安装 piexif：只能查看，无法写入（pip install photo-s-tools[exif]）",
+        "review_prev": "◀ 上一张",
+        "review_next": "下一张 ▶",
+        "review_none": "请先添加图片",
         "analyze_title": "曝光统计",
         "analyze_none": "请先在文件列表中选择一张图片",
         "analyze_err": "无法读取该图片",
@@ -551,6 +601,7 @@ STRINGS = {
         "sum_compressed": "Compressed",
         "sum_saved": "Saved",
         "sum_ask_compare": "Show before/after comparison?",
+        "sum_view_compare": "View comparison",
         "compare_title": "Comparison",
         "compare_header": "Before & After",
         "before": "Original",
@@ -573,6 +624,53 @@ STRINGS = {
         "plugins_err": "❌ {}",
         # Exposure analysis
         "analyze": "Exposure analysis",
+        "review_btn": "Review & Rate",
+        "dedup_btn": "Duplicates",
+        "gallery_btn": "Gallery",
+        "gallery_title": "Export Gallery",
+        "gallery_name": "Gallery title",
+        "gallery_thumb": "Thumbnail size",
+        "gallery_out": "Output directory",
+        "gallery_generate": "Generate",
+        "gallery_generating": "Generating…",
+        "gallery_done": "Generated {count} images → {path}",
+        "gallery_open": "Open in browser",
+        "gallery_need_files": "Add images first",
+        "gallery_need_dir": "Choose an output directory",
+        "gallery_error": "Failed: {err}",
+        "op_failed": "Operation failed: {err}",
+        "dedup_title": "Duplicate Viewer",
+        "dedup_scanning": "Scanning… {n}/{total}",
+        "dedup_none": "No duplicates found",
+        "dedup_group": "Group {i}",
+        "dedup_keep": "Keep",
+        "dedup_sharpest": "★sharpest",
+        "dedup_blur": "blur",
+        "dedup_execute": "Move unchecked to trash",
+        "dedup_moving": "Moving…",
+        "dedup_moved": "Moved {n} images to {dir}",
+        "dedup_rescan": "Rescan",
+        "dedup_confirm": "Move {n} images to a trash subfolder (nothing is deleted). Continue?",
+        "dedup_none_selected": "Nothing to clean up (every group must keep at least one image)",
+        "review_title": "Review & Rate",
+        "review_pos": "{i} / {n}",
+        "review_loading": "Reading metadata… {n}/{total}",
+        "review_rating": "Rating",
+        "review_keywords": "Keywords",
+        "review_title_lbl": "Title",
+        "review_save": "Save",
+        "review_saved": "Saved",
+        "review_save_failed": "Write failed: {err}",
+        "review_filter": "Filter",
+        "review_min_rating": "Min rating",
+        "review_filter_kw": "Keyword contains",
+        "review_apply_filter": "Apply",
+        "review_clear_filter": "Clear",
+        "review_empty": "No matching images",
+        "review_no_piexif": "⚠️ piexif not installed: view only (pip install photo-s-tools[exif])",
+        "review_prev": "◀ Prev",
+        "review_next": "Next ▶",
+        "review_none": "Add images first",
         "analyze_title": "Exposure Stats",
         "analyze_none": "Select an image in the file list first",
         "analyze_err": "Cannot read that image",
@@ -1180,6 +1278,34 @@ class PhotoSApp:
             border_color=COLORS["border"],
         )
         analyze_btn.pack(side="left", padx=(8, 0))
+
+        # Workflow toolbar (review / dedup / gallery). Gallery is exempted
+        # from the processing lockout (read-only export); review/dedup are
+        # auto-disabled during a batch (in-place EXIF writes / file moves
+        # would race the pipeline).
+        wf = tk.Frame(card, bg=COLORS["card"])
+        wf.pack(fill="x", padx=14, pady=(8, 0))
+
+        self.review_btn = FlatButton(
+            wf, text=self._t("review_btn"), command=self._show_review,
+            bg=COLORS["accent"], hover_bg=COLORS["accent_hover"],
+            font=FONT_SMALL,
+        )
+        self.review_btn.pack(side="left")
+
+        self.dedup_btn = FlatButton(
+            wf, text=self._t("dedup_btn"), command=self._show_dedup,
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+        )
+        self.dedup_btn.pack(side="left", padx=(8, 0))
+
+        self.gallery_btn = FlatButton(
+            wf, text=self._t("gallery_btn"), command=self._show_gallery_export,
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+        )
+        self.gallery_btn.pack(side="left", padx=(8, 0))
 
         self.file_count_label = tk.Label(
             toolbar, text=self._t("files_count", n=0), font=FONT_SMALL,
@@ -2505,6 +2631,792 @@ class PhotoSApp:
 
     # ── File Management ─────────────────────────────────────────────────────
 
+    def _gallery_build(self, paths, out_dir, title="PhotoS Gallery",
+                       thumb_size=360):
+        """Sync: build the HTML gallery (thin wrapper so tests can call it
+        without touching Tk)."""
+        from .gallery import build_gallery
+        return build_gallery(list(paths), out_dir, title=title,
+                             thumb_size=thumb_size)
+
+    def _show_gallery_export(self):
+        """Gallery export dialog: title + thumb size + output dir, then
+        build the HTML gallery in a background thread (thumbnail
+        rendering can take a while)."""
+        if not self.files:
+            messagebox.showinfo(self._t("gallery_title"),
+                                self._t("gallery_need_files"))
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title(self._t("gallery_title"))
+        win.geometry("480x360")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=20, pady=16)
+        body.columnconfigure(0, weight=1)
+
+        tk.Label(body, text=self._t("gallery_name"), font=FONT_BODY,
+                 fg=COLORS["text"], bg=COLORS["bg"]).grid(
+            row=0, column=0, sticky="w", pady=(0, 2))
+        title_var = tk.StringVar(value="PhotoS Gallery")
+        ttk.Entry(body, textvariable=title_var, font=FONT_BODY).grid(
+            row=1, column=0, sticky="ew", pady=(0, 10))
+
+        tk.Label(body, text=self._t("gallery_thumb"), font=FONT_BODY,
+                 fg=COLORS["text"], bg=COLORS["bg"]).grid(
+            row=2, column=0, sticky="w", pady=(0, 2))
+        thumb_combo = ttk.Combobox(
+            body, values=("240", "360", "480", "600"),
+            state="readonly", font=FONT_BODY, width=8)
+        thumb_combo.set("360")
+        thumb_combo.grid(row=3, column=0, sticky="w", pady=(0, 10))
+
+        tk.Label(body, text=self._t("gallery_out"), font=FONT_BODY,
+                 fg=COLORS["text"], bg=COLORS["bg"]).grid(
+            row=4, column=0, sticky="w", pady=(0, 2))
+        out_row = tk.Frame(body, bg=COLORS["bg"])
+        out_row.grid(row=5, column=0, sticky="ew", pady=(0, 10))
+        out_var = tk.StringVar(value=self.output_dir.get())
+        ttk.Entry(out_row, textvariable=out_var, font=FONT_BODY).pack(
+            side="left", fill="x", expand=True)
+        FlatButton(
+            out_row, text=self._t("browse"),
+            command=lambda: out_var.set(
+                filedialog.askdirectory(title=self._t("gallery_out"))
+                or out_var.get()),
+            bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
+            font=FONT_SMALL, padx=10, pady=3,
+            border_color=COLORS["border"]).pack(side="left", padx=(8, 0))
+
+        status_lbl = tk.Label(body, text="", font=FONT_SMALL,
+                              fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status_lbl.grid(row=6, column=0, sticky="w", pady=(0, 8))
+
+        btns = tk.Frame(body, bg=COLORS["bg"])
+        btns.grid(row=7, column=0, sticky="w")
+        state = {"output": None}
+
+        # Worker threads must never touch Tk directly: they put UI
+        # callbacks on a queue and a main-thread after-loop drains it
+        # (win.after from a worker raises "main thread is not in main
+        # loop" whenever the mainloop is not running).
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if win.winfo_exists():
+                win.after(80, drain)
+
+        win.after(80, drain)
+
+        def set_status(text, color=None):
+            if win.winfo_exists():
+                status_lbl.configure(
+                    text=text, fg=color or COLORS["text_secondary"])
+
+        def run():
+            out_dir = out_var.get().strip()
+            if not out_dir:
+                schedule(lambda: set_status(
+                    self._t("gallery_need_dir"), COLORS["danger"]))
+                return
+            schedule(lambda: (
+                generate_btn.configure(state="disabled"),
+                set_status(self._t("gallery_generating"))))
+            try:
+                res = self._gallery_build(
+                    list(self.files), out_dir,
+                    title=title_var.get().strip() or "PhotoS Gallery",
+                    thumb_size=int(thumb_combo.get()))
+            except Exception as e:
+                schedule(lambda: _failed(str(e)))
+            else:
+                schedule(lambda: _done(res))
+
+        def _failed(err):
+            if not win.winfo_exists():
+                return
+            generate_btn.configure(state="normal")
+            set_status(self._t("gallery_error", err=err), COLORS["danger"])
+
+        def _done(res):
+            if not win.winfo_exists():
+                return
+            state["output"] = res["output"]
+            generate_btn.configure(state="normal")
+            set_status(self._t("gallery_done", count=res["count"],
+                               path=res["output"]), COLORS["accent"])
+            open_btn.pack(side="left", padx=(8, 0))
+
+        generate_btn = FlatButton(
+            btns, text=self._t("gallery_generate"),
+            command=lambda: threading.Thread(target=run, daemon=True).start(),
+            bg=COLORS["accent"])
+        generate_btn.pack(side="left")
+        open_btn = FlatButton(
+            btns, text=self._t("gallery_open"),
+            command=lambda: state["output"]
+            and webbrowser.open("file://" + state["output"]),
+            bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
+            border_color=COLORS["border"])
+
+    # ── Duplicate viewer ────────────────────────────────────────────────────
+
+    def _dedup_scan(self, paths, threshold=5, progress_cb=None):
+        """Sync: find duplicate groups + per-image blur scores.
+
+        Returns (groups, scores): groups is a list of path-lists (each
+        >= 2 members), scores maps path -> blur score (0.0 on error).
+        Tk-free so tests can call it directly.
+        """
+        from .dedup import find_duplicates
+        from .metrics import compute_blur_score
+
+        dup_groups = find_duplicates(list(paths), threshold=threshold,
+                                     progress_callback=progress_cb)
+        groups = [list(g) for g in dup_groups.values() if len(g) >= 2]
+        scores = {}
+        for group in groups:
+            for p in group:
+                try:
+                    scores[p] = compute_blur_score(p)
+                except Exception:
+                    scores[p] = 0.0
+        return groups, scores
+
+    def _dedup_trash_path(self, path, trash_dir):
+        """Trash destination: trash_dir/basename with a numeric suffix if
+        the name is taken (mirrors dedup.py move collision logic)."""
+        dest = os.path.join(trash_dir, os.path.basename(path))
+        stem, ext = os.path.splitext(dest)
+        n = 1
+        while os.path.exists(dest):
+            dest = "{}_{}{}".format(stem, n, ext)
+            n += 1
+        return dest
+
+    def _dedup_move_to_trash(self, paths, trash_dir, progress_cb=None):
+        """Sync: move ``paths`` into ``trash_dir`` (created if needed).
+        Returns (moved, failed). Tk-free so tests can call it directly."""
+        moved, failed = 0, 0
+        try:
+            os.makedirs(trash_dir, exist_ok=True)
+        except OSError:
+            return 0, len(paths)
+        for i, p in enumerate(paths):
+            try:
+                os.rename(p, self._dedup_trash_path(p, trash_dir))
+                moved += 1
+            except OSError:
+                failed += 1
+            if progress_cb:
+                progress_cb(i + 1, len(paths))
+        return moved, failed
+
+    def _show_dedup(self):
+        """Duplicate viewer: scan in a background thread, render groups
+        with per-image keep-checkboxes (sharpest pre-checked), move the
+        unchecked ones into a ``_duplicates_trash`` subfolder."""
+        if not self.files:
+            messagebox.showinfo(self._t("dedup_title"),
+                                self._t("gallery_need_files"))
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title(self._t("dedup_title"))
+        win.geometry("980x660")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+        canvas_unbind_safe(win)
+
+        header = tk.Frame(win, bg=COLORS["bg"])
+        header.pack(fill="x", padx=20, pady=(16, 4))
+        tk.Label(header, text=self._t("dedup_title"),
+                 font=(PLATFORM_FONTS["title"], 14, "bold"),
+                 fg=COLORS["text"], bg=COLORS["bg"]).pack(side="left")
+        status_lbl = tk.Label(header, text="", font=FONT_SMALL,
+                              fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status_lbl.pack(side="left", padx=(16, 0))
+
+        # Scrollable group area
+        holder = tk.Frame(win, bg=COLORS["bg"])
+        holder.pack(fill="both", expand=True, padx=20, pady=8)
+        canvas = tk.Canvas(holder, bg=COLORS["bg"], highlightthickness=0,
+                           borderwidth=0)
+        sb = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = tk.Frame(canvas, bg=COLORS["bg"])
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _sync_scroll(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        inner.bind("<Configure>", _sync_scroll)
+
+        def _on_mw(event):
+            if inner.winfo_reqheight() > canvas.winfo_height():
+                canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+
+        canvas.bind("<Enter>",
+                    lambda e: canvas.bind_all("<MouseWheel>", _on_mw))
+        canvas.bind("<Leave>",
+                    lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        footer = tk.Frame(win, bg=COLORS["bg"])
+        footer.pack(fill="x", padx=20, pady=(4, 16))
+
+        state = {"groups": [], "scores": {}, "checks": [], "sharp": set()}
+
+        # Worker→UI marshalling queue (see gallery dialog for rationale)
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if win.winfo_exists():
+                win.after(80, drain)
+
+        win.after(80, drain)
+
+        def render():
+            for w in inner.winfo_children():
+                w.destroy()
+            state["checks"] = []
+            state["sharp"] = set()
+            groups, scores = state["groups"], state["scores"]
+            if not groups:
+                tk.Label(inner, text=self._t("dedup_none"), font=FONT_BODY,
+                         fg=COLORS["text_secondary"],
+                         bg=COLORS["bg"]).pack(pady=40)
+                execute_btn.configure(state="disabled")
+                return
+            from PIL import Image, ImageTk
+            for gi, group in enumerate(groups):
+                card = tk.Frame(inner, bg=COLORS["card"], bd=0,
+                                highlightthickness=0)
+                card.pack(fill="x", padx=2, pady=(0, 10))
+                head = tk.Frame(card, bg=COLORS["card"])
+                head.pack(fill="x", padx=12, pady=(10, 4))
+                tk.Label(head, text=self._t("dedup_group", i=gi + 1),
+                         font=(PLATFORM_FONTS["body"], 12, "bold"),
+                         fg=COLORS["text"], bg=COLORS["card"]).pack(
+                    side="left")
+                tk.Label(head, text="· {}".format(
+                    self._t("files_count", n=len(group))), font=FONT_SMALL,
+                    fg=COLORS["text_secondary"], bg=COLORS["card"]).pack(
+                    side="left", padx=(8, 0))
+                row = tk.Frame(card, bg=COLORS["card"])
+                row.pack(fill="x", padx=12, pady=(0, 12))
+                sharpest = max(group,
+                               key=lambda p: scores.get(p, 0.0))
+                state["sharp"].add(sharpest)
+                for p in group:
+                    cell = tk.Frame(row, bg=COLORS["card"])
+                    cell.pack(side="left", padx=6)
+                    try:
+                        img = Image.open(p)
+                        img.thumbnail((150, 150), Image.LANCZOS)
+                        photo = ImageTk.PhotoImage(img)
+                        lbl = tk.Label(cell, image=photo, bg=COLORS["bg"],
+                                       bd=0, highlightthickness=0)
+                        lbl.image = photo  # keep the reference alive
+                        lbl.pack()
+                    except Exception:
+                        tk.Label(cell, text="?", width=12, height=6,
+                                 bg=COLORS["bg"],
+                                 fg=COLORS["text_secondary"]).pack()
+                    cap = os.path.basename(p)
+                    if len(cap) > 16:
+                        cap = cap[:15] + "…"
+                    star = " " + self._t("dedup_sharpest") \
+                        if p == sharpest else ""
+                    tk.Label(cell, text=cap + star, font=FONT_TINY,
+                             fg=COLORS["text_secondary"],
+                             bg=COLORS["card"]).pack()
+                    tk.Label(cell, text="{} {:.1f}".format(
+                        self._t("dedup_blur"), scores.get(p, 0.0)),
+                        font=FONT_TINY, fg=COLORS["text_secondary"],
+                        bg=COLORS["card"]).pack()
+                    var = tk.BooleanVar(value=(p == sharpest))
+                    ttk.Checkbutton(cell, text=self._t("dedup_keep"),
+                                    variable=var).pack(pady=(2, 0))
+                    state["checks"].append((p, var))
+            execute_btn.configure(state="normal")
+
+        def scan_thread():
+            try:
+                def cb(cur, total):
+                    schedule(lambda: status_lbl.configure(
+                        text=self._t("dedup_scanning", n=cur, total=total)))
+
+                groups, scores = self._dedup_scan(list(self.files),
+                                                  progress_cb=cb)
+            except Exception as e:
+                schedule(lambda: _scan_failed(str(e)))
+                return
+            schedule(lambda: _scanned(groups, scores))
+
+        def _scan_failed(err):
+            if not win.winfo_exists():
+                return
+            status_lbl.configure(text=self._t("op_failed", err=err),
+                                 fg=COLORS["danger"])
+
+        def _scanned(groups, scores):
+            if not win.winfo_exists():
+                return
+            state["groups"], state["scores"] = groups, scores
+            status_lbl.configure(text="")
+            render()
+
+        def execute():
+            unchecked = [p for p, var in state["checks"] if not var.get()]
+            if not unchecked:
+                messagebox.showinfo(self._t("dedup_title"),
+                                    self._t("dedup_none_selected"))
+                return
+            if not messagebox.askyesno(
+                    self._t("dedup_title"),
+                    self._t("dedup_confirm", n=len(unchecked))):
+                return
+            # single trash dir next to the first file's folder
+            trash_dir = os.path.join(os.path.dirname(self.files[0]),
+                                     "_duplicates_trash")
+            execute_btn.configure(state="disabled")
+
+            def move_thread():
+                try:
+                    def cb(cur, total):
+                        schedule(lambda: status_lbl.configure(
+                            text="{} {}/{}".format(self._t("dedup_moving"),
+                                                   cur, total)))
+
+                    moved, failed = self._dedup_move_to_trash(
+                        unchecked, trash_dir, progress_cb=cb)
+                except Exception as e:
+                    schedule(lambda: _scan_failed(str(e)))
+                    return
+                schedule(lambda: _moved(moved, failed, unchecked, trash_dir))
+
+            def _moved(moved, failed, unchecked, trash_dir):
+                if not win.winfo_exists():
+                    return
+                moved_set = set(unchecked)
+                self.files = [f for f in self.files if f not in moved_set]
+                self._refresh_file_list()
+                self._update_stats()
+                state["groups"] = [
+                    [p for p in g if p not in moved_set]
+                    for g in state["groups"]]
+                state["groups"] = [g for g in state["groups"]
+                                   if len(g) >= 2]
+                state["scores"] = {p: s for p, s in state["scores"].items()
+                                   if p not in moved_set}
+                msg = self._t("dedup_moved", n=moved, dir=trash_dir)
+                if failed:
+                    msg += "（{} 失败）".format(failed)
+                status_lbl.configure(text=msg, fg=COLORS["accent"])
+                render()
+
+            threading.Thread(target=move_thread, daemon=True).start()
+
+        execute_btn = FlatButton(
+            footer, text=self._t("dedup_execute"), command=execute,
+            bg=COLORS["accent"])
+        execute_btn.configure(state="disabled")
+        execute_btn.pack(side="left")
+        FlatButton(
+            footer, text=self._t("dedup_rescan"),
+            command=lambda: threading.Thread(target=scan_thread,
+                                             daemon=True).start(),
+            bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
+            border_color=COLORS["border"]).pack(side="left", padx=(8, 0))
+        FlatButton(
+            footer, text=self._t("close"), command=win.destroy,
+            bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
+            border_color=COLORS["border"]).pack(side="right")
+
+        threading.Thread(target=scan_thread, daemon=True).start()
+
+    # ── Review & rate dialog ────────────────────────────────────────────────
+
+    def _review_scan(self, paths, progress_cb=None):
+        """Sync: read EXIF metadata for all paths. Returns {path: meta}.
+        Tk-free so tests can call it directly."""
+        from .engine import read_exif_metadata
+        meta = {}
+        total = len(paths)
+        for i, p in enumerate(paths):
+            try:
+                meta[p] = read_exif_metadata(p)
+            except Exception:
+                meta[p] = {"rating": None, "keywords": [], "title": "",
+                           "caption": ""}
+            if progress_cb:
+                progress_cb(i + 1, total)
+        return meta
+
+    def _review_save(self, path, rating=None, keywords=None, title=None):
+        """Sync: write rating/keywords/title diffs into ``path``'s EXIF
+        (PhotoS: UserComment segment; only changed fields are touched).
+        Returns (ok, message). Tk-free so tests can call it directly."""
+        from .engine import apply_exif_tags, read_exif_metadata
+
+        m = read_exif_metadata(path)
+        tags = {}
+        if rating is not None and rating != m.get("rating"):
+            tags["rating"] = rating
+        kw = (keywords or "").strip()
+        if kw != ",".join(m.get("keywords") or []):
+            tags["keywords"] = kw
+        tl = (title or "").strip()
+        if tl != (m.get("title") or ""):
+            tags["title"] = tl
+        if not tags:
+            return True, ""
+        try:
+            msg = apply_exif_tags(path, tags)
+        except Exception as e:
+            return False, self._t("review_save_failed", err=str(e))
+        if msg.startswith("⚠️"):
+            return False, msg
+        return True, msg
+
+    def _show_review(self):
+        """Lightbox review dialog: navigate, rate 0-5, tag keywords/title,
+        filter by rating/keywords. EXIF writes go through the engine's
+        PhotoS: UserComment segment; partial updates preserve other tags.
+        Operates on the tree selection, or all files when none selected."""
+        import importlib.util
+
+        if not self.files:
+            messagebox.showinfo(self._t("review_title"),
+                                self._t("review_none"))
+            return
+        sel = list(self.file_tree.selection())
+        all_paths = sel if sel else list(self.files)
+
+        has_piexif = importlib.util.find_spec("piexif") is not None
+
+        win = tk.Toplevel(self.root)
+        win.title(self._t("review_title"))
+        win.geometry("1000x720")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+
+        state = {"seq": [], "meta": {}, "idx": 0, "rating": None,
+                 "photo": None}
+
+        header = tk.Frame(win, bg=COLORS["bg"])
+        header.pack(fill="x", padx=20, pady=(14, 4))
+        tk.Label(header, text=self._t("review_title"),
+                 font=(PLATFORM_FONTS["title"], 14, "bold"),
+                 fg=COLORS["text"], bg=COLORS["bg"]).pack(side="left")
+        pos_lbl = tk.Label(header, text="", font=FONT_BODY,
+                           fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        pos_lbl.pack(side="left", padx=(16, 0))
+        status_lbl = tk.Label(header, text="", font=FONT_SMALL,
+                              fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status_lbl.pack(side="right")
+
+        if not has_piexif:
+            tk.Label(win, text=self._t("review_no_piexif"), font=FONT_SMALL,
+                     fg=COLORS["danger"], bg=COLORS["bg"]).pack(
+                anchor="w", padx=20)
+
+        # Image area + shooting-info line
+        img_lbl = tk.Label(win, bg=COLORS["bg"])
+        img_lbl.pack(fill="both", expand=True, padx=20, pady=8)
+        info_lbl = tk.Label(win, text="", font=FONT_SMALL,
+                            fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        info_lbl.pack(fill="x", padx=20, pady=(0, 2))
+
+        # Nav + rating row
+        ctrl = tk.Frame(win, bg=COLORS["bg"])
+        ctrl.pack(fill="x", padx=20, pady=(0, 6))
+        nav = tk.Frame(ctrl, bg=COLORS["bg"])
+        nav.pack(side="left")
+        prev_btn = FlatButton(
+            nav, text=self._t("review_prev"), command=lambda: go(-1),
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL)
+        prev_btn.pack(side="left")
+        next_btn = FlatButton(
+            nav, text=self._t("review_next"), command=lambda: go(1),
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL)
+        next_btn.pack(side="left", padx=(8, 0))
+
+        rating_box = tk.Frame(ctrl, bg=COLORS["bg"])
+        rating_box.pack(side="left", padx=(20, 0))
+        tk.Label(rating_box, text=self._t("review_rating"), font=FONT_BODY,
+                 fg=COLORS["text"], bg=COLORS["bg"]).pack(
+            side="left", padx=(0, 6))
+        rating_btns = {}
+        for n in range(6):
+            btn = FlatButton(
+                rating_box, text="{}★".format(n),
+                command=lambda n=n: set_rating(n),
+                bg=COLORS["card"], fg=COLORS["text"],
+                hover_bg=COLORS["bg"], border_color=COLORS["border"],
+                font=FONT_SMALL, padx=10, pady=3)
+            btn.pack(side="left", padx=(4, 0))
+            rating_btns[n] = btn
+
+        # Keywords + title row
+        fields = tk.Frame(win, bg=COLORS["bg"])
+        fields.pack(fill="x", padx=20, pady=(0, 4))
+        tk.Label(fields, text=self._t("review_keywords"), font=FONT_BODY,
+                 fg=COLORS["text"], bg=COLORS["bg"]).pack(side="left")
+        keywords_var = tk.StringVar()
+        ttk.Entry(fields, textvariable=keywords_var, font=FONT_BODY).pack(
+            side="left", fill="x", expand=True, padx=(8, 16))
+        tk.Label(fields, text=self._t("review_title_lbl"), font=FONT_BODY,
+                 fg=COLORS["text"], bg=COLORS["bg"]).pack(side="left")
+        title_var = tk.StringVar()
+        ttk.Entry(fields, textvariable=title_var, font=FONT_BODY).pack(
+            side="left", fill="x", expand=True, padx=(8, 0))
+        save_btn = FlatButton(
+            fields, text=self._t("review_save"),
+            command=lambda: save_current(),
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=10, pady=3)
+        save_btn.pack(side="left", padx=(8, 0))
+
+        # Filter row
+        filt = tk.Frame(win, bg=COLORS["bg"])
+        filt.pack(fill="x", padx=20, pady=(0, 14))
+        tk.Label(filt, text=self._t("review_filter"), font=FONT_BODY,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
+            side="left")
+        tk.Label(filt, text=self._t("review_min_rating"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
+            side="left", padx=(10, 4))
+        min_rating_var = tk.StringVar(value="0")
+        ttk.Combobox(filt, values=("0", "1", "2", "3", "4", "5"),
+                     textvariable=min_rating_var, state="readonly",
+                     width=3, font=FONT_SMALL).pack(side="left")
+        tk.Label(filt, text=self._t("review_filter_kw"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
+            side="left", padx=(10, 4))
+        filter_var = tk.StringVar()
+        ttk.Entry(filt, textvariable=filter_var, font=FONT_SMALL,
+                  width=16).pack(side="left")
+        FlatButton(
+            filt, text=self._t("review_apply_filter"),
+            command=lambda: apply_filter(),
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+            padx=10, pady=3).pack(side="left", padx=(8, 0))
+        FlatButton(
+            filt, text=self._t("review_clear_filter"),
+            command=lambda: clear_filter(),
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+            padx=10, pady=3).pack(side="left", padx=(8, 0))
+        FlatButton(
+            filt, text=self._t("close"), command=lambda: on_close(),
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+            padx=10, pady=3).pack(side="right")
+
+        # Worker→UI marshalling queue (see gallery dialog for rationale)
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if win.winfo_exists():
+                win.after(80, drain)
+
+        win.after(80, drain)
+
+        def set_status(text, color=None):
+            status_lbl.configure(text=text,
+                                 fg=color or COLORS["text_secondary"])
+
+        def save_current():
+            """Write rating/keywords/title diffs for the current image."""
+            if not state["seq"]:
+                return True
+            p = state["seq"][state["idx"]]
+            ok, msg = self._review_save(
+                p, rating=state["rating"],
+                keywords=keywords_var.get(),
+                title=title_var.get())
+            if not ok:
+                set_status(msg, COLORS["danger"])
+                return False
+            m = state["meta"].get(p, {})
+            m["rating"] = state["rating"]
+            m["keywords"] = [k for k
+                             in keywords_var.get().strip().split(",")
+                             if k.strip()]
+            m["title"] = title_var.get().strip()
+            if msg:
+                set_status(self._t("review_saved") + " · " + msg,
+                           COLORS["accent"])
+            return True
+
+        def _restyle_rating():
+            for n, btn in rating_btns.items():
+                active = (state["rating"] is not None
+                          and n == state["rating"])
+                btn.configure(
+                    bg=COLORS["accent"] if active else COLORS["card"],
+                    fg="white" if active else COLORS["text"],
+                    border_color=COLORS["accent"] if active
+                    else COLORS["border"])
+
+        def show():
+            if not state["seq"]:
+                img_lbl.configure(image="", text=self._t("review_empty"))
+                info_lbl.configure(text="")
+                pos_lbl.configure(text="0 / 0")
+                prev_btn.configure(state="disabled")
+                next_btn.configure(state="disabled")
+                return
+            idx = state["idx"]
+            p = state["seq"][idx]
+            m = state["meta"].get(p, {})
+            state["rating"] = m.get("rating")
+            keywords_var.set(",".join(m.get("keywords") or []))
+            title_var.set(m.get("title") or "")
+            pos_lbl.configure(text=self._t("review_pos", i=idx + 1,
+                                           n=len(state["seq"])))
+            parts = []
+            if m.get("date"):
+                parts.append(m["date"])
+            if m.get("camera"):
+                parts.append(m["camera"])
+            if m.get("iso"):
+                parts.append("ISO " + str(m["iso"]))
+            if m.get("focal"):
+                parts.append(str(m["focal"]))
+            info_lbl.configure(text="  |  ".join(parts))
+            prev_btn.configure(
+                state="normal" if idx > 0 else "disabled")
+            next_btn.configure(
+                state="normal" if idx < len(state["seq"]) - 1
+                else "disabled")
+            _restyle_rating()
+            state["photo"] = None
+            try:
+                from PIL import Image, ImageTk
+                img = Image.open(p)
+                img.thumbnail((900, 540), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                img_lbl.configure(image=photo, text="")
+                state["photo"] = photo  # keep the reference alive
+            except Exception as e:
+                img_lbl.configure(image="",
+                                  text=os.path.basename(p) + "\n" + str(e))
+
+        def set_rating(n):
+            if not state["seq"]:
+                return
+            state["rating"] = n
+            _restyle_rating()
+            save_current()
+
+        def go(delta):
+            if not state["seq"]:
+                return
+            save_current()
+            new_idx = state["idx"] + delta
+            if 0 <= new_idx < len(state["seq"]):
+                state["idx"] = new_idx
+                show()
+
+        def apply_filter():
+            save_current()
+            min_r = int(min_rating_var.get() or 0)
+            kw = filter_var.get().strip().lower()
+            seq = []
+            for p in all_paths:
+                m = state["meta"].get(p, {})
+                if (m.get("rating") or 0) < min_r:
+                    continue
+                if kw:
+                    kws = [k.lower() for k in (m.get("keywords") or [])]
+                    if not any(kw in k for k in kws):
+                        continue
+                seq.append(p)
+            state["seq"] = seq
+            state["idx"] = 0
+            show()
+
+        def clear_filter():
+            filter_var.set("")
+            min_rating_var.set("0")
+            state["seq"] = list(all_paths)
+            state["idx"] = 0
+            show()
+
+        def on_close():
+            save_current()
+            win.destroy()
+
+        def _focus_in_input():
+            w = win.focus_get()
+            return isinstance(w, (ttk.Entry, ttk.Combobox, tk.Entry))
+
+        win.bind("<Left>", lambda e: go(-1) if not _focus_in_input() else None)
+        win.bind("<Right>", lambda e: go(1) if not _focus_in_input() else None)
+        for n in range(6):
+            win.bind(str(n), lambda e, n=n: (
+                set_rating(n) if not _focus_in_input() else None))
+        win.bind("<Escape>", lambda e: on_close())
+
+        def scan_thread():
+            try:
+                def cb(cur, total):
+                    schedule(lambda: set_status(
+                        self._t("review_loading", n=cur, total=total)))
+
+                meta = self._review_scan(all_paths, progress_cb=cb)
+            except Exception as e:
+                schedule(lambda: set_status(
+                    self._t("op_failed", err=str(e)), COLORS["danger"]))
+                return
+            schedule(lambda: _scanned(meta))
+
+        def _scanned(meta):
+            if not win.winfo_exists():
+                return
+            state["meta"] = meta
+            state["seq"] = list(all_paths)
+            state["idx"] = 0
+            set_status("")
+            show()
+
+        win.protocol("WM_DELETE_WINDOW", on_close)
+        threading.Thread(target=scan_thread, daemon=True).start()
+
     def _add_files(self):
         """Open file dialog to add image files."""
         extensions = []
@@ -3020,7 +3932,11 @@ class PhotoSApp:
                                                            confirm_delete=False))
 
     def _show_summary(self, result: BatchResult):
-        """Show processing summary dialog."""
+        """Show processing summary in a scrollable dialog.
+
+        A plain messagebox truncates long per-file error lists; the
+        readonly Text widget keeps every failure visible.
+        """
         lines = [self._t("sum_header"), "=" * 40, ""]
         lines.append(f"{self._t('sum_success')}: {result.success_count}")
         lines.append(f"{self._t('sum_failed')}: {result.fail_count}")
@@ -3039,13 +3955,35 @@ class PhotoSApp:
 
         msg = "\n".join(lines)
 
-        # Show summary. If successful files exist, offer comparison view
+        win = tk.Toplevel(self.root)
+        win.title(self._t("summary_title"))
+        win.geometry("600x480")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+
+        tk.Label(win, text=self._t("summary_title"),
+                 font=(PLATFORM_FONTS["title"], 14, "bold"),
+                 fg=COLORS["text"], bg=COLORS["bg"]).pack(pady=(16, 4))
+
+        text = tk.Text(win, wrap="word", font=FONT_BODY,
+                       bg=COLORS["card"], fg=COLORS["text"],
+                       relief="flat", borderwidth=0,
+                       padx=14, pady=10, highlightthickness=0)
+        text.insert("1.0", msg)
+        text.configure(state="disabled")
+        text.pack(fill="both", expand=True, padx=20, pady=(4, 8))
+
+        btns = tk.Frame(win, bg=COLORS["bg"])
+        btns.pack(pady=(0, 16))
         if result.success_count > 0:
-            if messagebox.askyesno(self._t("summary_title"),
-                                   msg + "\n\n" + self._t("sum_ask_compare")):
-                self._show_comparison(result)
-        else:
-            messagebox.showinfo(self._t("summary_title"), msg)
+            FlatButton(
+                btns, text=self._t("sum_view_compare"),
+                command=lambda: (win.destroy(), self._show_comparison(result)),
+                bg=COLORS["accent"]).pack(side="left", padx=6)
+        FlatButton(
+            btns, text=self._t("close"), command=win.destroy,
+            bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
+            border_color=COLORS["border"]).pack(side="left", padx=6)
 
     def _show_comparison(self, result: BatchResult):
         """Open a before/after comparison window for the first successful result."""
@@ -3169,9 +4107,12 @@ class PhotoSApp:
         """Recursively set widget state."""
         try:
             # Keep cancel/preview/start and the file-add buttons enabled:
-            # files can be added to the queue while a batch is processing
+            # files can be added to the queue while a batch is processing.
+            # Gallery export is read-only on the originals, so it stays up
+            # too; review/dedup mutate files and are locked out.
             if widget in (self.cancel_btn, self.start_btn, self.preview_btn,
-                          self.add_files_btn, self.add_folder_btn):
+                          self.add_files_btn, self.add_folder_btn,
+                          self.gallery_btn):
                 return
             if isinstance(widget, (FlatButton, ttk.Combobox, ttk.Scale,
                                    ttk.Entry, ttk.Checkbutton, ttk.Radiobutton)):

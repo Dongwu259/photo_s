@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-384%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-406%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **PhotoS** 是一款跨平台批量图片处理工具，同时提供 **GUI 和 CLI**。为需要按指定尺寸交付图片的摄影师，
@@ -37,13 +37,13 @@
 | 自动整理归档 | ✅ | ✅ | `--organize date-camera` 子文件夹归类 |
 | 水印 | ✅ | ✅ | 文字 + 图片水印，7 个位置 |
 | 多尺寸输出 | ✅ | ✅ | `--sizes thumb:480x,screen:1920x` |
-| 元数据打标 | — | ✅ | `exif --rating` / `--keywords` / `--caption` 批量打标（UserComment） |
-| 元数据筛选 | — | ✅ | `exif --show --rating-min 3 --keywords beach` 筛出已打标照片 |
+| 元数据打标 | ✅ | ✅ | `exif --rating` / `--keywords` / `--caption` 批量打标（UserComment） |
+| 元数据筛选 | ✅ | ✅ | `exif --show --rating-min 3 --keywords beach` 筛出已打标照片 |
 | 元数据导入 | — | ✅ | `exif --from-csv meta.csv` 从表格批量写入 |
 | 选片 | — | ✅ | `photo-s cull` 曝光/清晰度筛选 |
-| 连拍选图 | — | ✅ | `dedup --action keep-sharpest` 每组保留最清晰 |
+| 连拍选图 | ✅ | ✅ | `dedup --action keep-sharpest` 每组保留最清晰 |
 | 校验和清单 | — | ✅ | `photo-s hash` SHA-256 归档完整性 + `--verify` |
-| HTML 画廊 | — | ✅ | `photo-s gallery` 自包含 index.html + 缩略图 |
+| HTML 画廊 | ✅ | ✅ | `photo-s gallery` 自包含 index.html + 缩略图 |
 | 预设 | ✅ | ✅ | 保存/加载命名配置 |
 | 多配置批量 | — | ✅ | `--profiles web,thumb` 一份输入、N 份输出 |
 | 并行处理 | ✅ | ✅ | `-j 8` 多线程 |
@@ -195,7 +195,10 @@ photo-s gui      # 显式 GUI 模式
 ```
 
 GUI 特性：中英文切换、拖放（需要 `pip install photo-s-tools[gui]`）、可取消的批量处理、
-前后对比、关于对话框。
+前后对比、**审查打分灯箱**（←/→ 导航、0-5 星、关键词/标题、按评分与关键词过滤——直接写 EXIF）、
+**去重查看器**（分组并排对比 + 清晰度评分，勾选保留，移入回收子文件夹而非删除）、
+**HTML 画廊导出**。打标后的照片可在 CLI 中按标签筛选（`photo-s exif --rating-min 4 --list`）
+或交给 AI agent 使用。
 
 > GUI 变更与接口契约：见 [`docs/GUI_CHANGES.md`](GUI_CHANGES.md)
 
