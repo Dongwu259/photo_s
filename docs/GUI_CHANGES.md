@@ -227,7 +227,7 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 
 新增 `tests/test_gui_workflows.py`（15 个）：同步 helper 全覆盖 +
 对话框冒烟（有界 `root.update()` 轮询，不点启动按钮、不挂线程）。
-全量 414 个。
+全量 415 个。
 
 ### 8.8 勾选式文件列表（替代选中集）
 
@@ -244,3 +244,11 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   显示「N 个文件 · 已勾选 M 个」。
 - 队列追加（处理中新增）不受影响：`_start_processing(pending)` 仍按显式
   列表运行。
+
+- 勾选列渲染：Treeview 单元格只支持文字，勾选框是 16px PhotoImage 图形
+  （`_make_check_images()`：未选=描边空框、选中=accent 填充+白勾），
+  每次重建重新生成以跟随主题；引用存 `self._check_on_img/_off_img`
+  （PIL 源图存 `_check_on_src/_off_src` 供像素级测试）。
+- 修复：`PhotoSApp.__init__` 现在按本实例 `dark_mode` 重新 `_apply_palette`
+  （COLORS 是模块级全局，前一个实例的切换会残留；同进程二次实例化或测试
+  场景下第二个 app 会以错误的调色板构建）。

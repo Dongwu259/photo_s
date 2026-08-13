@@ -324,9 +324,24 @@ class TestCheckList:
         b = _img(tmp_path / "b.jpg", seed=2)
         app._append_files([a, b])
         app._toggle_check(b)
-        assert app.file_tree.set(a, "check") == "✓"
-        assert app.file_tree.set(b, "check") == ""
+        # the check column renders checkbox glyph images (checked vs not)
+        img_a = app.file_tree.item(a, "image")
+        img_b = app.file_tree.item(b, "image")
+        assert img_a and img_a[0] != ""
+        assert img_b and img_b[0] != ""
+        assert img_a[0] != img_b[0], "checked/unchecked glyphs must differ"
         assert "已勾选 1" in app.file_count_label.cget("text")
+        root.destroy()
+
+    def test_check_glyphs_retinted_on_theme_toggle(self):
+        """Regression for the same class of bug as the dark->light ttk
+        stuck-colors issue: the checkbox glyphs are PhotoImages and must
+        be regenerated when the palette changes."""
+        root, app = _make_app()
+        px = app._check_on_src.getpixel((8, 3))     # inside the accent fill
+        app._toggle_theme()
+        px2 = app._check_on_src.getpixel((8, 3))
+        assert px != px2, "checked glyph must be re-tinted after theme switch"
         root.destroy()
 
     def test_remove_selected_discards(self, tmp_path):

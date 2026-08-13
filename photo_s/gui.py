@@ -905,6 +905,35 @@ class FlatButton(tk.Canvas):
             self._command()
 
 
+def _make_check_images():
+    """Checked/unchecked checkbox glyphs for the file-list check column.
+
+    Treeview cells are text-only, so a real checkbox look is drawn as
+    16px PhotoImages (per-item ``image`` option). Colors follow the
+    current palette; callers regenerate them on every rebuild so theme
+    switches stay consistent. Returns (on_tk, off_tk, on_pil, off_pil) —
+    keep the PhotoImage references alive on the app; the PIL sources are
+    for pixel-level assertions.
+    """
+    from PIL import Image, ImageDraw, ImageTk
+
+    def _rgb(hex_color):
+        h = hex_color.lstrip("#")
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+    size = 16
+    on = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(on)
+    d.rounded_rectangle([1, 1, size - 2, size - 2], radius=4,
+                        fill=_rgb(COLORS["accent"]) + (255,))
+    d.line([4, 8, 7, 11, 12, 5], fill=(255, 255, 255, 255), width=2)
+    off = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(off)
+    d.rounded_rectangle([1, 1, size - 2, size - 2], radius=4,
+                        outline=_rgb(COLORS["border"]) + (255,), width=1)
+    return (ImageTk.PhotoImage(on), ImageTk.PhotoImage(off), on, off)
+
+
 def canvas_unbind_safe(widget):
     """Drop any leftover global mousewheel binding from a destroyed panel.
 
@@ -927,6 +956,11 @@ class PhotoSApp:
         self.root = root
         self.lang = DEFAULT_LANG
         self.dark_mode = _system_dark_mode()
+        # COLORS is module-global and may be left flipped by a previous
+        # app instance (e.g. tests, or embedding PhotoSApp twice in one
+        # process) — re-apply the palette so the build always matches
+        # THIS instance's dark_mode.
+        _apply_palette(self.dark_mode)
         self.root.title(self._t("window_title"))
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         self.root.minsize(MIN_WIDTH, MIN_HEIGHT)
@@ -1349,6 +1383,11 @@ class PhotoSApp:
 
         # Zebra striping for readability
         self.file_tree.tag_configure("even", background=COLORS["row_alt"])
+
+        # Checkbox glyphs for the first column (regenerated on every
+        # rebuild so theme switches re-tint them)
+        (self._check_on_img, self._check_off_img,
+         self._check_on_src, self._check_off_src) = _make_check_images()
 
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.file_tree.yview)
         self.file_tree.configure(yscrollcommand=scrollbar.set)
@@ -3636,10 +3675,12 @@ class PhotoSApp:
                 size, dims = "N/A", "—"
             fmt = Path(path).suffix.upper().lstrip(".")
             tag = "even" if i % 2 else ""
-            mark = "✓" if path in self._checked else ""
+            check_img = (self._check_on_img if path in self._checked
+                         else self._check_off_img)
             self.file_tree.insert(
                 "", "end", iid=path,
-                values=(mark, name, size, fmt, dims),
+                values=(name, size, fmt, dims),
+                image=(check_img,),
                 tags=(tag,) if tag else ())
 
         if self._checked and len(self._checked) < len(self.files):
