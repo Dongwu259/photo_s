@@ -53,18 +53,20 @@ HuggingFace `Heliosoph/scunet-onnx`（MIT，由官方 cszn/SCUNet 权重重新�
 `plugins/scunet/photo_s_plugin_scunet/__init__.py` 里的 `DEFAULT_*` 常量。
 
 ```bash
-# 1. 独立构建插件 wheel
-cd plugins/scunet
-python3 -m build --wheel
-# dist/photo_s_plugin_scunet-0.1.0-py3-none-any.whl
+# 1. 一次性：在 PyPI 的 photo-s-plugin-scunet 项目添加 trusted publisher
+#    （与核心同一个仓库/环境）：
+#    Publishing → Add trusted publisher →
+#    owner Dongwu259 / repo photo_s / workflow publish.yml / environment pypi
 
-# 2. 上传到 PyPI（需在 PyPI 建 photo-s-plugin-scunet 项目并加信任）
-python3 -m twine upload dist/*.whl          # 或单独加 trusted publisher
+# 2. 打 tag 即发布（publish.yml 的 publish-plugin job，
+#    在 plugins/scunet/ 下 python -m build，wheel 不带权重）
+git tag scunet-v0.1.0 && git push origin scunet-v0.1.0
 
 # 3. 验证：安装后 photo-s 能看到 provider
-pip install photo-s-plugin-scunet
+pip install photo-s-tools photo-s-plugin-scunet
 photo-s plugin list --json                  # installed: scunet, provides: [denoise]
 photo-s plugin fetch scunet                 # 预下载权重（~77MB, sha256 校验）
+photo-s batch ~/highiso/ --denoise 12       # 端到端（首次使用自动下载权重）
 ```
 
 > 插件与核心是**独立发行版**：插件修复不必等核心发版。`registry.py` 里
