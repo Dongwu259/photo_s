@@ -32,9 +32,10 @@ class TestCacheDir:
         from pathlib import Path
         monkeypatch.setenv("PHOTOS_CACHE_DIR", "/tmp/photos-cache")
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-        # pathlib comparison — separator-agnostic (Windows CI uses \\)
-        assert modelstore.cache_dir() == str(Path("/tmp/photos-cache")
-                                             / "models")
+        # Path equality normalizes separators on both sides (Windows CI
+        # keeps the env value verbatim and joins with backslashes)
+        assert Path(modelstore.cache_dir()) == Path("/tmp/photos-cache") \
+            / "models"
 
     def test_xdg(self, monkeypatch, tmp_path):
         monkeypatch.delenv("PHOTOS_CACHE_DIR", raising=False)
