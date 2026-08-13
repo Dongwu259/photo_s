@@ -401,7 +401,10 @@ class {entry_cls}Plugin(PhotoSPlugin):
 '''
     (pkg_dir / "__init__.py").write_text(init_py, encoding="utf-8")
 
-    created = sorted(str(p.relative_to(base)) for p in base.rglob("*") if p.is_file())
+    # Normalize to forward slashes so the JSON contract is platform-independent
+    # (Windows pathlib yields backslashes; agents shouldn't care).
+    created = sorted(str(p.relative_to(base)).replace(os.sep, "/")
+                     for p in base.rglob("*") if p.is_file())
     if is_json:
         print(json.dumps({"ok": True, "name": name,
                           "dir": str(base), "files": created},
