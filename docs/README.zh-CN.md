@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-406%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-414%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **PhotoS** 是一款跨平台批量图片处理工具，同时提供 **GUI 和 CLI**。为需要按指定尺寸交付图片的摄影师，
@@ -195,7 +195,8 @@ photo-s gui      # 显式 GUI 模式
 ```
 
 GUI 特性：中英文切换、拖放（需要 `pip install photo-s-tools[gui]`）、可取消的批量处理、
-前后对比、**审查打分灯箱**（←/→ 导航、0-5 星、关键词/标题、按评分与关键词过滤——直接写 EXIF）、
+前后对比、**勾选式文件列表**（处理/审查/去重/画廊全部作用于勾选文件；点第一列切换勾选、
+点表头全选/全不选）、**审查打分灯箱**（←/→ 导航、0-5 星、关键词/标题、按评分与关键词过滤——直接写 EXIF）、
 **去重查看器**（分组并排对比 + 清晰度评分，勾选保留，移入回收子文件夹而非删除）、
 **HTML 画廊导出**。打标后的照片可在 CLI 中按标签筛选（`photo-s exif --rating-min 4 --list`）
 或交给 AI agent 使用。

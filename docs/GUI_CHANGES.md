@@ -227,4 +227,20 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 
 新增 `tests/test_gui_workflows.py`（15 个）：同步 helper 全覆盖 +
 对话框冒烟（有界 `root.update()` 轮询，不点启动按钮、不挂线程）。
-全量 406 个。
+全量 414 个。
+
+### 8.8 勾选式文件列表（替代选中集）
+
+- Treeview 新增第一列 `check`（✓ 标记）：点该列切换单行、点表头
+  `_toggle_all_checks`（全勾选 → 全不选，否则全选）。其他列的点击仍走
+  普通多选（Delete 删除 / 曝光分析 / 双击对比不受影响）。
+- 状态存 `self._checked: set`（`__init__` 中创建，跨语言/主题重建存活）；
+  `_checked_files()` 按列表序返回勾选文件。
+- **所有工作流动作作用于勾选文件**：`_start_processing`（交互启动）、
+  `_preview`、`_show_review`、`_show_dedup`、`_show_gallery_export`。
+  无勾选时提示 `check_none`。
+- 维护规则：`_append_files` 新文件默认勾选；`_remove_selected`/`_clear_files`/
+  去重移动同步剔除；`_refresh_file_list` 渲染 ✓ 标记；计数标签在部分勾选时
+  显示「N 个文件 · 已勾选 M 个」。
+- 队列追加（处理中新增）不受影响：`_start_processing(pending)` 仍按显式
+  列表运行。

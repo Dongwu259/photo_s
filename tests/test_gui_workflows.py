@@ -211,6 +211,7 @@ class TestDialogSmokes:
         root, app = _make_app()
         a = _img(tmp_path / "a.jpg")
         app.files = [a]
+        app._checked = {a}
         app._refresh_file_list()
         app._show_review()
         win = [w for w in root.winfo_children()
@@ -226,6 +227,7 @@ class TestDialogSmokes:
         a = _img(tmp_path / "a.jpg")
         b = _img(tmp_path / "b.jpg")           # duplicate of a
         app.files = [a, b]
+        app._checked = {a, b}
         app._refresh_file_list()
         app._show_dedup()
         win = [w for w in root.winfo_children()
@@ -239,6 +241,7 @@ class TestDialogSmokes:
         root, app = _make_app()
         a = _img(tmp_path / "a.jpg")
         app.files = [a]
+        app._checked = {a}
         app._refresh_file_list()
         app._show_gallery_export()
         win = [w for w in root.winfo_children()
@@ -277,4 +280,100 @@ class TestProcessingLockout:
             "gallery export is read-only and must stay enabled"
         app._toggle_settings(True)
         assert app.review_btn.cget("state") == "normal"
+        root.destroy()
+
+
+class TestCheckList:
+    """The check-column contract: all workflow actions run on the checked
+    files, checks survive rebuilds, and list maintenance keeps the set
+    consistent."""
+
+    def test_append_seeds_checked(self, tmp_path):
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", seed=2)
+        assert app._append_files([a, b]) == 2
+        assert app._checked == {a, b}, "new files start checked"
+        root.destroy()
+
+    def test_toggle_and_checked_files(self, tmp_path):
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", seed=2)
+        app._append_files([a, b])
+        app._toggle_check(a)
+        assert app._checked_files() == [b]
+        app._toggle_check(a)
+        assert app._checked_files() == [a, b]
+        root.destroy()
+
+    def test_toggle_all(self, tmp_path):
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", seed=2)
+        app._append_files([a, b])
+        app._toggle_all_checks()          # all checked -> none
+        assert app._checked_files() == []
+        app._toggle_all_checks()          # none -> all
+        assert app._checked_files() == [a, b]
+        root.destroy()
+
+    def test_refresh_renders_marks(self, tmp_path):
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", seed=2)
+        app._append_files([a, b])
+        app._toggle_check(b)
+        assert app.file_tree.set(a, "check") == "✓"
+        assert app.file_tree.set(b, "check") == ""
+        assert "已勾选 1" in app.file_count_label.cget("text")
+        root.destroy()
+
+    def test_remove_selected_discards(self, tmp_path):
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", seed=2)
+        app._append_files([a, b])
+        app.file_tree.selection_set(a)
+        app._remove_selected()
+        assert app._checked == {b}
+        assert app.files == [b]
+        root.destroy()
+
+    def test_clear_files_resets(self, tmp_path, monkeypatch):
+        from photo_s import gui as gui_mod
+        monkeypatch.setattr(gui_mod.messagebox, "askyesno",
+                            lambda *a, **k: True)
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        app._append_files([a])
+        app._clear_files()
+        assert app.files == [] and app._checked == set()
+        root.destroy()
+
+    def test_start_processing_requires_checked(self, tmp_path, monkeypatch):
+        from photo_s import gui as gui_mod
+        warned = []
+        monkeypatch.setattr(gui_mod.messagebox, "showwarning",
+                            lambda *a, **k: warned.append(a))
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        app._append_files([a])
+        app._toggle_check(a)               # nothing checked
+        app._start_processing()
+        assert not app.processing, "must refuse to run with no checked files"
+        assert len(warned) == 1
+        root.destroy()
+
+    def test_preview_requires_checked(self, tmp_path, monkeypatch):
+        from photo_s import gui as gui_mod
+        warned = []
+        monkeypatch.setattr(gui_mod.messagebox, "showwarning",
+                            lambda *a, **k: warned.append(a))
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        app._append_files([a])
+        app._toggle_check(a)
+        app._preview()
+        assert len(warned) == 1
         root.destroy()

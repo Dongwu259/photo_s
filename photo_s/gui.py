@@ -186,6 +186,8 @@ STRINGS = {
         "remove": "移除",
         "clear": "清除全部",
         "files_count": "{n} 个文件",
+        "files_count_checked": "{n} 个文件 · 已勾选 {m} 个",
+        "check_none": "请先勾选要处理的图片（点击文件列表第一列切换勾选，点表头全选/全不选）",
         "hint_dnd": "将图片或文件夹拖入列表，或使用上方按钮添加",
         "hint_no_dnd": "使用上方按钮添加图片文件（安装 tkinterdnd2 可启用拖放）",
         "col_name": "文件名",
@@ -490,6 +492,8 @@ STRINGS = {
         "remove": "Remove",
         "clear": "Clear All",
         "files_count": "{n} files",
+        "files_count_checked": "{n} files · {m} checked",
+        "check_none": "Check the images to process first (click the first column to toggle, the header for all/none)",
         "hint_dnd": "Drag & drop images/folders into the list, or use the buttons above",
         "hint_no_dnd": "Use the buttons above to add images (install tkinterdnd2 for drag & drop)",
         "col_name": "Name",
@@ -930,6 +934,12 @@ class PhotoSApp:
 
         # State
         self.files: List[str] = []
+        # Checked subset of self.files (first Treeview column). All
+        # workflow actions — process / review / dedup / gallery — operate
+        # on the checked files, not on the row selection (which stays an
+        # ephemeral multi-select for remove/analyze). New files are
+        # checked by default. Survives language/theme rebuilds.
+        self._checked: set = set()
         self.processing = False
         self.cancel_requested = False
         self.output_dir = tk.StringVar(value="")
@@ -1317,17 +1327,21 @@ class PhotoSApp:
         list_frame = tk.Frame(card, bg=COLORS["card"])
         list_frame.pack(fill="both", expand=True, padx=14, pady=12)
 
-        columns = ("name", "size", "format", "dims")
+        columns = ("check", "name", "size", "format", "dims")
         self.file_tree = ttk.Treeview(
             list_frame, columns=columns, show="headings",
             selectmode="extended", height=12,
         )
 
+        self.file_tree.heading("check", text="✓",
+                               command=self._toggle_all_checks)
         self.file_tree.heading("name", text=self._t("col_name"))
         self.file_tree.heading("size", text=self._t("col_size"))
         self.file_tree.heading("format", text=self._t("col_format"))
         self.file_tree.heading("dims", text=self._t("col_dims"))
 
+        self.file_tree.column("check", width=36, minwidth=36,
+                              anchor="center", stretch=False)
         self.file_tree.column("name", width=300, minwidth=140)
         self.file_tree.column("size", width=100, minwidth=80, anchor="center")
         self.file_tree.column("format", width=80, minwidth=60, anchor="center")
@@ -1345,6 +1359,10 @@ class PhotoSApp:
         # Bind delete key
         self.file_tree.bind("<BackSpace>", lambda e: self._remove_selected())
         self.file_tree.bind("<Delete>", lambda e: self._remove_selected())
+
+        # Click on the check column toggles the checkbox (clicks on other
+        # columns keep their normal selection behavior)
+        self.file_tree.bind("<Button-1>", self._on_tree_click)
 
         # Double-click a row → before/after comparison for that file
         self.file_tree.bind("<Double-1>", self._on_tree_double_click)
@@ -2647,6 +2665,11 @@ class PhotoSApp:
             messagebox.showinfo(self._t("gallery_title"),
                                 self._t("gallery_need_files"))
             return
+        files = self._checked_files()
+        if not files:
+            messagebox.showinfo(self._t("gallery_title"),
+                                self._t("check_none"))
+            return
 
         win = tk.Toplevel(self.root)
         win.title(self._t("gallery_title"))
@@ -2735,7 +2758,7 @@ class PhotoSApp:
                 set_status(self._t("gallery_generating"))))
             try:
                 res = self._gallery_build(
-                    list(self.files), out_dir,
+                    list(files), out_dir,
                     title=title_var.get().strip() or "PhotoS Gallery",
                     thumb_size=int(thumb_combo.get()))
             except Exception as e:
@@ -2830,6 +2853,11 @@ class PhotoSApp:
         if not self.files:
             messagebox.showinfo(self._t("dedup_title"),
                                 self._t("gallery_need_files"))
+            return
+        files = self._checked_files()
+        if not files:
+            messagebox.showinfo(self._t("dedup_title"),
+                                self._t("check_none"))
             return
 
         win = tk.Toplevel(self.root)
@@ -2967,7 +2995,7 @@ class PhotoSApp:
                     schedule(lambda: status_lbl.configure(
                         text=self._t("dedup_scanning", n=cur, total=total)))
 
-                groups, scores = self._dedup_scan(list(self.files),
+                groups, scores = self._dedup_scan(list(files),
                                                   progress_cb=cb)
             except Exception as e:
                 schedule(lambda: _scan_failed(str(e)))
@@ -2998,7 +3026,7 @@ class PhotoSApp:
                     self._t("dedup_confirm", n=len(unchecked))):
                 return
             # single trash dir next to the first file's folder
-            trash_dir = os.path.join(os.path.dirname(self.files[0]),
+            trash_dir = os.path.join(os.path.dirname(files[0]),
                                      "_duplicates_trash")
             execute_btn.configure(state="disabled")
 
@@ -3021,6 +3049,7 @@ class PhotoSApp:
                     return
                 moved_set = set(unchecked)
                 self.files = [f for f in self.files if f not in moved_set]
+                self._checked -= moved_set
                 self._refresh_file_list()
                 self._update_stats()
                 state["groups"] = [
@@ -3111,8 +3140,11 @@ class PhotoSApp:
             messagebox.showinfo(self._t("review_title"),
                                 self._t("review_none"))
             return
-        sel = list(self.file_tree.selection())
-        all_paths = sel if sel else list(self.files)
+        all_paths = self._checked_files()
+        if not all_paths:
+            messagebox.showinfo(self._t("review_title"),
+                                self._t("check_none"))
+            return
 
         has_piexif = importlib.util.find_spec("piexif") is not None
 
@@ -3473,6 +3505,39 @@ class PhotoSApp:
                 pass
         return total
 
+    def _checked_files(self) -> List[str]:
+        """Checked files in list order (the set all workflow actions use)."""
+        return [p for p in self.files if p in self._checked]
+
+    def _toggle_check(self, path):
+        """Toggle the checkbox for one row and re-render the list."""
+        if path in self._checked:
+            self._checked.discard(path)
+        else:
+            self._checked.add(path)
+        self._refresh_file_list()
+
+    def _toggle_all_checks(self):
+        """Header click: uncheck all when everything is checked, else
+        check all."""
+        if self._checked and len(self._checked) == len(self.files):
+            self._checked.clear()
+        else:
+            self._checked = set(self.files)
+        self._refresh_file_list()
+
+    def _on_tree_click(self, event):
+        """Treeview click: toggle the check column; ignore other columns
+        (normal selection keeps working there)."""
+        try:
+            if (self.file_tree.identify_region(event.x, event.y) == "cell"
+                    and self.file_tree.identify_column(event.x) == "#1"):
+                iid = self.file_tree.identify_row(event.y)
+                if iid:
+                    self._toggle_check(iid)
+        except tk.TclError:
+            pass
+
     def _remove_selected(self):
         """Remove selected files from the list.
 
@@ -3485,6 +3550,7 @@ class PhotoSApp:
 
         remove_paths = set(selected)
         self.files = [f for f in self.files if f not in remove_paths]
+        self._checked -= remove_paths
         self._refresh_file_list()
         self._update_stats()
 
@@ -3507,6 +3573,9 @@ class PhotoSApp:
                 fresh.append(p)
                 added += 1
 
+        if fresh:
+            # new files start checked (default: process everything added)
+            self._checked.update(fresh)
         if added:
             self._refresh_file_list()
             self._update_stats()
@@ -3538,6 +3607,7 @@ class PhotoSApp:
             self._t("dlg_confirm_clear", n=len(self.files)),
         ):
             self.files.clear()
+            self._checked.clear()
             self._refresh_file_list()
             self._update_stats()
 
@@ -3566,10 +3636,19 @@ class PhotoSApp:
                 size, dims = "N/A", "—"
             fmt = Path(path).suffix.upper().lstrip(".")
             tag = "even" if i % 2 else ""
-            self.file_tree.insert("", "end", iid=path, values=(name, size, fmt, dims),
-                                  tags=(tag,) if tag else ())
+            mark = "✓" if path in self._checked else ""
+            self.file_tree.insert(
+                "", "end", iid=path,
+                values=(mark, name, size, fmt, dims),
+                tags=(tag,) if tag else ())
 
-        self.file_count_label.config(text=self._t("files_count", n=len(self.files)))
+        if self._checked and len(self._checked) < len(self.files):
+            self.file_count_label.config(text=self._t(
+                "files_count_checked", n=len(self.files),
+                m=len(self._checked)))
+        else:
+            self.file_count_label.config(
+                text=self._t("files_count", n=len(self.files)))
 
     def _browse_output_dir(self):
         """Browse for output directory."""
@@ -3705,9 +3784,14 @@ class PhotoSApp:
 
     def _preview(self):
         """Preview what would happen without processing."""
-        if not self.files:
-            messagebox.showwarning(self._t("dlg_no_files_title"),
-                                   self._t("dlg_no_files"))
+        files = self._checked_files()
+        if not files:
+            if not self.files:
+                messagebox.showwarning(self._t("dlg_no_files_title"),
+                                       self._t("dlg_no_files"))
+            else:
+                messagebox.showwarning(self._t("dlg_no_files_title"),
+                                       self._t("check_none"))
             return
 
         options = self._build_options()
@@ -3715,7 +3799,7 @@ class PhotoSApp:
         yn = lambda b: yes if b else no
 
         lines = [self._t("preview_header"), "=" * 40, ""]
-        lines.append(self._t("pv_files", n=len(self.files)))
+        lines.append(self._t("pv_files", n=len(files)))
         lines.append(self._t("pv_format", fmt=options.output_format))
         if options.target_size_bytes:
             lines.append(self._t("pv_target", size=format_size(options.target_size_bytes)))
@@ -3750,15 +3834,23 @@ class PhotoSApp:
         """Start batch processing in a background thread.
 
         Args:
-            file_list: Files to process (default: the whole file list).
+            file_list: Files to process (default: the checked files).
             confirm_delete: Skip the remove-original confirmation on
                             automatic queue follow-up runs.
         """
-        files = file_list if file_list is not None else self.files
-        if not files:
-            messagebox.showwarning(self._t("dlg_no_files_title"),
-                                   self._t("dlg_no_files"))
-            return
+        if file_list is not None:
+            files = list(file_list)
+        else:
+            # interactive start: process the checked files only
+            files = self._checked_files()
+            if not files:
+                if not self.files:
+                    messagebox.showwarning(self._t("dlg_no_files_title"),
+                                           self._t("dlg_no_files"))
+                else:
+                    messagebox.showwarning(self._t("dlg_no_files_title"),
+                                           self._t("check_none"))
+                return
 
         if self.processing:
             return

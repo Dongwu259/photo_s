@@ -24,7 +24,7 @@
 
 ```bash
 # 1. 本地验证（必须全绿）
-python3 -m pytest tests/ -q                 # 406 个
+python3 -m pytest tests/ -q                 # 414 个
 python3 -m photo_s.cli --help               # CLI 冒烟
 python3 -m photo_s.cli plugin list --json   # 官方插件目录
 
