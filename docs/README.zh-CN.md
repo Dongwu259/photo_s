@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-453%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-476%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **PhotoS** 是一款跨平台批量图片处理工具，同时提供 **GUI 和 CLI**。为需要按指定尺寸交付图片的摄影师，
@@ -24,15 +24,16 @@
 | 格式转换 | ✅ | ✅ | JPEG / PNG / WebP / TIFF / BMP / HEIC / AVIF |
 | RAW 解码 | ✅ | ✅ | 22+ 种相机 RAW 格式，内置支持（rawpy/libraw） |
 | 缩放 / 比例 | ✅ | ✅ | 最大尺寸、百分比或最长边上限 |
+| 视觉预览 | ✅ | — | 原图↔处理后实时并排预览（经真实管线渲染） |
 | 影调与色彩 | ✅ | ✅ | 亮度/对比度/饱和度/伽马/锐化，黑白、复古 |
-| 白平衡 | — | ✅ | `--wb 5600` 色温，或 `--wb-from ref.jpg` 采样灰卡 |
+| 白平衡 | ✅ | ✅ | `--wb 5600` 色温，或 `--wb-from ref.jpg` 采样灰卡 |
 | 曝光 | ✅ | ✅ | `--ev +1` 档，或 `--auto-exposure 0.45` 归一化到目标 |
-| 自动色阶 | — | ✅ | `--auto-levels` 2% 裁切直方图拉伸 |
+| 自动色阶 | ✅ | ✅ | `--auto-levels` 2% 裁切直方图拉伸 |
 | LOG 还原 | ✅ | ✅ | `--log-curve SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG`（1D LUT，零依赖） |
 | 降噪 | ✅ | ✅¹ | `--denoise 10` NLM（`[enhance]` 可选依赖） |
 | 自动扶正 | ✅ | ✅¹ | `--auto-straighten` 校正地平线，置信度门控（`[enhance]` 可选依赖） |
 | 裁剪 / 旋转 / 翻转 / 留边 | ✅ | ✅ | `--crop 800x600+0+0`、`--rotate 90`、`--flip h`、`--pad 16:9` |
-| 打印尺寸 | — | ✅ | `--print-size 8x10@300dpi` 中心裁剪 + 精确打印像素 |
+| 打印尺寸 | ✅ | ✅ | `--print-size 8x10@300dpi` 中心裁剪 + 精确打印像素 |
 | 智能重命名 | ✅ | ✅ | `{date}_{camera}_{seq}` 模板 |
 | 自动整理归档 | ✅ | ✅ | `--organize date-camera` 子文件夹归类 |
 | 水印 | ✅ | ✅ | 文字 + 图片水印，7 个位置 |
@@ -40,9 +41,9 @@
 | 元数据打标 | ✅ | ✅ | `exif --rating` / `--keywords` / `--caption` 批量打标（UserComment） |
 | 元数据筛选 | ✅ | ✅ | `exif --show --rating-min 3 --keywords beach` 筛出已打标照片 |
 | 元数据导入 | — | ✅ | `exif --from-csv meta.csv` 从表格批量写入 |
-| 选片 | — | ✅ | `photo-s cull` 曝光/清晰度筛选 |
+| 选片 | ✅ | ✅ | `photo-s cull` 曝光/清晰度筛选（GUI 仅保留符合项，可撤销） |
 | 连拍选图 | ✅ | ✅ | `dedup --action keep-sharpest` 每组保留最清晰 |
-| 校验和清单 | — | ✅ | `photo-s hash` SHA-256 归档完整性 + `--verify` |
+| 校验和清单 | ✅ | ✅ | `photo-s hash` SHA-256 归档完整性 + `--verify` |
 | HTML 画廊 | ✅ | ✅ | `photo-s gallery` 自包含 index.html + 缩略图 |
 | 预设 | ✅ | ✅ | 保存/加载命名配置 |
 | 多配置批量 | — | ✅ | `--profiles web,thumb` 一份输入、N 份输出 |
@@ -53,13 +54,13 @@
 | EXIF 日期偏移 | — | ✅ | `--date-shift "-5h30m"` 时区/相机时钟修正 |
 | 隐私清理 | — | ✅ | `--scrub` 移除 EXIF+ICC+GPS |
 | 同步日期 | — | ✅ | `--sync-date` 输出 mtime ← EXIF 拍摄时间 |
-| 文件夹监视 | — | ✅ | `photo-s watch ~/incoming/` 自动处理 |
+| 文件夹监视 | ✅ | ✅ | `photo-s watch ~/incoming/` 自动处理（`[watch]` 可选依赖） |
 | 自动旋转 | ✅ | ✅ | 基于 EXIF Orientation |
 | 图片去重 | ✅ | ✅ | 感知哈希重复检测 |
 | 质量指标 | ✅ | ✅ | `--evaluate` SSIM + `--blur-score` |
 | CSV 报告 | — | ✅ | `--report out.csv` 逐文件统计 |
 | 完整性检查 | — | ✅ | `photo-s check` 损坏文件扫描 |
-| 联系表 | — | ✅ | `photo-s contact-sheet *.jpg -o sheet.png` |
+| 联系表 | ✅ | ✅ | `photo-s contact-sheet *.jpg -o sheet.png` |
 | 色彩管理 | — | ✅ | `--srgb` / `--flatten-cmyk` |
 | REST API | — | ✅ | `photo-s serve` 供 AI agent 使用 |
 | 插件系统 | — | ✅ | 第三方插件支持 |
@@ -196,9 +197,11 @@ photo-s gui      # 显式 GUI 模式
 GUI 特性：中英文切换、拖放（需要 `pip install photo-s-tools[gui]`）、可取消的批量处理、
 前后对比、全局快捷键（⌘/Ctrl+O 添加、⌘/Ctrl+R 开始、Esc 取消、⌘/Ctrl+E 审查、⌘/Ctrl+D 去重、⌘/Ctrl+G 画廊、⌘/Ctrl+Z 撤销）、**勾选式文件列表**（每行一个与设置面板同款的勾选框；处理/审查/去重/画廊全部作用于
 勾选文件；添加文件夹自动递归扫描子文件夹；工具栏「全选/全不选」批量切换）、
+**视觉预览**（⌘/Ctrl+P：原图↔处理后并排实时渲染，设置变化自动刷新）、
 **审查打分灯箱**（←/→ 导航、0-5 星、关键词/标题、按评分与关键词过滤——直接写 EXIF）、
 **去重查看器**（分组并排对比 + 清晰度评分，勾选保留，移入回收子文件夹而非删除）、
-**HTML 画廊导出**。打标后的照片可在 CLI 中按标签筛选（`photo-s exif --rating-min 4 --list`）
+**HTML 画廊导出**、工具栏「更多工具」菜单（**目录监视** / **联系表** / **曝光筛选** / **校验和清单** / **预设管理**）。
+打标后的照片可在 CLI 中按标签筛选（`photo-s exif --rating-min 4 --list`）
 或交给 AI agent 使用。
 
 > GUI 变更与接口契约：见 [`docs/GUI_CHANGES.md`](GUI_CHANGES.md)

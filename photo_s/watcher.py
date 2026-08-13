@@ -86,16 +86,19 @@ def start_watching(
     options: ProcessOptions,
     recursive: bool = False,
     on_process: Optional[Callable[[ProcessResult], None]] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> None:
     """Watch a directory for new images and process them automatically.
 
-    Blocks until Ctrl+C.
+    Blocks until Ctrl+C, or until ``stop_event`` is set (used by the GUI;
+    the CLI leaves it None for the original Ctrl+C behavior).
 
     Args:
         watch_dir: Directory to monitor.
         options: ProcessOptions for auto-processing.
         recursive: Watch subdirectories too.
         on_process: Callback when a file is processed.
+        stop_event: When set, the loop exits and the observer is stopped.
     """
     try:
         from watchdog.observers import Observer
@@ -124,7 +127,7 @@ def start_watching(
     processed_count = 0
 
     try:
-        while True:
+        while not (stop_event is not None and stop_event.is_set()):
             time.sleep(1)
             results = handler.tick()
             for r in results:
@@ -140,6 +143,7 @@ def start_watching(
                 else:
                     print(f"  ❌ #{processed_count} {name}: {r.error}")
     except KeyboardInterrupt:
-        observer.stop()
         print(f"\n👁  已停止 Stopped. 共处理 {processed_count} 个文件.")
-    observer.join()
+    finally:
+        observer.stop()
+        observer.join()

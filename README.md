@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-453%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-476%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **PhotoS** is a cross-platform batch image processing tool with **both GUI and CLI**. Built for photographers who need to deliver images at specific sizes, and for AI agents that need reliable image processing pipelines.
@@ -23,15 +23,16 @@
 | Format convert | ✅ | ✅ | JPEG / PNG / WebP / TIFF / BMP / HEIC / AVIF |
 | RAW decode | ✅ | ✅ | 22+ camera RAW formats, built-in (rawpy/libraw) |
 | Resize / Scale | ✅ | ✅ | Max dimensions, percentage, or longest-side cap |
+| Visual preview | ✅ | — | Live original↔processed preview rendered through the real pipeline |
 | Tone & color | ✅ | ✅ | Brightness/contrast/saturation/gamma/sharpen, B&W, sepia |
-| White balance | — | ✅ | `--wb 5600` Kelvin, or `--wb-from ref.jpg` sample a gray card |
+| White balance | ✅ | ✅ | `--wb 5600` Kelvin, or `--wb-from ref.jpg` sample a gray card |
 | Exposure | ✅ | ✅ | `--ev +1` stops, or `--auto-exposure 0.45` normalize to target |
-| Auto levels | — | ✅ | `--auto-levels` 2% clip histogram stretch |
+| Auto levels | ✅ | ✅ | `--auto-levels` 2% clip histogram stretch |
 | LOG recovery | ✅ | ✅ | `--log-curve SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG` (1D LUT, no deps) |
 | Denoise | ✅ | ✅¹ | `--denoise 10` NLM (`[enhance]` extra) |
 | Auto-straighten | ✅ | ✅¹ | `--auto-straighten` level the horizon, confidence-gated (`[enhance]` extra) |
 | Crop / Rotate / Flip / Pad | ✅ | ✅ | `--crop 800x600+0+0`, `--rotate 90`, `--flip h`, `--pad 16:9` |
-| Print size | — | ✅ | `--print-size 8x10@300dpi` center-crop + exact print pixels |
+| Print size | ✅ | ✅ | `--print-size 8x10@300dpi` center-crop + exact print pixels |
 | Smart rename | ✅ | ✅ | `{date}_{camera}_{seq}` templates |
 | Auto folder organize | ✅ | ✅ | `--organize date-camera` subfolder creation |
 | Watermark | ✅ | ✅ | Text + image overlay, 7 positions |
@@ -39,9 +40,9 @@
 | Metadata tagging | ✅ | ✅ | `exif --rating` / `--keywords` / `--caption` batch tag (UserComment) |
 | Metadata filter | ✅ | ✅ | `exif --show --rating-min 3 --keywords beach` find tagged photos |
 | Metadata import | — | ✅ | `exif --from-csv meta.csv` batch write from spreadsheet |
-| Culling | — | ✅ | `photo-s cull` exposure/sharpness filter |
+| Culling | ✅ | ✅ | `photo-s cull` exposure/sharpness filter (GUI keeps only matches, undoable) |
 | Burst keep-sharpest | ✅ | ✅ | `dedup --action keep-sharpest` pick the sharpest of a burst |
-| Checksum manifest | — | ✅ | `photo-s hash` SHA-256 archive integrity + `--verify` |
+| Checksum manifest | ✅ | ✅ | `photo-s hash` SHA-256 archive integrity + `--verify` |
 | HTML gallery | ✅ | ✅ | `photo-s gallery` self-contained index.html + thumbs |
 | Presets | ✅ | ✅ | Save/load named configs |
 | Multi-profile batch | — | ✅ | `--profiles web,thumb` one input set, N outputs |
@@ -52,13 +53,13 @@
 | EXIF date shift | — | ✅ | `--date-shift "-5h30m"` timezone/camera clock fixes |
 | Privacy scrub | — | ✅ | `--scrub` strips EXIF+ICC+GPS |
 | Sync date | — | ✅ | `--sync-date` output mtime ← EXIF datetime |
-| Folder watch | — | ✅ | `photo-s watch ~/incoming/` auto-process |
+| Folder watch | ✅ | ✅ | `photo-s watch ~/incoming/` auto-process (`[watch]` extra) |
 | Auto-rotate | ✅ | ✅ | EXIF Orientation-based |
 | Image dedup | ✅ | ✅ | Perceptual hash duplicate detection |
 | Quality metrics | ✅ | ✅ | `--evaluate` SSIM + `--blur-score` |
 | CSV report | — | ✅ | `--report out.csv` per-file stats |
 | Integrity check | — | ✅ | `photo-s check` corrupt file scan |
-| Contact sheet | — | ✅ | `photo-s contact-sheet *.jpg -o sheet.png` |
+| Contact sheet | ✅ | ✅ | `photo-s contact-sheet *.jpg -o sheet.png` |
 | Color management | — | ✅ | `--srgb` / `--flatten-cmyk` |
 | REST API | — | ✅ | `photo-s serve` for AI agents |
 | Plugin system | — | ✅ | Third-party plugin support |

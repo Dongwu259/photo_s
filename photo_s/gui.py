@@ -15,8 +15,10 @@ Features:
 
 import os
 import queue
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -493,6 +495,91 @@ STRINGS = {
         "dep_installed": "已安装",
         "dep_missing": "未安装",
         "about_license": "开源协议: MIT License",
+        # ── More tools menu ──
+        "more_btn": "更多工具",
+        "more_watch": "目录监视",
+        "more_contact": "联系表",
+        "more_cull": "曝光筛选",
+        "more_hash": "校验和",
+        "more_presets": "预设",
+        # ── Visual preview ──
+        "preview_render": "正在渲染预览…",
+        "preview_error": "预览失败: {err}",
+        "preview_rendered": "原始 {in_size} → 处理 {out_size} · 质量 {q}",
+        # ── Folder watcher ──
+        "watch_title": "目录监视",
+        "watch_dir": "监视目录",
+        "watch_recursive": "包含子文件夹",
+        "watch_outdir": "输出目录（留空 = 原目录）",
+        "watch_format": "输出格式",
+        "watch_quality": "质量",
+        "watch_remove_original": "处理后删除原文件",
+        "watch_start": "开始监视",
+        "watch_stop": "停止",
+        "watch_running": "监视中…",
+        "watch_stopped": "已停止",
+        "watch_processed": "已处理 {n} 个文件",
+        "watch_no_dir": "请选择要监视的目录",
+        "watch_no_watchdog": "未安装 watchdog，请运行 pip install photo-s-tools[watch]",
+        # ── Contact sheet ──
+        "contact_title": "联系表",
+        "contact_output": "输出文件",
+        "contact_cols": "列数",
+        "contact_thumb": "缩略图尺寸 WxH",
+        "contact_caption": "显示文件名",
+        "contact_bg": "背景色 (#RRGGBB)",
+        "contact_generate": "生成",
+        "contact_done": "已生成: {path}",
+        "contact_failed": "生成失败: {err}",
+        "contact_open": "打开",
+        "contact_need_files": "请先添加并勾选图片",
+        "contact_bad_bg": "背景色无效，已用黑色",
+        # ── Cull ──
+        "cull_title": "曝光筛选",
+        "cull_overexposed": "过曝上限 %",
+        "cull_underexposed": "欠曝上限 %",
+        "cull_lum_min": "亮度下限 (0-1)",
+        "cull_lum_max": "亮度上限 (0-1)",
+        "cull_sharp": "清晰度下限",
+        "cull_scan": "扫描",
+        "cull_apply": "仅保留符合的",
+        "cull_kept": "符合 {kept}/{total}",
+        "cull_failed": "扫描失败: {err}",
+        "cull_no_files": "文件列表为空",
+        "cull_processing": "处理中，无法应用筛选",
+        "undo_cull": "撤销筛选（恢复 {n} 张）",
+        # ── Checksums ──
+        "hash_title": "校验和",
+        "hash_tab_gen": "生成清单",
+        "hash_tab_verify": "校验",
+        "hash_output": "输出文件",
+        "hash_generate": "生成",
+        "hash_done": "已写入 {path}（{n} 项）",
+        "hash_failed": "失败: {err}",
+        "hash_choose": "选择清单",
+        "hash_verify": "校验",
+        "hash_total": "共 {n} 项",
+        "hash_ok": "一致 {n}",
+        "hash_missing": "缺失 {n}",
+        "hash_mismatched": "不匹配 {n}",
+        "hash_all_ok": "全部一致",
+        "hash_open": "打开",
+        "hash_no_files": "没有要哈希的文件",
+        # ── Presets ──
+        "presets_title": "预设",
+        "presets_list": "预设列表",
+        "presets_name": "名称",
+        "presets_desc": "描述",
+        "presets_save": "保存当前设置",
+        "presets_load": "加载",
+        "presets_delete": "删除",
+        "presets_saved": "已保存",
+        "presets_loaded": "已加载: {name}",
+        "presets_deleted": "已删除: {name}",
+        "presets_name_required": "请输入预设名称",
+        "presets_load_failed": "加载失败: {name}",
+        "presets_empty": "（空）",
+        "presets_confirm_delete": "删除预设 {name}？",
     },
     "en": {
         "window_title": "PhotoS — Batch Image Compression & Conversion",
@@ -811,6 +898,91 @@ STRINGS = {
         "dep_installed": "installed",
         "dep_missing": "not installed",
         "about_license": "License: MIT License",
+        # ── More tools menu ──
+        "more_btn": "More Tools",
+        "more_watch": "Folder Watch",
+        "more_contact": "Contact Sheet",
+        "more_cull": "Cull Filter",
+        "more_hash": "Checksums",
+        "more_presets": "Presets",
+        # ── Visual preview ──
+        "preview_render": "Rendering preview…",
+        "preview_error": "Preview failed: {err}",
+        "preview_rendered": "{in_size} → {out_size} · q{q}",
+        # ── Folder watcher ──
+        "watch_title": "Folder Watcher",
+        "watch_dir": "Watch directory",
+        "watch_recursive": "Include subfolders",
+        "watch_outdir": "Output dir (blank = same folder)",
+        "watch_format": "Output format",
+        "watch_quality": "Quality",
+        "watch_remove_original": "Delete original after processing",
+        "watch_start": "Start watching",
+        "watch_stop": "Stop",
+        "watch_running": "Watching…",
+        "watch_stopped": "Stopped",
+        "watch_processed": "Processed {n} files",
+        "watch_no_dir": "Pick a directory to watch",
+        "watch_no_watchdog": "watchdog not installed — pip install photo-s-tools[watch]",
+        # ── Contact sheet ──
+        "contact_title": "Contact Sheet",
+        "contact_output": "Output file",
+        "contact_cols": "Columns",
+        "contact_thumb": "Thumbnail WxH",
+        "contact_caption": "Show filenames",
+        "contact_bg": "Background (#RRGGBB)",
+        "contact_generate": "Generate",
+        "contact_done": "Saved: {path}",
+        "contact_failed": "Generation failed: {err}",
+        "contact_open": "Open",
+        "contact_need_files": "Add and check images first",
+        "contact_bad_bg": "Invalid background color, using black",
+        # ── Cull ──
+        "cull_title": "Cull Filter",
+        "cull_overexposed": "Overexposed max %",
+        "cull_underexposed": "Underexposed max %",
+        "cull_lum_min": "Luminance min (0-1)",
+        "cull_lum_max": "Luminance max (0-1)",
+        "cull_sharp": "Sharpness min",
+        "cull_scan": "Scan",
+        "cull_apply": "Keep only matches",
+        "cull_kept": "Matched {kept}/{total}",
+        "cull_failed": "Scan failed: {err}",
+        "cull_no_files": "No files in the list",
+        "cull_processing": "Cannot apply while processing",
+        "undo_cull": "Undo cull (restore {n})",
+        # ── Checksums ──
+        "hash_title": "Checksums",
+        "hash_tab_gen": "Generate",
+        "hash_tab_verify": "Verify",
+        "hash_output": "Output file",
+        "hash_generate": "Generate",
+        "hash_done": "Written {path} ({n} entries)",
+        "hash_failed": "Failed: {err}",
+        "hash_choose": "Choose manifest",
+        "hash_verify": "Verify",
+        "hash_total": "{n} entries",
+        "hash_ok": "OK {n}",
+        "hash_missing": "Missing {n}",
+        "hash_mismatched": "Mismatched {n}",
+        "hash_all_ok": "All OK",
+        "hash_open": "Open",
+        "hash_no_files": "Nothing to hash",
+        # ── Presets ──
+        "presets_title": "Presets",
+        "presets_list": "Presets",
+        "presets_name": "Name",
+        "presets_desc": "Description",
+        "presets_save": "Save current settings",
+        "presets_load": "Load",
+        "presets_delete": "Delete",
+        "presets_saved": "Saved",
+        "presets_loaded": "Loaded: {name}",
+        "presets_deleted": "Deleted: {name}",
+        "presets_name_required": "Enter a preset name",
+        "presets_load_failed": "Failed to load: {name}",
+        "presets_empty": "(empty)",
+        "presets_confirm_delete": "Delete preset {name}?",
     },
 }
 
@@ -1428,6 +1600,13 @@ class PhotoSApp:
         )
         self.undo_btn.pack(side="left", padx=(8, 0))
         self._sync_undo_btn()
+
+        self.more_btn = FlatButton(
+            wf, text=self._t("more_btn"), command=self._post_more_menu,
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+        )
+        self.more_btn.pack(side="left", padx=(8, 0))
 
         self.file_count_label = tk.Label(
             toolbar, text=self._t("files_count", n=0), font=FONT_SMALL,
@@ -2806,6 +2985,122 @@ class PhotoSApp:
         return build_gallery(list(paths), out_dir, title=title,
                              thumb_size=thumb_size)
 
+    def _preview_render(self, path, options):
+        """Sync: render one file through the real engine pipeline."""
+        from .engine import process_image
+        return process_image(path, options)
+
+    def _preview_options(self, tempdir):
+        """Sync: options for a preview render. NEVER deletes the source:
+        remove_original is force-set to False, and naming/output are pinned
+        so the result lands predictably inside the temp dir."""
+        from dataclasses import replace
+        opts = self._build_options()
+        return replace(opts, output_dir=tempdir, overwrite=True,
+                       remove_original=False, suffix="", prefix="",
+                       rename_pattern="", folder_pattern=None,
+                       output_sizes=None)
+
+    def _contact_sheet_build(self, files, output, cols=4,
+                             thumb_size=(240, 240), captions=True,
+                             bg=(0, 0, 0)):
+        """Sync: build a contact sheet (thin wrapper so tests can call it
+        without touching Tk)."""
+        from .contact import build_contact_sheet
+        return build_contact_sheet(files, output, cols=cols,
+                                   thumb_size=thumb_size, captions=captions,
+                                   bg=bg)
+
+    def _cull_scan(self, paths, thresholds, progress_cb=None):
+        """Sync: classify files against exposure/sharpness thresholds."""
+        from .cull import cull_files
+        return cull_files(list(paths), progress_callback=progress_cb,
+                          **thresholds)
+
+    def _hash_generate(self, paths, output, algorithm="sha256",
+                       progress_cb=None):
+        """Sync: hash files and write a manifest (returns the output path)."""
+        from .check import compute_checksums, write_manifest
+        entries = compute_checksums(list(paths), algorithm=algorithm,
+                                    progress_callback=progress_cb)
+        write_manifest(output, entries, algorithm=algorithm)
+        return output
+
+    def _hash_verify(self, path):
+        """Sync: verify a manifest (returns the verify_manifest report)."""
+        from .check import verify_manifest
+        return verify_manifest(path)
+
+    def _apply_options_to_ui(self, opts):
+        """Map a ProcessOptions back onto the GUI's tk.Variables (preset
+        load). Forgiving: each field is wrapped in try/except so an
+        unexpected value degrades instead of aborting. Fields without a GUI
+        var (gpx_trace, scrub, date_shift, resume, …) are skipped."""
+        def _set(var, value, fmt=str):
+            try:
+                if value is None:
+                    if isinstance(var, tk.StringVar):
+                        var.set("")
+                    return
+                var.set(fmt(value))
+            except Exception:
+                pass
+
+        # booleans
+        for name in ("preserve_exif", "optimize", "progressive", "overwrite",
+                     "raw_half_size", "raw_auto_bright", "auto_rotate",
+                     "remove_original", "strip_gps", "keep_mtime",
+                     "grayscale", "sepia", "auto_levels", "srgb",
+                     "flatten_cmyk", "evaluate", "blur_score", "resume",
+                     "sync_date", "scrub"):
+            _set(getattr(self, name), getattr(opts, name), bool)
+        # floats / sliders
+        for name in ("brightness", "contrast", "saturation", "gamma",
+                     "sharpen", "ev"):
+            _set(getattr(self, name), getattr(opts, name), float)
+        # strings (None → "")
+        for name in ("output_dir", "prefix", "suffix", "scale_percent",
+                     "max_width", "max_height", "max_pixels",
+                     "watermark_text", "watermark_image", "auto_exposure",
+                     "log_curve", "denoise", "max_straighten_angle",
+                     "wb_temp", "wb_reference", "print_size", "crop",
+                     "crop_ratio", "rotate_bg", "flip", "pad_ratio",
+                     "pad_bg", "rename_pattern", "folder_pattern"):
+            _set(getattr(self, name), getattr(opts, name), str)
+        # ints
+        _set(self.quality, getattr(opts, "quality", None), int)
+        _set(self.watermark_opacity, getattr(opts, "watermark_opacity", None),
+             int)
+        _set(self.jobs, getattr(opts, "jobs", None), str)
+        _set(self.output_format, getattr(opts, "output_format", None), str)
+        # rotate field name differs from the var
+        _set(self.rotate, getattr(opts, "rotate_degrees", None), str)
+        # watermark position (only set when the preset carries a valid value)
+        pos = getattr(opts, "watermark_position", None)
+        if pos:
+            _set(self.watermark_position, pos, str)
+        # target_size_bytes → target mode on + value/unit
+        try:
+            tsz = getattr(opts, "target_size_bytes", None)
+            if tsz:
+                self.target_size_mode.set(True)
+                if tsz >= 1024 * 1024:
+                    self.target_size_value.set(str(round(tsz / 1024 / 1024)))
+                    self.target_size_unit.set("MB")
+                else:
+                    self.target_size_value.set(str(round(tsz / 1024)))
+                    self.target_size_unit.set("KB")
+        except Exception:
+            pass
+        # output_sizes list[tuple] → "label:WxH,..." (inverse of _parse_sizes)
+        try:
+            sizes = getattr(opts, "output_sizes", None)
+            if sizes:
+                self.output_sizes.set(",".join(
+                    f"{label}:{w}x{h}" for label, w, h in sizes))
+        except Exception:
+            pass
+
     def _show_gallery_export(self):
         """Gallery export dialog: title + thumb size + output dir, then
         build the HTML gallery in a background thread (thumbnail
@@ -3310,6 +3605,28 @@ class PhotoSApp:
         entry = self._push_undo(
             self._t("undo_tag", name=os.path.basename(path)), revert)
         return True, msg, revert, entry
+
+    def _post_more_menu(self):
+        """Toolbar 'More Tools' popup: watch / contact sheet / cull / hash /
+        presets. A single button keeps the workflow row uncluttered; the whole
+        menu locks during processing (it is not in the lockout exemption)."""
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(label=self._t("more_watch"),
+                         command=self._show_watch)
+        menu.add_command(label=self._t("more_contact"),
+                         command=self._show_contact_sheet)
+        menu.add_command(label=self._t("more_cull"),
+                         command=self._show_cull)
+        menu.add_command(label=self._t("more_hash"),
+                         command=self._show_hash)
+        menu.add_command(label=self._t("more_presets"),
+                         command=self._show_presets)
+        try:
+            menu.tk_popup(self.more_btn.winfo_rootx(),
+                          self.more_btn.winfo_rooty()
+                          + self.more_btn.winfo_height())
+        finally:
+            menu.grab_release()
 
     def _show_review(self):
         """Lightbox review dialog: navigate, rate 0-5, tag keywords/title,
@@ -4224,8 +4541,810 @@ class PhotoSApp:
             jobs=jobs,
         )
 
+    def _show_watch(self):
+        """Folder watcher: auto-process new images dropped into a directory.
+        Runs in a daemon thread (watchdog Observer); closing the dialog stops
+        it. Uses the current watch fields, not the main-window options."""
+        win = tk.Toplevel(self.root)
+        win.title(self._t("watch_title"))
+        win.geometry("560x460")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+
+        from .engine import ProcessOptions, SUPPORTED_FORMATS
+
+        watch_dir = tk.StringVar()
+        out_dir = tk.StringVar()
+        recursive = tk.BooleanVar(value=False)
+        fmt = tk.StringVar(value=self.output_format.get() or "JPEG")
+        quality = tk.IntVar(value=85)
+        rm_orig = tk.BooleanVar(value=False)
+        state = {"stop": threading.Event(), "running": False, "count": 0,
+                 "thread": None}
+
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=20, pady=16)
+        body.columnconfigure(1, weight=1)
+
+        def _row(row, label_key, var, browse_dir=False):
+            tk.Label(body, text=self._t(label_key), font=FONT_SMALL,
+                     fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+                row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 10))
+            ttk.Entry(body, textvariable=var, font=FONT_BODY).grid(
+                row=row, column=1, sticky="ew", pady=(0, 6))
+            if browse_dir:
+                def _browse():
+                    if self._dlg_cooldown_active():
+                        return
+                    p = filedialog.askdirectory()
+                    self._after_file_dialog()
+                    if p:
+                        var.set(p)
+                FlatButton(body, text=self._t("browse"), command=_browse,
+                           bg=COLORS["card"], fg=COLORS["text"],
+                           hover_bg=COLORS["bg"],
+                           border_color=COLORS["border"],
+                           font=FONT_SMALL).grid(
+                    row=row, column=2, sticky="w", padx=(8, 0), pady=(0, 6))
+
+        _row(0, "watch_dir", watch_dir, browse_dir=True)
+        _row(2, "watch_outdir", out_dir, browse_dir=True)
+
+        ttk.Checkbutton(body, text=self._t("watch_recursive"),
+                        variable=recursive).grid(
+            row=4, column=0, columnspan=3, sticky="w", pady=(2, 6))
+
+        tk.Label(body, text=self._t("watch_format"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=5, column=0, sticky="w", pady=(0, 6), padx=(0, 10))
+        ttk.Combobox(body, textvariable=fmt,
+                     values=list(SUPPORTED_FORMATS), state="readonly",
+                     font=FONT_BODY).grid(row=5, column=1, columnspan=2,
+                                          sticky="ew", pady=(0, 6))
+
+        qrow = tk.Frame(body, bg=COLORS["bg"])
+        qrow.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(2, 2))
+        qval = tk.Label(qrow, text=str(quality.get()), font=FONT_SMALL,
+                        fg=COLORS["accent"], bg=COLORS["bg"], width=4)
+        qval.pack(side="right")
+        qlbl = tk.Label(qrow, text=self._t("watch_quality"), font=FONT_SMALL,
+                        fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        qlbl.pack(side="left")
+        ttk.Scale(qrow, from_=1, to=100, variable=quality,
+                  command=lambda v: qval.configure(text=str(int(float(v)))))\
+            .pack(side="left", fill="x", expand=True, padx=(8, 8))
+
+        ttk.Checkbutton(body, text=self._t("watch_remove_original"),
+                        variable=rm_orig).grid(
+            row=7, column=0, columnspan=3, sticky="w", pady=(2, 10))
+
+        btns = tk.Frame(body, bg=COLORS["bg"])
+        btns.grid(row=8, column=0, columnspan=3, sticky="w")
+        start_btn = FlatButton(btns, text=self._t("watch_start"),
+                               command=lambda: _start(),
+                               bg=COLORS["accent"],
+                               hover_bg=COLORS["accent_hover"])
+        start_btn.pack(side="left")
+        stop_btn = FlatButton(btns, text=self._t("watch_stop"),
+                              command=lambda: _stop(),
+                              bg=COLORS["card"], fg=COLORS["text"],
+                              hover_bg=COLORS["bg"],
+                              border_color=COLORS["border"])
+        stop_btn.pack(side="left", padx=(8, 0))
+        stop_btn.configure(state="disabled")
+
+        status = tk.Label(body, text="", font=FONT_SMALL,
+                          fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status.grid(row=9, column=0, columnspan=3, sticky="w", pady=(10, 0))
+
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def _start():
+            d = watch_dir.get().strip()
+            if not d or not os.path.isdir(d):
+                status.configure(text=self._t("watch_no_dir"),
+                                 fg=COLORS["danger"])
+                return
+            import importlib.util
+            if importlib.util.find_spec("watchdog") is None:
+                status.configure(text=self._t("watch_no_watchdog"),
+                                 fg=COLORS["danger"])
+                return
+            state["stop"].clear()
+            state["running"] = True
+            state["count"] = 0
+            start_btn.configure(state="disabled")
+            stop_btn.configure(state="normal")
+            status.configure(text=self._t("watch_running"),
+                             fg=COLORS["success"])
+            opts = ProcessOptions(
+                quality=int(quality.get()),
+                output_format=fmt.get(),
+                output_dir=out_dir.get().strip() or None,
+                remove_original=rm_orig.get(),
+            )
+
+            def run():
+                from .watcher import start_watching
+                start_watching(d, opts, recursive=recursive.get(),
+                               on_process=lambda r: schedule(
+                                   lambda: _on_result(r)),
+                               stop_event=state["stop"])
+                state["running"] = False
+
+            state["thread"] = threading.Thread(target=run, daemon=True)
+            state["thread"].start()
+
+        def _stop():
+            state["stop"].set()
+            start_btn.configure(state="normal")
+            stop_btn.configure(state="disabled")
+
+        def _on_result(r):
+            if not win.winfo_exists():
+                return
+            if r.success and r.output_path:
+                try:
+                    self._append_files([r.output_path])
+                except Exception:
+                    pass
+                state["count"] += 1
+                status.configure(
+                    text=self._t("watch_processed", n=state["count"]),
+                    fg=COLORS["success"])
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if win.winfo_exists():
+                win.after(80, drain)
+
+        win.protocol("WM_DELETE_WINDOW", lambda: (_stop(), win.destroy()))
+        win.after(80, drain)
+
+    def _show_contact_sheet(self):
+        """Contact sheet: grid of thumbnails from the checked files."""
+        files = self._checked_files()
+        if not files:
+            if not self.files:
+                messagebox.showinfo(self._t("contact_title"),
+                                    self._t("contact_need_files"))
+            else:
+                messagebox.showinfo(self._t("contact_title"),
+                                    self._t("check_none"))
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title(self._t("contact_title"))
+        win.geometry("480x400")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=20, pady=16)
+        body.columnconfigure(1, weight=1)
+
+        out_var = tk.StringVar(value=os.path.join(
+            os.getcwd(), "contact_sheet.png"))
+        cols_var = tk.StringVar(value="4")
+        thumb_var = tk.StringVar(value="240x240")
+        cap_var = tk.BooleanVar(value=True)
+        bg_var = tk.StringVar(value="#000000")
+
+        def _row(row, label_key, var, browse=False):
+            tk.Label(body, text=self._t(label_key), font=FONT_SMALL,
+                     fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+                row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 10))
+            ttk.Entry(body, textvariable=var, font=FONT_BODY).grid(
+                row=row, column=1, sticky="ew", pady=(0, 6))
+            if browse:
+                def _browse():
+                    if self._dlg_cooldown_active():
+                        return
+                    p = filedialog.asksaveasfilename(
+                        defaultextension=".png",
+                        initialfile=os.path.basename(var.get()),
+                        filetypes=[("PNG", "*.png"), ("JPEG", "*.jpg"),
+                                   ("WebP", "*.webp")])
+                    self._after_file_dialog()
+                    if p:
+                        var.set(p)
+                FlatButton(body, text=self._t("browse"), command=_browse,
+                           bg=COLORS["card"], fg=COLORS["text"],
+                           hover_bg=COLORS["bg"],
+                           border_color=COLORS["border"],
+                           font=FONT_SMALL).grid(
+                    row=row, column=2, sticky="w", padx=(8, 0), pady=(0, 6))
+
+        _row(0, "contact_output", out_var, browse=True)
+        _row(2, "contact_cols", cols_var)
+        _row(3, "contact_thumb", thumb_var)
+        ttk.Checkbutton(body, text=self._t("contact_caption"),
+                        variable=cap_var).grid(
+            row=4, column=0, columnspan=3, sticky="w", pady=(2, 2))
+        _row(5, "contact_bg", bg_var)
+
+        status = tk.Label(body, text="", font=FONT_SMALL,
+                          fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status.grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+        open_btn = FlatButton(body, text=self._t("contact_open"),
+                              command=lambda: _open(),
+                              bg=COLORS["card"], fg=COLORS["text"],
+                              hover_bg=COLORS["bg"],
+                              border_color=COLORS["border"],
+                              font=FONT_SMALL)
+        open_btn.grid(row=7, column=1, sticky="w", pady=(8, 0))
+        open_btn.grid_remove()
+
+        gen_btn = FlatButton(body, text=self._t("contact_generate"),
+                             command=lambda: _generate(),
+                             bg=COLORS["accent"],
+                             hover_bg=COLORS["accent_hover"])
+        gen_btn.grid(row=7, column=0, sticky="w", pady=(8, 0))
+
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def _parse_thumb():
+            from .cli import _parse_dimensions
+            try:
+                tw, th = _parse_dimensions(thumb_var.get().strip())
+                return (tw or 240, th or 240)
+            except Exception:
+                return (240, 240)
+
+        def _parse_cols():
+            try:
+                return max(1, int(cols_var.get()))
+            except (ValueError, TypeError):
+                return 4
+
+        def _parse_bg():
+            from .adjust import hex_to_rgb
+            try:
+                return hex_to_rgb(bg_var.get().strip())
+            except (ValueError, AttributeError):
+                status.configure(text=self._t("contact_bad_bg"),
+                                 fg=COLORS["warning"])
+                return (0, 0, 0)
+
+        def _generate():
+            gen_btn.configure(state="disabled")
+            status.configure(text=self._t("preview_render"))
+            output = out_var.get().strip()
+            captions = cap_var.get()
+            bg = _parse_bg()
+
+            def run():
+                try:
+                    result = self._contact_sheet_build(
+                        files, output, cols=_parse_cols(),
+                        thumb_size=_parse_thumb(), captions=captions, bg=bg)
+                    schedule(lambda: _done(result))
+                except Exception as e:
+                    schedule(lambda: _done(None, str(e)))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        def _done(result, err=None):
+            if not win.winfo_exists():
+                return
+            gen_btn.configure(state="normal")
+            if err or not result:
+                status.configure(text=self._t("contact_failed",
+                                              err=err or "?"),
+                                 fg=COLORS["danger"])
+                return
+            status.configure(text=self._t("contact_done", path=result),
+                             fg=COLORS["success"])
+            open_btn.grid()
+
+        def _open():
+            p = out_var.get().strip()
+            if p and os.path.isfile(p):
+                webbrowser.open("file://" + os.path.abspath(p))
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if win.winfo_exists():
+                win.after(80, drain)
+
+        win.after(80, drain)
+
+    def _show_cull(self):
+        """Cull: classify the file list by exposure/sharpness thresholds,
+        then optionally keep only the matches (removing the rest, undoable)."""
+        if not self.files:
+            messagebox.showinfo(self._t("cull_title"),
+                                self._t("cull_no_files"))
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title(self._t("cull_title"))
+        win.geometry("640x540")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=20, pady=16)
+        body.columnconfigure(1, weight=1)
+
+        ov = tk.StringVar(); un = tk.StringVar()
+        lmin = tk.StringVar(); lmax = tk.StringVar(); shp = tk.StringVar()
+        state = {"results": None}
+
+        def _row(row, label_key, var, hint=""):
+            tk.Label(body, text=self._t(label_key) + (hint or ""),
+                     font=FONT_SMALL, fg=COLORS["text_secondary"],
+                     bg=COLORS["bg"]).grid(row=row, column=0, sticky="w",
+                                           pady=(0, 6), padx=(0, 10))
+            ttk.Entry(body, textvariable=var, font=FONT_BODY, width=10).grid(
+                row=row, column=1, sticky="w", pady=(0, 6))
+
+        _row(0, "cull_overexposed", ov, " %")
+        _row(1, "cull_underexposed", un, " %")
+        _row(2, "cull_lum_min", lmin)
+        _row(3, "cull_lum_max", lmax)
+        _row(4, "cull_sharp", shp)
+
+        def _thresholds():
+            def _num(v):
+                v = v.get().strip()
+                return float(v) if v else None
+            return {"overexposed_max": _num(ov),
+                    "underexposed_max": _num(un),
+                    "luminance_min": _num(lmin),
+                    "luminance_max": _num(lmax),
+                    "sharpness_min": _num(shp)}
+
+        btns = tk.Frame(body, bg=COLORS["bg"])
+        btns.grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 8))
+        scan_btn = FlatButton(btns, text=self._t("cull_scan"),
+                              command=lambda: _scan(),
+                              bg=COLORS["accent"],
+                              hover_bg=COLORS["accent_hover"])
+        scan_btn.pack(side="left")
+        apply_btn = FlatButton(btns, text=self._t("cull_apply"),
+                               command=lambda: _apply(),
+                               bg=COLORS["card"], fg=COLORS["text"],
+                               hover_bg=COLORS["bg"],
+                               border_color=COLORS["border"])
+        apply_btn.pack(side="left", padx=(8, 0))
+        apply_btn.configure(state="disabled")
+
+        status = tk.Label(body, text="", font=FONT_SMALL,
+                          fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status.grid(row=6, column=0, columnspan=3, sticky="w", pady=(0, 6))
+
+        tree = ttk.Treeview(body, columns=("lum", "over", "under", "blur",
+                                           "kept"), show="headings",
+                            height=12)
+        for c, w, t in (("lum", 60, self._t("cull_lum_min").replace(
+                             "Luminance min", "Lum")),
+                        ("over", 50, "%"), ("under", 50, "%"),
+                        ("blur", 50, "blur"), ("kept", 50, "✓")):
+            tree.heading(c, text=t)
+            tree.column(c, width=w, anchor="center")
+        tree.column("lum", width=70)
+        vsb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.grid(row=7, column=0, columnspan=3, sticky="nsew")
+        vsb.grid(row=7, column=3, sticky="ns")
+        body.rowconfigure(7, weight=1)
+
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def _scan():
+            scan_btn.configure(state="disabled")
+            status.configure(text=self._t("preview_render"))
+            th = _thresholds()
+
+            def run():
+                try:
+                    results = self._cull_scan(self.files, th)
+                    schedule(lambda: _scanned(results))
+                except Exception as e:
+                    schedule(lambda: status.configure(
+                        text=self._t("cull_failed", err=str(e)),
+                        fg=COLORS["danger"]))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        def _scanned(results):
+            if not win.winfo_exists():
+                return
+            scan_btn.configure(state="normal")
+            state["results"] = results
+            kept = sum(1 for r in results if r["kept"])
+            status.configure(
+                text=self._t("cull_kept", kept=kept, total=len(results)),
+                fg=COLORS["accent"])
+            for item in tree.get_children():
+                tree.delete(item)
+            for r in results:
+                tree.insert("", "end", values=(
+                    f"{r['luminance']:.2f}", f"{r['overexposed_pct']:.1f}",
+                    f"{r['underexposed_pct']:.1f}",
+                    r.get("blur_score", "-"),
+                    "✓" if r["kept"] else "✗"))
+            apply_btn.configure(state="normal")
+
+        def _apply():
+            if self.processing:
+                status.configure(text=self._t("cull_processing"),
+                                 fg=COLORS["warning"])
+                return
+            results = state.get("results")
+            if not results:
+                return
+            kept = [r["path"] for r in results if r["kept"]]
+            kept_set = set(kept)
+            removed = [(i, f) for i, f in enumerate(self.files)
+                       if f not in kept_set]
+            if not removed:
+                return
+            was_checked = set(self._checked - kept_set)
+            self.files = kept
+            self._checked &= kept_set
+            self._refresh_file_list()
+            self._update_stats()
+            self._push_undo(self._t("undo_cull", n=len(removed)),
+                            lambda: self._restore_removed(list(removed),
+                                                          set(was_checked)))
+            status.configure(text=self._t("cull_kept", kept=len(kept),
+                                          total=len(self.files)),
+                             fg=COLORS["success"])
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if win.winfo_exists():
+                win.after(80, drain)
+
+        win.after(80, drain)
+
+    def _show_hash(self):
+        """Checksums: generate a manifest of the checked files, or verify an
+        existing one."""
+        win = tk.Toplevel(self.root)
+        win.title(self._t("hash_title"))
+        win.geometry("600x500")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+
+        nb = ttk.Notebook(win)
+        nb.pack(fill="both", expand=True, padx=12, pady=12)
+
+        # ── Generate tab ──
+        gen = tk.Frame(nb, bg=COLORS["bg"])
+        nb.add(gen, text=self._t("hash_tab_gen"))
+        gen.columnconfigure(1, weight=1)
+        out_var = tk.StringVar(value=os.path.join(os.getcwd(),
+                                                  "manifest.csv"))
+        status_g = tk.Label(gen, text="", font=FONT_SMALL,
+                            fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status_g.grid(row=0, column=0, columnspan=3, sticky="w", pady=(4, 8))
+        tk.Label(gen, text=self._t("hash_output"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=1, column=0, sticky="w", padx=(0, 10), pady=(0, 6))
+        ttk.Entry(gen, textvariable=out_var, font=FONT_BODY).grid(
+            row=1, column=1, sticky="ew", pady=(0, 6))
+
+        def _browse_out():
+            if self._dlg_cooldown_active():
+                return
+            p = filedialog.asksaveasfilename(
+                defaultextension=".csv", initialfile="manifest.csv",
+                filetypes=[("CSV", "*.csv")])
+            self._after_file_dialog()
+            if p:
+                out_var.set(p)
+
+        FlatButton(gen, text=self._t("browse"), command=_browse_out,
+                   bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+                   border_color=COLORS["border"],
+                   font=FONT_SMALL).grid(row=1, column=2, sticky="w",
+                                         padx=(8, 0), pady=(0, 6))
+        open_g = FlatButton(gen, text=self._t("hash_open"),
+                            command=lambda: _open_path(out_var.get()),
+                            bg=COLORS["card"], fg=COLORS["text"],
+                            hover_bg=COLORS["bg"],
+                            border_color=COLORS["border"], font=FONT_SMALL)
+        open_g.grid(row=2, column=1, sticky="w", pady=(4, 0))
+        open_g.grid_remove()
+        FlatButton(gen, text=self._t("hash_generate"), command=lambda: _gen(),
+                   bg=COLORS["accent"],
+                   hover_bg=COLORS["accent_hover"]).grid(
+            row=2, column=0, sticky="w", pady=(4, 0))
+
+        # ── Verify tab ──
+        ver = tk.Frame(nb, bg=COLORS["bg"])
+        nb.add(ver, text=self._t("hash_tab_verify"))
+        ver.columnconfigure(1, weight=1)
+        manifest_var = tk.StringVar()
+        status_v = tk.Label(ver, text="", font=FONT_SMALL,
+                            fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status_v.grid(row=0, column=0, columnspan=3, sticky="w", pady=(4, 8))
+
+        def _browse_manifest():
+            if self._dlg_cooldown_active():
+                return
+            p = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
+            self._after_file_dialog()
+            if p:
+                manifest_var.set(p)
+
+        tk.Label(ver, text=self._t("hash_choose"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=1, column=0, sticky="w", padx=(0, 10), pady=(0, 6))
+        ttk.Entry(ver, textvariable=manifest_var, font=FONT_BODY).grid(
+            row=1, column=1, sticky="ew", pady=(0, 6))
+        FlatButton(ver, text=self._t("browse"), command=_browse_manifest,
+                   bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+                   border_color=COLORS["border"],
+                   font=FONT_SMALL).grid(row=1, column=2, sticky="w",
+                                         padx=(8, 0), pady=(0, 6))
+        FlatButton(ver, text=self._t("hash_verify"), command=lambda: _ver(),
+                   bg=COLORS["accent"], hover_bg=COLORS["accent_hover"]).grid(
+            row=2, column=0, sticky="w", pady=(4, 0))
+        tree = ttk.Treeview(ver, columns=("kind", "detail"), show="headings",
+                            height=10)
+        tree.heading("kind", text="")
+        tree.heading("detail", text="")
+        tree.column("kind", width=90, anchor="w")
+        tree.column("detail", width=420, anchor="w")
+        tree.grid(row=3, column=0, columnspan=3, sticky="nsew", pady=(8, 0))
+        ver.rowconfigure(3, weight=1)
+
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def _gen():
+            files = self._checked_files()
+            if not files:
+                status_g.configure(text=self._t("hash_no_files"),
+                                   fg=COLORS["warning"])
+                return
+            status_g.configure(text=self._t("preview_render"))
+            output = out_var.get().strip()
+
+            def run():
+                try:
+                    self._hash_generate(files, output)
+                    schedule(lambda: _gen_done())
+                except Exception as e:
+                    schedule(lambda: status_g.configure(
+                        text=self._t("hash_failed", err=str(e)),
+                        fg=COLORS["danger"]))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        def _gen_done():
+            if not win.winfo_exists():
+                return
+            status_g.configure(
+                text=self._t("hash_done", path=out_var.get(),
+                             n=len(self._checked_files())),
+                fg=COLORS["success"])
+            open_g.grid()
+
+        def _ver():
+            m = manifest_var.get().strip()
+            if not m:
+                return
+            status_v.configure(text=self._t("preview_render"))
+
+            def run():
+                try:
+                    report = self._hash_verify(m)
+                    schedule(lambda: _ver_done(report))
+                except Exception as e:
+                    schedule(lambda: status_v.configure(
+                        text=self._t("hash_failed", err=str(e)),
+                        fg=COLORS["danger"]))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        def _ver_done(report):
+            if not win.winfo_exists():
+                return
+            ok_all = (report["missing"] == [] and report["mismatched"] == [])
+            status_v.configure(
+                text=" · ".join(filter(None, [
+                    self._t("hash_total", n=report["total"]),
+                    self._t("hash_ok", n=report["ok"]),
+                    (self._t("hash_missing", n=len(report["missing"]))
+                     if report["missing"] else ""),
+                    (self._t("hash_mismatched", n=len(report["mismatched"]))
+                     if report["mismatched"] else ""),
+                ])) or self._t("hash_all_ok"),
+                fg=COLORS["success"] if ok_all else COLORS["danger"])
+            for item in tree.get_children():
+                tree.delete(item)
+            for p in report["missing"]:
+                tree.insert("", "end", values=(self._t("hash_missing", n=1),
+                                               p))
+            for mm in report["mismatched"]:
+                tree.insert("", "end", values=(
+                    self._t("hash_mismatched", n=1),
+                    f"{mm['path']}  (expected {mm['expected'][:12]}… "
+                    f"got {mm['actual'][:12]}…)"))
+
+        def _open_path(p):
+            if p and os.path.isfile(p):
+                webbrowser.open("file://" + os.path.abspath(p))
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if win.winfo_exists():
+                win.after(80, drain)
+
+        win.after(80, drain)
+
+    def _show_presets(self):
+        """Presets: save / load / delete named option sets (stored as JSON in
+        ~/.photos/presets). Load applies the preset back onto the settings."""
+        win = tk.Toplevel(self.root)
+        win.title(self._t("presets_title"))
+        win.geometry("520x440")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+
+        from . import presets
+
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=20, pady=16)
+        body.columnconfigure(1, weight=1)
+
+        tk.Label(body, text=self._t("presets_list"), font=FONT_BODY,
+                 fg=COLORS["text"], bg=COLORS["bg"]).grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        listbox = tk.Listbox(body, height=8, font=FONT_BODY,
+                             selectmode=tk.SINGLE,
+                             bg=COLORS["card"], fg=COLORS["text"],
+                             highlightthickness=0,
+                             relief=tk.FLAT)
+        listbox.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        body.rowconfigure(1, weight=1)
+
+        tk.Label(body, text=self._t("presets_name"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=2, column=0, sticky="w", padx=(0, 10), pady=(0, 6))
+        name_var = tk.StringVar()
+        ttk.Entry(body, textvariable=name_var, font=FONT_BODY).grid(
+            row=2, column=1, columnspan=2, sticky="ew", pady=(0, 6))
+        tk.Label(body, text=self._t("presets_desc"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=3, column=0, sticky="w", padx=(0, 10), pady=(0, 6))
+        desc_var = tk.StringVar()
+        ttk.Entry(body, textvariable=desc_var, font=FONT_BODY).grid(
+            row=3, column=1, columnspan=2, sticky="ew", pady=(0, 6))
+
+        status = tk.Label(body, text="", font=FONT_SMALL,
+                          fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status.grid(row=4, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+        btns = tk.Frame(body, bg=COLORS["bg"])
+        btns.grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        FlatButton(btns, text=self._t("presets_save"), command=lambda: _save(),
+                   bg=COLORS["accent"], hover_bg=COLORS["accent_hover"]
+                   ).pack(side="left")
+        FlatButton(btns, text=self._t("presets_load"), command=lambda: _load(),
+                   bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+                   border_color=COLORS["border"]).pack(side="left", padx=(8, 0))
+        FlatButton(btns, text=self._t("presets_delete"),
+                   command=lambda: _delete(),
+                   bg=COLORS["card"], fg=COLORS["danger"],
+                   hover_bg=COLORS["danger_hover"],
+                   border_color=COLORS["border"]).pack(side="left", padx=(8, 0))
+
+        def _refresh():
+            listbox.delete(0, tk.END)
+            try:
+                items = presets.list_presets()
+            except Exception:
+                items = []
+            if not items:
+                listbox.insert(tk.END, self._t("presets_empty"))
+                listbox.itemconfig(0, fg=COLORS["text_secondary"])
+            for it in items:
+                listbox.insert(tk.END, it)
+
+        def _selected_name():
+            sel = listbox.curselection()
+            if not sel:
+                return None
+            item = listbox.get(sel[0])
+            if item == self._t("presets_empty"):
+                return None
+            return item.split(" — ", 1)[0]
+
+        def _save():
+            name = name_var.get().strip()
+            if not name:
+                status.configure(text=self._t("presets_name_required"),
+                                 fg=COLORS["warning"])
+                return
+            try:
+                presets.save_preset(name, self._build_options(),
+                                    desc_var.get().strip())
+            except Exception as e:
+                status.configure(text=self._t("presets_load_failed",
+                                              name=str(e)),
+                                 fg=COLORS["danger"])
+                return
+            status.configure(text=self._t("presets_saved"),
+                             fg=COLORS["success"])
+            _refresh()
+
+        def _load():
+            name = _selected_name()
+            if not name:
+                return
+            try:
+                opts = presets.load_preset(name)
+            except Exception:
+                opts = None
+            if opts is None:
+                status.configure(text=self._t("presets_load_failed",
+                                              name=name),
+                                 fg=COLORS["danger"])
+                return
+            self._apply_options_to_ui(opts)
+            status.configure(text=self._t("presets_loaded", name=name),
+                             fg=COLORS["success"])
+
+        def _delete():
+            name = _selected_name()
+            if not name:
+                return
+            if not messagebox.askyesno(
+                    self._t("presets_title"),
+                    self._t("presets_confirm_delete", name=name)):
+                return
+            try:
+                presets.delete_preset(name)
+            except Exception as e:
+                status.configure(text=self._t("presets_load_failed",
+                                              name=str(e)),
+                                 fg=COLORS["danger"])
+                return
+            status.configure(text=self._t("presets_deleted", name=name),
+                             fg=COLORS["success"])
+            _refresh()
+
+        _refresh()
+
     def _preview(self):
-        """Preview what would happen without processing."""
+        """Visual preview: render the checked file through the REAL engine
+        pipeline into a temp dir and show original vs processed side by side,
+        auto-refreshing (debounced ~400ms) as settings change. Never deletes
+        the source — _preview_options force-sets remove_original=False."""
         files = self._checked_files()
         if not files:
             if not self.files:
@@ -4236,41 +5355,149 @@ class PhotoSApp:
                                        self._t("check_none"))
             return
 
-        options = self._build_options()
-        yes, no = self._t("yes"), self._t("no")
-        yn = lambda b: yes if b else no
+        from PIL import Image, ImageTk
 
-        lines = [self._t("preview_header"), "=" * 40, ""]
-        lines.append(self._t("pv_files", n=len(files)))
-        lines.append(self._t("pv_format", fmt=options.output_format))
-        if options.target_size_bytes:
-            lines.append(self._t("pv_target", size=format_size(options.target_size_bytes)))
-            lines.append(self._t("pv_qmax", q=options.quality))
-        else:
-            lines.append(self._t("pv_quality", q=options.quality))
+        tempdir = tempfile.mkdtemp(prefix="photos_preview_")
+        win = tk.Toplevel(self.root)
+        win.title(self._t("preview_title"))
+        win.geometry("1000x640")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
 
-        if options.max_width or options.max_height:
-            w = options.max_width or self._t("auto")
-            h = options.max_height or self._t("auto")
-            lines.append(self._t("pv_maxsize", w=w, h=h))
+        state = {"files": files, "idx": 0, "sig": None, "stable": 0,
+                 "inflight": False, "render_sig": None, "tempdir": tempdir}
 
-        if options.scale_percent:
-            lines.append(self._t("pv_scale", s=options.scale_percent))
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=16, pady=12)
 
-        lines.append(self._t("pv_exif", yn=yn(options.preserve_exif)))
-        lines.append(self._t("pv_optimize", yn=yn(options.optimize)))
-        lines.append(self._t("pv_progressive", yn=yn(options.progressive)))
-        lines.append(self._t("pv_overwrite", yn=yn(options.overwrite)))
-        outdir = options.output_dir or self._t("pv_outdir_same")
-        lines.append(self._t("pv_outdir", d=outdir))
-        if options.folder_pattern:
-            lines.append(self._t("pv_subfolder", p=options.folder_pattern))
-        lines.append(self._t("pv_prefix", p=options.prefix))
-        lines.append(self._t("pv_suffix", s=options.suffix))
-        lines.append("")
-        lines.append(self._t("pv_total", size=format_size(self._total_size())))
+        nav = tk.Frame(body, bg=COLORS["bg"])
+        nav.pack(fill="x", pady=(0, 8))
+        nav_lbl = tk.Label(nav, text="", font=FONT_SMALL,
+                           fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        nav_lbl.pack(side="left", padx=(0, 12))
+        FlatButton(nav, text="‹", command=lambda: _nav(-1),
+                   bg=COLORS["card"], fg=COLORS["text"],
+                   hover_bg=COLORS["bg"], border_color=COLORS["border"],
+                   font=FONT_BODY, padx=10).pack(side="left")
+        FlatButton(nav, text="›", command=lambda: _nav(1),
+                   bg=COLORS["card"], fg=COLORS["text"],
+                   hover_bg=COLORS["bg"], border_color=COLORS["border"],
+                   font=FONT_BODY, padx=10).pack(side="left", padx=(6, 0))
 
-        messagebox.showinfo(self._t("preview_title"), "\n".join(lines))
+        panels = tk.Frame(body, bg=COLORS["bg"])
+        panels.pack(fill="both", expand=True)
+        left = tk.Frame(panels, bg=COLORS["card"])
+        left.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        right = tk.Frame(panels, bg=COLORS["card"])
+        right.pack(side="left", fill="both", expand=True, padx=(4, 0))
+        tk.Label(left, text=self._t("before"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).pack(
+            anchor="w", padx=8, pady=(6, 0))
+        tk.Label(right, text=self._t("after"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).pack(
+            anchor="w", padx=8, pady=(6, 0))
+        orig_lbl = tk.Label(left, bg=COLORS["card"])
+        orig_lbl.pack(expand=True, pady=(0, 8))
+        proc_lbl = tk.Label(right, bg=COLORS["card"])
+        proc_lbl.pack(expand=True, pady=(0, 8))
+
+        status = tk.Label(body, text="", font=FONT_SMALL,
+                          fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status.pack(fill="x", pady=(8, 0))
+
+        def _render_image(lbl, path):
+            try:
+                img = _open_image_safe(path).convert("RGB")
+                img.thumbnail((430, 300), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                lbl.configure(image=photo)
+                lbl.image = photo
+            except Exception:
+                lbl.configure(image="", text=self._t("cannot_load"))
+
+        def _nav(delta):
+            n = len(state["files"])
+            state["idx"] = (state["idx"] + delta) % n
+            state["sig"] = None
+            state["stable"] = 0
+            state["inflight"] = False
+            nav_lbl.configure(text=f"{state['idx'] + 1}/{n} · "
+                              f"{os.path.basename(state['files'][state['idx']])}")
+            _render_image(orig_lbl, state["files"][state["idx"]])
+            proc_lbl.configure(image="", text=self._t("preview_render"))
+            status.configure(text="")
+
+        def _done(result, sig):
+            state["inflight"] = False
+            if not win.winfo_exists():
+                return
+            if sig != state["render_sig"]:
+                return  # stale render; a newer one is pending
+            if result.success and result.output_path:
+                _render_image(proc_lbl, result.output_path)
+                status.configure(text=self._t(
+                    "preview_rendered",
+                    in_size=format_size(result.input_size),
+                    out_size=format_size(result.output_size),
+                    q=result.achieved_quality or "-"))
+            else:
+                status.configure(text=self._t("preview_error",
+                                              err=result.error or "?"))
+
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def launch(sig, path, opts):
+            from .engine import ProcessResult
+            state["inflight"] = True
+            state["render_sig"] = sig
+            proc_lbl.configure(image="", text=self._t("preview_render"))
+            status.configure(text=self._t("preview_render"))
+
+            def render():
+                try:
+                    result = self._preview_render(path, opts)
+                except Exception as e:
+                    result = ProcessResult(
+                        input_path=path, output_path="", input_size=0,
+                        output_size=0, input_format="", output_format="",
+                        input_dims=(0, 0), output_dims=(0, 0),
+                        success=False, error=str(e))
+                schedule(lambda: _done(result, sig))
+
+            threading.Thread(target=render, daemon=True).start()
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if not win.winfo_exists():
+                # Keep draining until an in-flight render finishes, then
+                # remove the temp dir — never rmtree while writing.
+                if state["inflight"]:
+                    self.root.after(100, drain)
+                else:
+                    shutil.rmtree(state["tempdir"], ignore_errors=True)
+                return
+            cur = self._build_options()
+            if cur != state["sig"]:
+                state["sig"] = cur
+                state["stable"] = 0
+            else:
+                state["stable"] += 1
+            if state["stable"] >= 5 and not state["inflight"]:
+                launch(cur, state["files"][state["idx"]],
+                       self._preview_options(tempdir))
+            self.root.after(80, drain)
+
+        nav_lbl.configure(text=f"1/{len(state['files'])} · "
+                          f"{os.path.basename(state['files'][0])}")
+        _render_image(orig_lbl, state["files"][0])
+        self.root.after(80, drain)
 
     def _start_processing(self, file_list=None, confirm_delete=True):
         """Start batch processing in a background thread.

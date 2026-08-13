@@ -1811,31 +1811,20 @@ def run_cli(args: List[str] = None) -> int:
 
     # ── Handle 'cull' command ───────────────────────────────────────────────
     if parsed.command == "cull":
-        from .metrics import compute_exposure_stats, compute_blur_score
+        from .cull import cull_files
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
             print("❌ 没有找到支持的图片文件。No supported image files found.")
             return 1
 
-        results = []
-        for f in files:
-            s = compute_exposure_stats(f)
-            row = {"path": f, **s}
-            if parsed.sharpness_min is not None:
-                row["blur_score"] = round(compute_blur_score(f), 1)
-            keep = (s["ok"]
-                    and (parsed.overexposed_max is None
-                         or s["overexposed_pct"] <= parsed.overexposed_max)
-                    and (parsed.underexposed_max is None
-                         or s["underexposed_pct"] <= parsed.underexposed_max)
-                    and (parsed.luminance_min is None
-                         or s["luminance"] >= parsed.luminance_min)
-                    and (parsed.luminance_max is None
-                         or s["luminance"] <= parsed.luminance_max)
-                    and (parsed.sharpness_min is None
-                         or row["blur_score"] >= parsed.sharpness_min))
-            row["kept"] = keep
-            results.append(row)
+        results = cull_files(
+            files,
+            overexposed_max=parsed.overexposed_max,
+            underexposed_max=parsed.underexposed_max,
+            luminance_min=parsed.luminance_min,
+            luminance_max=parsed.luminance_max,
+            sharpness_min=parsed.sharpness_min,
+        )
 
         kept_paths = [r["path"] for r in results if r["kept"]]
         if getattr(parsed, 'list', False):

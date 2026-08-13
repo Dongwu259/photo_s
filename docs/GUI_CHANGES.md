@@ -227,7 +227,7 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 
 新增 `tests/test_gui_workflows.py`（15 个）：同步 helper 全覆盖 +
 对话框冒烟（有界 `root.update()` 轮询，不点启动按钮、不挂线程）。
-全量 453 个（含安全回归测试，见 §8.12）。
+全量 476 个（含安全回归测试，见 §8.12；更多工具与视觉预览见 §8.13）。
 
 ### 8.8 勾选式文件列表（替代选中集）
 
@@ -336,3 +336,34 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   `_authed` 无 token 时校验 `Origin` 头，跨域请求拒绝（浏览器 fetch/XHR
   必带 Origin；CLI/curl/agent 不带 Origin 不受影响）。`--token auto`
   仍是最强防护。
+
+### 8.13 更多工具入口 + 视觉预览（v1.2.0 内）
+
+审计发现 6 个 CLI/引擎功能无 GUI 入口，本轮补全：
+
+- **工具栏「更多工具」菜单**（`more_btn` + `_post_more_menu`，`tk.Menu.tk_popup`）：
+  目录监视 / 联系表 / 曝光筛选 / 校验和 / 预设。`more_btn` **不在**锁定豁免元组——
+  批处理期间整体锁定（与 review/dedup 一致）；`preview_btn` 保持豁免（只写临时
+  目录，安全）。
+- **视觉预览**（`_preview` 从文字弹窗改为真实画面）：选中图经**真实管线**
+  `process_image` 渲染到 `tempfile.mkdtemp`，原图↔处理后并排；drain 循环对比
+  `_build_options()` 签名，连续 5 tick（~400ms）稳定且无 in-flight 才渲染；
+  `_preview_options` **强制 `remove_original=False`**（预览永不删源，最高优先级
+  不变量）；临时目录在窗口销毁、渲染结束后由 root-drain 清理（绝不边写边删）。
+- **目录监视**（`_show_watch`）：watchdog 后台 daemon，`start_watching` 新增
+  `stop_event` 参数（CLI 默认 None 行为不变）；关闭对话框即停止；成功结果
+  `_append_files` 回主列表。缺 watchdog 给安装提示。
+- **联系表**（`_show_contact_sheet`）：列数/缩略图/文件名/背景色 → 线程
+  `build_contact_sheet` → 打开。
+- **曝光筛选**（`_show_cull`）：5 个阈值 → `cull_files`（**新 `photo_s/cull.py`**，
+  cli.py cull handler 委托复用，输出逐字节不变）→ 结果表 + 「仅保留符合的」
+  从列表移除并 `_push_undo`（`_restore_removed` 还原）。
+- **校验和**（`_show_hash`，ttk.Notebook 两 tab）：生成清单（`compute_checksums` +
+  `write_manifest`）/ 校验（`verify_manifest`，缺失与不匹配明细表）。
+- **预设**（`_show_presets`）：`list/save/load/delete`；`_apply_options_to_ui`
+  把 ProcessOptions 反向映射回全部 tk.Var（含 `target_size_bytes`→模式+值+单位、
+  `output_sizes`→`label:WxH` 序列化；无对应 var 字段跳过，逐字段 try/except）。
+- **测试**：`tests/test_cull.py`（8）、`tests/test_watcher.py`（2，watchdog 启动
+  竞态：观察器就绪前写入的文件会丢事件 → 先等 1.5s 再落文件）、
+  `test_gui_workflows.py` 增 seam 直调 + 5 对话框 smoke + 预览渲染/临时目录清理 +
+  锁定扩展。全量 476 个。

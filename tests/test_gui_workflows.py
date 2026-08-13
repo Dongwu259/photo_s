@@ -9,6 +9,7 @@ threads are drained with a bounded root.update() poll.
 
 import os
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -535,6 +536,10 @@ class TestProcessingLockout:
         assert app.dedup_btn.cget("state") == "disabled"
         assert app.gallery_btn.cget("state") == "normal", \
             "gallery export is read-only and must stay enabled"
+        assert app.more_btn.cget("state") == "disabled", \
+            "the whole More Tools menu locks during processing"
+        assert app.preview_btn.cget("state") == "normal", \
+            "visual preview only writes to a temp dir → stays enabled"
         app._toggle_settings(True)
         assert app.review_btn.cget("state") == "normal"
         root.destroy()
@@ -713,3 +718,206 @@ class TestCheckList:
         app._preview()
         assert len(warned) == 1
         root.destroy()
+
+
+class TestSyncSeams:
+    """Tk-free sync helpers for the new tools — exercised directly."""
+
+    def test_preview_options_never_removes_original(self, tmp_path):
+        root, app = _make_app()
+        opts = app._preview_options(str(tmp_path))
+        assert opts.remove_original is False, \
+            "preview must never delete the source"
+        assert opts.output_dir == str(tmp_path)
+        assert opts.suffix == "" and opts.prefix == ""
+        assert opts.overwrite is True
+        root.destroy()
+
+    def test_preview_render_keeps_source(self, tmp_path):
+        root, app = _make_app()
+        src = tmp_path / "a.png"
+        _img(src)
+        out = tmp_path / "out"
+        out.mkdir()
+        opts = app._preview_options(str(out))
+        result = app._preview_render(str(src), opts)
+        assert result.success, result.error
+        assert os.path.dirname(result.output_path) == str(out)
+        assert os.path.exists(src), "source file must be untouched"
+        root.destroy()
+
+    def test_contact_sheet_build(self, tmp_path):
+        root, app = _make_app()
+        files = [_img(tmp_path / f"n{i}.png", seed=i + 1) for i in range(3)]
+        out = tmp_path / "sheet.png"
+        result = app._contact_sheet_build(files, str(out), cols=2,
+                                          thumb_size=(60, 60))
+        assert result == str(out)
+        assert os.path.exists(out)
+        root.destroy()
+
+    def test_cull_scan(self, tmp_path):
+        root, app = _make_app()
+        sharp = _img(tmp_path / "s.png", seed=5)
+        results = app._cull_scan([sharp], {})
+        assert results[0]["kept"] is True
+        root.destroy()
+
+    def test_hash_generate_verify_roundtrip(self, tmp_path):
+        root, app = _make_app()
+        files = [_img(tmp_path / f"n{i}.png", seed=i + 1) for i in range(2)]
+        manifest = tmp_path / "m.csv"
+        app._hash_generate(files, str(manifest))
+        assert manifest.exists()
+        report = app._hash_verify(str(manifest))
+        assert report["total"] == 2
+        assert report["ok"] == 2
+        assert report["missing"] == [] and report["mismatched"] == []
+        # tamper one file → mismatch reported
+        with open(files[0], "ab") as f:
+            f.write(b"x")
+        report = app._hash_verify(str(manifest))
+        assert len(report["mismatched"]) == 1
+        root.destroy()
+
+
+class TestPresetsRoundtrip:
+    def test_apply_options_to_ui_roundtrip(self, tmp_path, monkeypatch):
+        root, app = _make_app()
+        # set a spread of vars
+        app.quality.set(90)
+        app.output_format.set("WebP")
+        app.max_width.set("1920")
+        app.brightness.set(1.1)
+        app.grayscale.set(True)
+        app.target_size_mode.set(True)
+        app.target_size_value.set("500")
+        app.target_size_unit.set("KB")
+        app.output_sizes.set("thumb:320x240,full:1600x1200")
+        opts = app._build_options()
+        assert opts.quality == 90
+        assert opts.target_size_bytes == 500 * 1024
+        # wipe, then apply back
+        app.quality.set(85)
+        app.max_width.set("")
+        app.grayscale.set(False)
+        app._apply_options_to_ui(opts)
+        assert app.quality.get() == 90
+        assert app.max_width.get() == "1920"
+        assert app.grayscale.get() is True
+        assert app.target_size_mode.get() is True
+        assert app.target_size_value.get() == "500"
+        assert app.output_sizes.get() == "thumb:320x240,full:1600x1200"
+        root.destroy()
+
+    def test_preset_save_load_roundtrip(self, tmp_path, monkeypatch):
+        import photo_s.presets as presets_mod
+        monkeypatch.setattr(presets_mod, "PRESETS_DIR", tmp_path / "presets")
+        root, app = _make_app()
+        app.quality.set(77)
+        app.output_format.set("PNG")
+        app.suffix.set("_web")
+        opts = app._build_options()
+        presets_mod.save_preset("mytest", opts, "desc")
+        loaded = presets_mod.load_preset("mytest")
+        assert loaded is not None
+        app.quality.set(85)
+        app._apply_options_to_ui(loaded)
+        assert app.quality.get() == 77
+        assert app.output_format.get() == "PNG"
+        assert app.suffix.get() == "_web"
+        names = [n.split(" — ", 1)[0] for n in presets_mod.list_presets()]
+        assert "mytest" in names
+        assert presets_mod.delete_preset("mytest") is True
+        root.destroy()
+
+
+class TestMoreToolDialogs:
+    def _open_dialog(self, root, app, method, title_key):
+        import tkinter as tk
+        getattr(app, method)()
+        wins = [w for w in root.winfo_children()
+                if isinstance(w, tk.Toplevel)]
+        assert wins, f"{method} opened no dialog"
+        assert app._t(title_key) in wins[-1].title()
+        return wins[-1]
+
+    def test_contact_sheet_dialog(self, tmp_path):
+        root, app = _make_app()
+        app._append_files([_img(tmp_path / "a.png", seed=1)])
+        win = self._open_dialog(root, app, "_show_contact_sheet",
+                                "contact_title")
+        win.destroy()
+        root.destroy()
+
+    def test_hash_dialog(self, tmp_path):
+        root, app = _make_app()
+        win = self._open_dialog(root, app, "_show_hash", "hash_title")
+        win.destroy()
+        root.destroy()
+
+    def test_watch_dialog(self, tmp_path):
+        root, app = _make_app()
+        win = self._open_dialog(root, app, "_show_watch", "watch_title")
+        win.destroy()
+        root.destroy()
+
+    def test_cull_dialog(self, tmp_path):
+        root, app = _make_app()
+        app._append_files([_img(tmp_path / "a.png", seed=1)])
+        win = self._open_dialog(root, app, "_show_cull", "cull_title")
+        win.destroy()
+        root.destroy()
+
+    def test_presets_dialog(self, tmp_path):
+        root, app = _make_app()
+        win = self._open_dialog(root, app, "_show_presets", "presets_title")
+        win.destroy()
+        root.destroy()
+
+
+class TestPreviewDialog:
+    def test_preview_dialog_renders(self, tmp_path):
+        """The visual preview opens, renders the source through the real
+        pipeline, and cleans up its temp dir on close."""
+        import tkinter as tk
+        import glob
+        root, app = _make_app()
+        app._append_files([_img(tmp_path / "a.png", seed=1)])
+        app._preview()
+        wins = [w for w in root.winfo_children()
+                if isinstance(w, tk.Toplevel)
+                and w.title() == app._t("preview_title")]
+        assert wins, "preview dialog did not open"
+        win = wins[0]
+        # let the drain loop debounce + render; the "after" panel fills
+        deadline = time.time() + 8
+        rendered = False
+        while time.time() < deadline:
+            root.update()
+            # processed label got an image (photo reference kept on .image)
+            for lbl in _walk_labels(win):
+                if getattr(lbl, "image", None):
+                    rendered = True
+            if rendered:
+                break
+            time.sleep(0.05)
+        assert rendered, "preview never rendered the processed image"
+        win.destroy()
+        # root-drain cleans the temp dir once no render is in flight
+        for _ in range(20):
+            root.update()
+            if not glob.glob(os.path.join(
+                    tempfile.gettempdir(), "photos_preview_*")):
+                break
+            time.sleep(0.05)
+        assert not glob.glob(os.path.join(
+            tempfile.gettempdir(), "photos_preview_*")), \
+            "preview temp dir must be cleaned up"
+        root.destroy()
+
+
+def _walk_labels(widget):
+    for c in widget.winfo_children():
+        yield c
+        yield from _walk_labels(c)
