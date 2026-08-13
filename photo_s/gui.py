@@ -196,8 +196,9 @@ STRINGS = {
         "undo_removed": "撤销移除 {n} 张",
         "undo_dedup": "撤销去重移动 {n} 张",
         "undo_tag": "撤销打标: {name}",
+        "undo_done": "已撤销",
         "about_shortcuts": "快捷键 Shortcuts",
-        "shortcuts_text": "⌘O / Ctrl+O 添加图片\n⌘⇧O / Ctrl+Shift+O 添加文件夹\n⌘R / Ctrl+R 开始处理（Esc 取消）\n⌘P / Ctrl+P 预览参数\n⌘E / Ctrl+E 审查打分\n⌘D / Ctrl+D 去重查看\n⌘G / Ctrl+G 导出画廊\n⌘Z / Ctrl+Z 撤销\n（审查窗口内：←/→ 翻页，0-5 评分，Esc 关闭）",
+        "shortcuts_text": "⌘O / Ctrl+O 添加图片\n⌘⇧O / Ctrl+Shift+O 添加文件夹\n⌘R / Ctrl+R 开始处理（Esc 取消）\n⌘P / Ctrl+P 预览参数\n⌘E / Ctrl+E 审查打分\n⌘D / Ctrl+D 去重查看\n⌘G / Ctrl+G 导出画廊\n⌘Z / Ctrl+Z 撤销\n（审查窗口内：←/→ 翻页，0-5 评分，⌘Z 撤销，Esc 关闭）",
         "dlg_skipped": "已导入 {n} 张图片，跳过 {m} 个不支持的文件",
         "dlg_no_supported": "未找到支持的图片（跳过 {m} 个不支持的文件）",
         "hint_dnd": "将图片或文件夹拖入列表，或使用上方按钮添加",
@@ -513,8 +514,9 @@ STRINGS = {
         "undo_removed": "Undo removal of {n}",
         "undo_dedup": "Undo dedup move of {n}",
         "undo_tag": "Undo tagging: {name}",
+        "undo_done": "Undone",
         "about_shortcuts": "Shortcuts 快捷键",
-        "shortcuts_text": "⌘O / Ctrl+O Add images\n⌘⇧O / Ctrl+Shift+O Add folder\n⌘R / Ctrl+R Start processing (Esc cancels)\n⌘P / Ctrl+P Preview options\n⌘E / Ctrl+E Review & rate\n⌘D / Ctrl+D Duplicates\n⌘G / Ctrl+G Export gallery\n⌘Z / Ctrl+Z Undo\n(In review: ←/→ navigate, 0-5 rate, Esc close)",
+        "shortcuts_text": "⌘O / Ctrl+O Add images\n⌘⇧O / Ctrl+Shift+O Add folder\n⌘R / Ctrl+R Start processing (Esc cancels)\n⌘P / Ctrl+P Preview options\n⌘E / Ctrl+E Review & rate\n⌘D / Ctrl+D Duplicates\n⌘G / Ctrl+G Export gallery\n⌘Z / Ctrl+Z Undo\n(In review: ←/→ navigate, 0-5 rate, ⌘Z undo, Esc close)",
         "dlg_skipped": "Imported {n} images, skipped {m} unsupported files",
         "dlg_no_supported": "No supported images found (skipped {m} unsupported files)",
         "hint_dnd": "Drag & drop images/folders into the list, or use the buttons above",
@@ -3269,7 +3271,10 @@ class PhotoSApp:
     def _review_save(self, path, rating=None, keywords=None, title=None):
         """Sync: write rating/keywords/title diffs into ``path``'s EXIF
         (PhotoS: UserComment segment; only changed fields are touched).
-        Returns (ok, message). Tk-free so tests can call it directly."""
+        Returns (ok, message, revert, entry): revert undoes this exact
+        write (None when nothing changed); entry is the global undo
+        entry pushed (None likewise). Tk-free so tests can call it
+        directly."""
         from .engine import apply_exif_tags, read_exif_metadata
 
         m = read_exif_metadata(path)
@@ -3283,16 +3288,16 @@ class PhotoSApp:
         if tl != (m.get("title") or ""):
             tags["title"] = tl
         if not tags:
-            return True, ""
+            return True, "", None, None
         prev = {"rating": m.get("rating"),
                 "keywords": ",".join(m.get("keywords") or []),
                 "title": m.get("title") or ""}
         try:
             msg = apply_exif_tags(path, tags)
         except Exception as e:
-            return False, self._t("review_save_failed", err=str(e))
+            return False, self._t("review_save_failed", err=str(e)), None, None
         if msg.startswith("⚠️"):
-            return False, msg
+            return False, msg, None, None
 
         def revert():
             # full restore — None / "" explicitly clear the fields
@@ -3302,9 +3307,9 @@ class PhotoSApp:
                  "title": prev["title"]}
             apply_exif_tags(path, t)
 
-        self._push_undo(self._t("undo_tag", name=os.path.basename(path)),
-                        revert)
-        return True, msg
+        entry = self._push_undo(
+            self._t("undo_tag", name=os.path.basename(path)), revert)
+        return True, msg, revert, entry
 
     def _show_review(self):
         """Lightbox review dialog: navigate, rate 0-5, tag keywords/title,
@@ -3333,7 +3338,7 @@ class PhotoSApp:
         win.transient(self.root)
 
         state = {"seq": [], "meta": {}, "idx": 0, "rating": None,
-                 "photo": None}
+                 "photo": None, "reverts": {}}
 
         header = tk.Frame(win, bg=COLORS["bg"])
         header.pack(fill="x", padx=20, pady=(14, 4))
@@ -3410,6 +3415,12 @@ class PhotoSApp:
             bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
             border_color=COLORS["border"], font=FONT_SMALL, padx=10, pady=3)
         save_btn.pack(side="left", padx=(8, 0))
+        FlatButton(
+            fields, text=self._t("undo"),
+            command=lambda: undo_current(),
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=10, pady=3
+        ).pack(side="left", padx=(8, 0))
 
         # Filter row
         filt = tk.Frame(win, bg=COLORS["bg"])
@@ -3474,7 +3485,7 @@ class PhotoSApp:
             if not state["seq"]:
                 return True
             p = state["seq"][state["idx"]]
-            ok, msg = self._review_save(
+            ok, msg, revert, entry = self._review_save(
                 p, rating=state["rating"],
                 keywords=keywords_var.get(),
                 title=title_var.get())
@@ -3487,10 +3498,45 @@ class PhotoSApp:
                              in keywords_var.get().strip().split(",")
                              if k.strip()]
             m["title"] = title_var.get().strip()
+            if revert is not None:
+                # dialog-scoped undo for THIS image (⌘Z in the lightbox)
+                state["reverts"].setdefault(p, []).append((entry, revert))
             if msg:
                 set_status(self._t("review_saved") + " · " + msg,
                            COLORS["accent"])
             return True
+
+        def undo_current():
+            """⌘Z / Undo button in the lightbox: revert the latest save
+            on the current image and refresh the display from disk."""
+            if not state["seq"]:
+                return
+            p = state["seq"][state["idx"]]
+            stack = state["reverts"].get(p, [])
+            if not stack:
+                set_status(self._t("undo_none"),
+                           COLORS["text_secondary"])
+                return
+            entry, revert = stack.pop()
+            try:
+                if entry in self._undo_stack:
+                    self._undo_stack.remove(entry)  # keep LIFO coherent
+                self._sync_undo_btn()
+                revert()
+            except Exception as e:
+                set_status(self._t("undo_failed", err=str(e)),
+                           COLORS["danger"])
+                return
+            try:
+                m = read_exif_metadata(p)
+                state["meta"][p] = m
+            except Exception:
+                m = state["meta"].get(p, {})
+            state["rating"] = m.get("rating")
+            keywords_var.set(",".join(m.get("keywords") or []))
+            title_var.set(m.get("title") or "")
+            _restyle_rating()
+            set_status(self._t("undo_done"), COLORS["accent"])
 
         def _restyle_rating():
             for n, btn in rating_btns.items():
@@ -3607,6 +3653,9 @@ class PhotoSApp:
             win.bind(str(n), lambda e, n=n: (
                 set_rating(n) if not _focus_in_input() else None))
         win.bind("<Escape>", lambda e: on_close())
+        # in-lightbox undo (root shortcuts don't reach Toplevel windows)
+        win.bind("<Command-z>", lambda e: undo_current())
+        win.bind("<Control-z>", lambda e: undo_current())
 
         def scan_thread():
             try:
@@ -3772,11 +3821,14 @@ class PhotoSApp:
 
     def _push_undo(self, label, run):
         """Record a reversible action (label for display, run restores
-        the previous state)."""
-        self._undo_stack.append({"label": label, "run": run})
+        the previous state). Returns the entry so callers can remove it
+        from the stack again (e.g. in-lightbox undo)."""
+        entry = {"label": label, "run": run}
+        self._undo_stack.append(entry)
         if len(self._undo_stack) > self._undo_max:
             self._undo_stack.pop(0)
         self._sync_undo_btn()
+        return entry
 
     def _sync_undo_btn(self):
         btn = getattr(self, "undo_btn", None)

@@ -227,7 +227,7 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 
 新增 `tests/test_gui_workflows.py`（15 个）：同步 helper 全覆盖 +
 对话框冒烟（有界 `root.update()` 轮询，不点启动按钮、不挂线程）。
-全量 435 个。
+全量 436 个。
 
 ### 8.8 勾选式文件列表（替代选中集）
 
@@ -305,4 +305,10 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
     也能撤销回"未评分"（`_write_usercomment` 同时修正空段残留）。
   - 审查窗口每次翻页从磁盘重读元数据（撤销 / 外部 CLI 写入在下次翻页时
     可见，不再用过期缓存）。
+  - **灯箱内撤销**：root 级 ⌘Z 到不了 Toplevel 窗口（用户在审查窗口里按
+    ⌘Z 无响应 = "无法撤销"的真相）。窗口内新增 ⌘Z/Ctrl+Z + 「撤销」按钮
+    （`undo_current`）：撤销当前图片最近一次保存（`_review_save` 现返回
+    `(ok, msg, revert, entry)` 四元组），同步从全局栈移除该条目保持 LIFO
+    一致，随后从磁盘重读并刷新评分/输入框。`_push_undo` 返回 entry 供
+    调用方移除。
 - 快捷键清单（About + STRINGS）同步加入 ⌘Z 行。

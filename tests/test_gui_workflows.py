@@ -82,7 +82,7 @@ class TestReviewHelpers:
         from photo_s.engine import read_exif_metadata
         root, app = _make_app()
         p = _img(tmp_path / "a.jpg")
-        ok, msg = app._review_save(p, rating=4, keywords="portrait,night",
+        ok, msg, _, _ = app._review_save(p, rating=4, keywords="portrait,night",
                                    title="T1")
         assert ok, msg
         m = read_exif_metadata(p)
@@ -90,7 +90,7 @@ class TestReviewHelpers:
         assert m["keywords"] == ["portrait", "night"]
         assert m["title"] == "T1"
         # an unchanged second save must be a no-op
-        ok2, msg2 = app._review_save(p, rating=4, keywords="portrait,night",
+        ok2, msg2, _, _ = app._review_save(p, rating=4, keywords="portrait,night",
                                      title="T1")
         assert ok2 and msg2 == ""
         root.destroy()
@@ -100,11 +100,11 @@ class TestReviewHelpers:
         from photo_s.engine import read_exif_metadata
         root, app = _make_app()
         p = _img(tmp_path / "a.jpg")
-        ok, _ = app._review_save(p, rating=4, keywords="beach",
+        ok, _, _, _ = app._review_save(p, rating=4, keywords="beach",
                                  title="Summer")
         assert ok
         # rating-only update must keep keywords + title intact
-        ok2, _ = app._review_save(p, rating=5, keywords="beach",
+        ok2, _, _, _ = app._review_save(p, rating=5, keywords="beach",
                                   title="Summer")
         assert ok2
         m = read_exif_metadata(p)
@@ -117,7 +117,7 @@ class TestReviewHelpers:
         pytest.importorskip("piexif")
         root, app = _make_app()
         p = _img(tmp_path / "a.png")
-        ok, msg = app._review_save(p, rating=3, keywords="x", title=None)
+        ok, msg, _, _ = app._review_save(p, rating=3, keywords="x", title=None)
         assert not ok, "PNG has no EXIF container — save must fail cleanly"
         assert msg
         root.destroy()
@@ -127,7 +127,7 @@ class TestReviewHelpers:
         monkeypatch.setattr(engine_mod, "_HAS_PIEXIF", False)
         root, app = _make_app()
         p = _img(tmp_path / "a.jpg")
-        ok, msg = app._review_save(p, rating=3, keywords="x", title=None)
+        ok, msg, _, _ = app._review_save(p, rating=3, keywords="x", title=None)
         assert not ok and "piexif" in msg
         root.destroy()
 
@@ -406,6 +406,42 @@ class TestGlobalShortcuts:
         root.destroy()
 
 
+class TestReviewDialogUndo:
+    def test_in_lightbox_undo_via_shortcut(self, tmp_path):
+        """The user's exact flow: rate inside the lightbox, press ⌘Z
+        there — the rating must revert AND the global stack must stay
+        coherent (root shortcuts never reach Toplevel windows)."""
+        pytest.importorskip("piexif")
+        import tkinter as tk
+        from photo_s.engine import read_exif_metadata
+        root, app = _make_app()
+        p = _img(tmp_path / "a.jpg")
+        app.files = [p]
+        app._checked = {p}
+        app._refresh_file_list()
+        app._show_review()
+        win = [w for w in root.winfo_children()
+               if isinstance(w, tk.Toplevel)][0]
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            root.update()
+            if _find_text(win, "1 / 1"):
+                break
+            time.sleep(0.05)
+        win.focus_force()
+        root.update()
+        win.event_generate("3")           # rate 3 stars (writes EXIF)
+        root.update()
+        assert read_exif_metadata(p)["rating"] == 3
+        assert len(app._undo_stack) == 1
+        win.event_generate("<Command-z>")  # undo inside the lightbox
+        root.update()
+        m = read_exif_metadata(p)
+        assert m["rating"] is None, "rating cleared back to unrated"
+        assert app._undo_stack == [], "global entry removed (LIFO coherent)"
+        root.destroy()
+
+
 class TestUndo:
     def test_undo_remove_rows(self, tmp_path):
         root, app = _make_app()
@@ -464,7 +500,7 @@ class TestUndo:
         from photo_s.engine import read_exif_metadata
         root, app = _make_app()
         p = _img(tmp_path / "a.jpg")
-        ok, _ = app._review_save(p, rating=4, keywords="beach,trip",
+        ok, _, _, _ = app._review_save(p, rating=4, keywords="beach,trip",
                                  title="Summer Trip")
         assert ok
         m = read_exif_metadata(p)
