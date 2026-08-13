@@ -289,6 +289,60 @@ class TestTokenAuth:
             s.close()
 
 
+class TestCsrf:
+    """No-token mode must reject browser cross-origin requests (CSRF)."""
+
+    def _status_with_origin(self, tmp_path, origin, path="/health",
+                            method="GET", body=None):
+        s = ServerFixture(tmp_path, token=None)
+        try:
+            data = json.dumps(body).encode() if body is not None else None
+            req = urllib.request.Request(f"{s.base}{path}", data=data,
+                                         method=method)
+            if body is not None:
+                req.add_header("Content-Type", "application/json")
+            if origin is not None:
+                req.add_header("Origin", origin)
+            try:
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    return resp.status
+            except urllib.error.HTTPError as e:
+                return e.code
+        finally:
+            s.close()
+
+    def test_no_origin_allowed(self, tmp_path):
+        # CLI/curl/agent clients send no Origin header → unaffected
+        assert self._status_with_origin(tmp_path, None) == 200
+
+    def test_same_origin_allowed(self, tmp_path):
+        s = ServerFixture(tmp_path, token=None)
+        try:
+            req = urllib.request.Request(f"{s.base}/health")
+            req.add_header("Origin", f"http://127.0.0.1:{s.port}")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                assert resp.status == 200
+        finally:
+            s.close()
+
+    def test_cross_origin_rejected(self, tmp_path):
+        assert self._status_with_origin(tmp_path, "http://evil.example.com") == 401
+
+    def test_null_origin_rejected(self, tmp_path):
+        # sandboxed iframes / file:// pages send Origin: null
+        assert self._status_with_origin(tmp_path, "null") == 401
+
+    def test_cross_origin_process_post_blocked(self, tmp_path):
+        # The destructive /process endpoint must not accept cross-origin posts
+        img = tmp_path / "a.png"
+        Image.new("RGB", (8, 8)).save(img)
+        body = {"paths": [str(img)], "dry_run": True}
+        status = self._status_with_origin(
+            tmp_path, "http://evil.example.com",
+            path="/process", method="POST", body=body)
+        assert status == 401
+
+
 def test_process_dry_run(server):
     s, img = server
     out = os.path.join(os.path.dirname(img), "out")

@@ -58,6 +58,44 @@ class TestRenameToOutputDir:
             ["Trip_001.png", "Trip_002.png", "Trip_003.png"]
 
 
+class TestRenameEscape:
+    """A crafted EXIF Make/DateTime must never escape the output dir."""
+
+    def _crafted_jpeg(self, tmp_path, make=b"../../evil"):
+        import piexif
+        from PIL import Image
+        exif_dict = {
+            "0th": {piexif.ImageIFD.Make: make},
+            "Exif": {},
+            "GPS": {}, "1st": {}, "thumbnail": None,
+        }
+        p = tmp_path / "photo.jpg"
+        Image.new("RGB", (8, 8)).save(p, quality=90, exif=piexif.dump(exif_dict))
+        return str(p)
+
+    def test_escaped_make_stays_in_outdir(self, tmp_path):
+        src = self._crafted_jpeg(tmp_path, make=b"../../evil")
+        out_dir = tmp_path / "out"
+        results = rename_files([src], "{make}_{original}",
+                               output_dir=str(out_dir))
+        assert results[0]["status"] == "ok"
+        # output must be inside out_dir, never "../.."
+        out = os.path.abspath(results[0]["output"])
+        assert out.startswith(os.path.abspath(str(out_dir)) + os.sep)
+        assert ".." not in os.path.basename(out)
+        assert (out_dir / "evil_photo.jpg").exists()
+
+    def test_unsafe_render_is_error(self, tmp_path):
+        # Literal separators from the operator's own pattern aren't an attack,
+        # but the guard must refuse them rather than escape the directory
+        src = tmp_path / "a.png"
+        Image.new("RGB", (8, 8)).save(src)
+        results = rename_files([str(src)], "../escape_{seq}",
+                               output_dir=str(tmp_path / "out"))
+        assert results[0]["status"] == "error"
+        assert not (tmp_path / "escape_001.png").exists()
+
+
 class TestDryRun:
     def test_no_files_changed(self, tmp_path):
         paths = _make_images(tmp_path)

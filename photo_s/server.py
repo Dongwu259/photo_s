@@ -258,9 +258,18 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _authed(self) -> bool:
-        if not self.token:
-            return True
-        return self.headers.get("Authorization", "") == f"Bearer {self.token}"
+        if self.token:
+            return self.headers.get("Authorization", "") == f"Bearer {self.token}"
+        # No token configured: still block browser cross-origin requests
+        # (localhost CSRF drive-by). A malicious page can send a CORS
+        # "simple request" (text/plain JSON, no preflight) to 127.0.0.1 and
+        # it would otherwise be fully processed. Browsers always reveal their
+        # origin on fetch/XHR; CLI/curl/agent clients send no Origin header
+        # and are unaffected.
+        origin = self.headers.get("Origin")
+        if origin:
+            return origin == f"http://{self.headers.get('Host', '')}"
+        return True
 
     def _read_json(self) -> dict:
         try:

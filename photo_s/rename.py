@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from .engine import _extract_exif_metadata, _render_rename_pattern
+from .engine import _extract_exif_metadata, _has_path_traversal, _render_rename_pattern
 
 
 def _load_meta(path: str) -> dict:
@@ -65,6 +65,14 @@ def rename_files(
         meta = _load_meta(path)
         new_stem = _render_rename_pattern(pattern, meta, seq)
         seq += 1
+
+        if _has_path_traversal(new_stem):
+            # Defense-in-depth: EXIF-derived values are sanitized at the
+            # source, but never let a rendered stem escape the target dir.
+            results.append({"input": path, "output": "",
+                            "status": "error",
+                            "error": "pattern produced an unsafe filename"})
+            continue
 
         src = Path(path)
         if output_dir:

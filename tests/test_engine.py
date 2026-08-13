@@ -10,6 +10,7 @@ import pytest
 
 from photo_s.engine import (
     _format_from_path,
+    _has_path_traversal,
     _render_rename_pattern,
     _resolve_folder_pattern,
     format_size,
@@ -100,6 +101,76 @@ class TestRenderRenamePattern:
         meta = self._meta(iso="400", focal="50mm")
         result = _render_rename_pattern("ISO{iso}_{focal}", meta)
         assert result == "ISO400_50mm"
+
+
+class TestHasPathTraversal:
+    """Defense-in-depth guard: rendered rename stems must stay in-dir."""
+
+    def test_plain_ok(self):
+        assert _has_path_traversal("2024-07-30_ILCE-7M4") is False
+
+    def test_dot_segments(self):
+        assert _has_path_traversal("..") is True
+        assert _has_path_traversal(".") is True
+
+    def test_separators(self):
+        assert _has_path_traversal("a/b") is True
+        assert _has_path_traversal("..\\..\\evil") is True
+
+    def test_windows_drive_relative(self):
+        # "C:evil" makes ntpath.join drop the base directory on Windows
+        assert _has_path_traversal("C:evil") is True
+
+    def test_empty_ok(self):
+        assert _has_path_traversal("") is False
+
+
+class TestExifSanitize:
+    """EXIF-derived rename values must be sanitized at extraction."""
+
+    def _extract(self, tmp_path, make=b"", dt=b""):
+        import piexif
+        from PIL import Image
+        from photo_s.engine import _extract_exif_metadata
+
+        exif_dict = {
+            "0th": {piexif.ImageIFD.Make: make},
+            "Exif": {},
+            "GPS": {}, "1st": {}, "thumbnail": None,
+        }
+        if dt:
+            exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = dt
+        path = tmp_path / "x.jpg"
+        Image.new("RGB", (8, 8)).save(path, quality=90,
+                                      exif=piexif.dump(exif_dict))
+        with Image.open(path) as img:
+            return _extract_exif_metadata(img, str(path))
+
+    def test_normal_make_kept(self, tmp_path):
+        meta = self._extract(tmp_path, make=b"TestCam")
+        assert meta["make"] == "TestCam"
+
+    def test_make_traversal_sanitized(self, tmp_path):
+        # "../../evil" → every unsafe char becomes "_" → strip "_" → "evil"
+        meta = self._extract(tmp_path, make=b"../../evil")
+        assert meta["make"] == "evil"
+        assert _has_path_traversal(meta["make"]) is False
+
+    def test_make_abs_sanitized(self, tmp_path):
+        meta = self._extract(tmp_path, make=b"/tmp/evil")
+        assert "/" not in meta["make"]
+
+    def test_date_traversal_rejected(self, tmp_path):
+        # Crafted DateTimeOriginal that would previously yield year=".."
+        meta = self._extract(tmp_path, dt=b"../../../etc:08:15 00:00:00")
+        assert meta["year"] == ""
+        assert meta["date"] == ""
+        assert meta["month"] == ""
+
+    def test_date_normal_kept(self, tmp_path):
+        meta = self._extract(tmp_path, dt=b"2024:07:30 14:30:00")
+        assert meta["date"] == "2024-07-30"
+        assert meta["year"] == "2024"
 
 
 class TestResolveFolderPattern:

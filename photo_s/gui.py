@@ -55,7 +55,7 @@ except ImportError:
 # ── Constants ───────────────────────────────────────────────────────────────
 
 APP_NAME = "PhotoS"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 WINDOW_WIDTH = 1120
 WINDOW_HEIGHT = 720
 MIN_WIDTH = 980

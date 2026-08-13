@@ -15,7 +15,7 @@
 | 第三轮 | 国际化 | 中/英语言切换、关于窗口、文案全部抽到 STRINGS 字典 |
 | 第四轮 | 工具箱补全 | 4 个新区块（水印/多尺寸/影调/构图）、双击对比、处理队列追加 |
 | 第五轮 | 界面现代化 | FlatButton 改 Canvas 药丸、卡片化布局、clam 主题（主题切换全量重染 ttk）、滚动抖动修复（卡片级绑定 + 边界吸附 + 去抖）、设置/MCP 对话框、插件管理器 |
-| 第六轮 | 工作流补全 | 审查打分灯箱、去重查看器、画廊导出、摘要对话框可滚动（v1.1.0，见 §8） |
+| 第六轮 | 工作流补全 | 审查打分灯箱、去重查看器、画廊导出、摘要对话框可滚动（v1.2.0，见 §8） |
 
 ---
 
@@ -174,7 +174,7 @@ python3 -m pytest tests/ -q     # 218 passed（Sprint 3 后）
 
 ---
 
-## 8. 第六轮：工作流对话框（v1.1.0）
+## 8. 第六轮：工作流对话框（v1.2.0）
 
 ### 8.1 工具栏与处理期间锁定
 
@@ -227,7 +227,7 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 
 新增 `tests/test_gui_workflows.py`（15 个）：同步 helper 全覆盖 +
 对话框冒烟（有界 `root.update()` 轮询，不点启动按钮、不挂线程）。
-全量 436 个。
+全量 453 个（含安全回归测试，见 §8.12）。
 
 ### 8.8 勾选式文件列表（替代选中集）
 
@@ -261,7 +261,7 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   （COLORS 是模块级全局，前一个实例的切换会残留；同进程二次实例化或测试
   场景下第二个 app 会以错误的调色板构建）。
 
-### 8.9 修复轮：跳过提醒 / 原生 RAW / 文件对话框焦点（v1.1.0 内）
+### 8.9 修复轮：跳过提醒 / 原生 RAW / 文件对话框焦点（v1.2.0 内）
 
 - **跳过不支持文件**：`_append_files` 过滤 `ALL_INPUT_EXTENSIONS` 之外的文件
   （目录用 os.walk 计数、隐藏文件不计），计数进 `self._last_skipped`；
@@ -274,7 +274,7 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   + 400ms 冷却门 `_dlg_guard_until`）+ `_dlg_cooldown_active()` 入口守卫，
   应用到添加图片/文件夹与全部浏览按钮（输出目录/白平衡/GPX/水印/画廊）。
 
-### 8.10 修复轮：RAW 预览 / 全局快捷键（v1.1.0 内）
+### 8.10 修复轮：RAW 预览 / 全局快捷键（v1.2.0 内）
 
 - **RAW 预览**：`_open_image_safe(path)` 模块 helper（PIL 打不开时回退
   `engine._get_image`（rawpy/HEIC））——审查灯箱、去重缩略图、前后对比、
@@ -288,7 +288,7 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 - 注意：root 绑定在 `__init__` 时捕获方法引用——测试补丁需在建 app 前
   改类方法；macOS 合成按键事件需 `focus_force()`。
 
-### 8.11 全局撤销（v1.1.0 内）
+### 8.11 全局撤销（v1.2.0 内）
 
 - **撤销栈**：`self._undo_stack`（上限 10，`__init__` 创建，跨重建存活）；
   `_push_undo(label, run)` 记录，工具栏「撤销」按钮（`undo_btn`）+
@@ -312,3 +312,27 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
     一致，随后从磁盘重读并刷新评分/输入框。`_push_undo` 返回 entry 供
     调用方移除。
 - 快捷键清单（About + STRINGS）同步加入 ⌘Z 行。
+
+### 8.12 发布前安全修复（v1.2.0 内，security review 产出）
+
+- **EXIF 重命名路径穿越**（engine/rename）：`{make}` 占位符曾直接使用
+  未净化的 EXIF Make tag（仅剥 NUL）——攻击者可构造
+  `Make = "../../target/evil"` 的图片，用户用 `--pattern '{make}_{original}'`
+  + `-o out`（或 REST /process、/rename）处理时文件逃出输出目录覆盖任意
+  路径。修复：
+  - `_extract_exif_metadata` 现在像 `camera` 一样净化 `make`（不安全字符
+    → `_`）；`DateTimeOriginal` 派生字段（`year`/`month`/`day`/`date`/
+    `time`）仅当各段全为数字才采用（`"../../../etc:08:15…"` 这类被拒）；
+    `iso` 仅保留数字。全部消费方（CLI rename/compress/batch、REST、
+    GUI folder vars）共用此函数，一处净化全链安全。
+  - 纵深防御 `_has_path_traversal()`：渲染出的文件名若含 `/`、`\`、
+    `:`（Windows `C:` 段会让 `ntpath.join` 丢基础目录）或为 `.`/`..`
+    则拒绝——rename 记 error，engine 回退 prefix/suffix 命名；folder
+    pattern 段过滤同步补 `:`。
+- **localhost CSRF 浏览器劫持**（server）：`photo-s serve` 默认无 token，
+  `_read_json` 无视 Content-Type——恶意网页可用 `text/plain` 简单请求
+  （无 CORS 预检）对 127.0.0.1 发 POST，`/process`（可 `remove_original` +
+  递归扫目录）、`/rename`、`/contact-sheet` 均构成删图/改名原语。修复：
+  `_authed` 无 token 时校验 `Origin` 头，跨域请求拒绝（浏览器 fetch/XHR
+  必带 Origin；CLI/curl/agent 不带 Origin 不受影响）。`--token auto`
+  仍是最强防护。

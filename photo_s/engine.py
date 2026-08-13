@@ -342,6 +342,9 @@ def _get_output_path(input_path: str, output_format: str, output_dir: Optional[s
         if seq_counter:
             seq_counter[0] += 1
         new_stem = _render_rename_pattern(rename_pattern, exif_meta, seq)
+        if _has_path_traversal(new_stem):
+            # Defense-in-depth: fall back to prefix/suffix naming
+            new_stem = f"{prefix}{in_path.stem}{suffix}"
     else:
         new_stem = f"{prefix}{in_path.stem}{suffix}"
 
@@ -354,8 +357,9 @@ def _get_output_path(input_path: str, output_format: str, output_dir: Optional[s
     if folder_pattern and exif_meta is not None:
         rendered = _render_rename_pattern(folder_pattern, exif_meta, 0)
         segments = [s.strip() for s in rendered.split("/") if s.strip()]
-        # Sanitize: prevent path traversal
-        segments = [s for s in segments if s not in ("..", ".") and not s.startswith("~")]
+        # Sanitize: prevent path traversal (incl. Windows drive-relative "C:..")
+        segments = [s for s in segments if s not in ("..", ".") and ":" not in s
+                    and not s.startswith("~")]
         if segments:
             out_dir = out_dir.joinpath(*segments)
 
@@ -402,17 +406,21 @@ def _extract_exif_metadata(img: Image.Image, path: str) -> dict:
                   or exif_sub.get(0x9004)
                   or exif.get(0x0132)
                   or "")
+        if isinstance(dt_str, bytes):
+            dt_str = dt_str.decode("utf-8", "replace")
         if dt_str:
-            # Format: "2024:07:30 14:30:00"
+            # Format: "2024:07:30 14:30:00". Only trust all-digit segments:
+            # a crafted DateTimeOriginal could otherwise smuggle path
+            # separators / ".." into {year}/{date}/... rename filenames.
             parts = dt_str.replace(" ", ":").split(":")
-            if len(parts) >= 3:
+            if len(parts) >= 3 and all(p.isdigit() for p in parts[:3]):
                 meta["date"] = f"{parts[0]}-{parts[1]}-{parts[2]}"
                 meta["year"] = parts[0]
                 meta["month"] = parts[1]
                 meta["day"] = parts[2]
-            if len(parts) >= 6:
+            if len(parts) >= 6 and all(p.isdigit() for p in parts[3:6]):
                 meta["time"] = f"{parts[3]}-{parts[4]}-{parts[5]}"
-            elif len(parts) >= 5:
+            elif len(parts) >= 5 and all(p.isdigit() for p in parts[3:5]):
                 meta["time"] = f"{parts[3]}-{parts[4]}"
 
         # Camera model (sanitize: remove null bytes, non-printable chars)
@@ -428,16 +436,24 @@ def _extract_exif_metadata(img: Image.Image, path: str) -> dict:
                     safe += "_"
             meta["camera"] = safe.strip("_") or "Unknown"
 
-        # Make
+        # Make (sanitize like camera: unsafe chars → "_"; a crafted Make tag
+        # must never escape the output dir via {make} in rename patterns)
         make = exif.get(0x010F) or ""
         if isinstance(make, str):
             make = make.replace("\x00", "").strip()
-            meta["make"] = make
+            safe = ""
+            for ch in make:
+                if ch.isalnum() or ch in " _-":
+                    safe += ch
+                else:
+                    safe += "_"
+            meta["make"] = safe.strip("_")
 
-        # ISO
+        # ISO (digits only — a crafted tag must not carry separators into
+        # {iso} rename filenames)
         iso = exif.get(0x8827)
         if iso:
-            meta["iso"] = str(iso)
+            meta["iso"] = "".join(c for c in str(iso) if c.isdigit())
 
         # Focal length
         focal = exif.get(0x920A)
@@ -451,6 +467,18 @@ def _extract_exif_metadata(img: Image.Image, path: str) -> dict:
         pass
 
     return meta
+
+
+def _has_path_traversal(name: str) -> bool:
+    """True if `name` can escape its directory when joined into a path.
+
+    Defense-in-depth on top of _extract_exif_metadata sanitization: rejects
+    path separators, dot-segments, and Windows drive-relative prefixes (a
+    ``C:name`` segment makes ntpath.join drop the base directory).
+    """
+    if name in (".", ".."):
+        return True
+    return "/" in name or "\\" in name or ":" in name
 
 
 def _render_rename_pattern(pattern: str, meta: dict, seq: int = 0) -> str:
