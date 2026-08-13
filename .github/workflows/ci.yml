@@ -63,6 +63,29 @@ jobs:
         # hermetic against discover_plugins).
         run: python -m pytest tests/ -q
 
+  test-windows:
+    name: Tests on Windows (real Tk, full suite + plugin)
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          pip install ".[all]"
+          pip install -e plugins/scunet
+          pip install onnx pytest
+      - name: Run tests
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python -m pytest tests/ -q
+        # Windows runners have a desktop session, so the Tk GUI tests
+        # execute for real here (they skip headless on Linux) — this is
+        # the main Windows-verification path for the GUI.
+
   bundle:
     name: Bundle (Windows exe)
     runs-on: windows-latest
