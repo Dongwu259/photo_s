@@ -95,4 +95,4 @@
 ## 9. 平台 / 验证
 
 - macOS / Linux / Windows（CI 7 jobs：py3.9-3.12 全量 + Windows 真实 Tk + SCUNet 真推理 + exe 打包）
-- 测试 476 个全绿
+- 测试 480 个全绿

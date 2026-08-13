@@ -39,11 +39,12 @@
 5. **STRINGS zh/en key 集合必须完全一致**（`_t` 缺 key 静默回退，会造成"看起来能用"的漏译）。
 6. GUI 禁用 `tk.Button`，用 `FlatButton`；输入/勾选类用 `ttk.*`。
 7. **测试模式**：纯 assert + `tmp_path` + PIL 小图；engine 层用 `_process(src, out_dir, **kwargs)` 助手（tests/test_features.py）；可配置项测试参照 `_apply_config_defaults` 的 hasattr 语义。
+8. **PIL 解压炸弹阈值**：`photo_s/__init__.py` 把 `Image.MAX_IMAGE_PIXELS` 设为有界值 `512_000_000`（警告 >512MP、硬报错 >1024MP）——合法大图（如 112MP）不再误报 DecompressionBombWarning，真炸弹仍被拦。只设一次不切换（线程安全），改阈值需同步 tests/test_pil_limit.py。
 
 ## 常用命令
 
 ```bash
-python3 -m pytest tests/ -q      # 全量测试（当前 476 个）
+python3 -m pytest tests/ -q      # 全量测试（当前 480 个）
 python3 -m photo_s.cli --help    # CLI 冒烟（无 PATH 依赖）
 python3 -m photo_s.cli plugin list --json   # 官方插件目录 + 已装状态
 python3 -m photo_s.cli mcp --list-tools     # MCP 工具 + schema（需 photo-s-tools[mcp]，py3.10+）
