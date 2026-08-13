@@ -28,6 +28,11 @@ import json
 import os
 import secrets
 import threading
+
+class _ClientGone(Exception):
+    """SSE client disconnected mid-stream (BrokenPipe/Reset)."""
+
+
 import time
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -283,6 +288,50 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _handle_process_stream(self, data: dict):
+        """SSE endpoint: run a batch, stream one ``data:`` frame per file.
+
+        Each progress event is ``data: {"current","total","path"}``; the final
+        frame is ``data: {"status":"done","result":{...}}`` (or an error
+        frame). The connection closes when the batch finishes, so clients
+        read until EOF instead of polling ``/tasks/<id>``.
+        """
+        from .engine import batch_process
+        paths = _resolve_paths(data.get("paths", []),
+                               bool(data.get("recursive", False)))
+        if not paths:
+            self._send_json(400, {"error": "no supported image files found"})
+            return
+        opts = _options_from_dict(data.get("options", {}), self.options)
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def _frame(payload: dict):
+            try:
+                self.wfile.write(
+                    f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                raise _ClientGone
+
+        def progress(current, total, path, *extra):
+            _frame({"current": current, "total": total, "path": path or ""})
+
+        try:
+            result = batch_process(paths, opts, progress_callback=progress)
+            _frame({"status": "done", "result": result.to_dict()})
+        except _ClientGone:
+            return  # client disconnected mid-stream — nothing to clean up
+        except Exception as e:  # noqa: BLE001 — report to the streaming agent
+            try:
+                _frame({"status": "error", "error": str(e)})
+            except _ClientGone:
+                pass
+
     # ── routes ───────────────────────────────────────────────────────────
     def do_GET(self):
         if not self._authed():
@@ -343,7 +392,9 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
             self._send_json(401, {"error": "unauthorized"})
             return
         data = self._read_json()
-        if self.path == "/process":
+        if self.path == "/process/stream":
+            self._handle_process_stream(data)
+        elif self.path == "/process":
             paths = _resolve_paths(data.get("paths", []),
                                    bool(data.get("recursive", False)))
             if not paths:

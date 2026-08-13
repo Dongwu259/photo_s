@@ -302,3 +302,26 @@ class TestBatchProcessCancel:
         result = batch_process(paths, options)
         assert result.success_count == 3
         assert result.fail_count == 0
+
+
+class TestAutoJobs:
+    """Smart default worker count: capped CPU count, never crashes."""
+
+    def test_bounds(self):
+        from photo_s.engine import auto_jobs
+        assert 1 <= auto_jobs() <= 8
+
+    def test_none_cpu_count_falls_back(self, monkeypatch):
+        from photo_s.engine import auto_jobs
+        monkeypatch.setattr("os.cpu_count", lambda: None)
+        assert auto_jobs() == 2  # unknown → assume 2 cores
+
+    def test_zero_cpu_count_falls_back(self, monkeypatch):
+        from photo_s.engine import auto_jobs
+        monkeypatch.setattr("os.cpu_count", lambda: 0)
+        assert auto_jobs() == 2  # unknown → assume 2 cores
+
+    def test_capped_at_eight(self, monkeypatch):
+        from photo_s.engine import auto_jobs
+        monkeypatch.setattr("os.cpu_count", lambda: 128)
+        assert auto_jobs() == 8

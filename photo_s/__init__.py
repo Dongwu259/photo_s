@@ -1,6 +1,6 @@
 # PhotoS - Batch Image Compression & Format Conversion Tool
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 # 有界放宽 PIL 解压炸弹阈值。
 # 默认 89.5MP（89478485）对合法大图（全景拼接、高像素相机，如 112MP）会误报

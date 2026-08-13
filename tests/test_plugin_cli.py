@@ -194,3 +194,41 @@ class TestPluginFetch:
         assert data["ok"] is True
         assert data["weights"][0]["cached"] is True
         assert os.path.isfile(data["weights"][0]["path"])
+
+
+class TestScaffold:
+    """photo-s plugin scaffold: generates a valid plugin package skeleton."""
+
+    def test_generates_files(self, tmp_path, capsys):
+        out_dir = str(tmp_path / "pd")
+        rc = run_cli(["plugin", "scaffold", "demo", "--dir", out_dir])
+        assert rc == 0
+        assert "Plugin scaffold created" in capsys.readouterr().out
+        pyproject = tmp_path / "pd" / "pyproject.toml"
+        init = tmp_path / "pd" / "photo_s_plugin_demo" / "__init__.py"
+        assert pyproject.exists()
+        assert init.exists()
+        text = pyproject.read_text()
+        assert 'name = "photo-s-plugin-demo"' in text
+        assert 'demo = "photo_s_plugin_demo:DemoPlugin"' in text
+        assert "photo-s-tools>=1.3.0" in text
+        assert "PhotoSPlugin" in init.read_text()
+
+    def test_json_shape(self, tmp_path, capsys):
+        out_dir = str(tmp_path / "pd")
+        rc = run_cli(["plugin", "scaffold", "demo", "--dir", out_dir,
+                      "--json"])
+        assert rc == 0
+        d = json.loads(_out(capsys))
+        assert d["ok"] is True
+        assert d["name"] == "demo"
+        assert set(d["files"]) == {"photo_s_plugin_demo/__init__.py",
+                                   "pyproject.toml"}
+
+    def test_bad_name_rejected(self, tmp_path, capsys):
+        rc = run_cli(["plugin", "scaffold", "bad/name", "--dir",
+                      str(tmp_path / "pd"), "--json"])
+        assert rc == 1
+        d = json.loads(_out(capsys))
+        assert d["ok"] is False
+        assert not (tmp_path / "pd").exists()

@@ -36,6 +36,13 @@ OFFICIAL_PLUGINS: Dict[str, OfficialPlugin] = {
         min_photo_s_version="1.0.0",
         requires=("onnxruntime>=1.16.0",),
     ),
+    "lut": OfficialPlugin(
+        name="lut",
+        pypi_distribution="photo-s-plugin-lut",
+        description="LUT 调色: 四面体插值 + 电影预设 Tetrahedral .cube "
+                    "grading + film presets (pure numpy)",
+        min_photo_s_version="1.3.0",
+    ),
 }
 
 

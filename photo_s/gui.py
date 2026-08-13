@@ -34,6 +34,7 @@ from .engine import (
     ProcessOptions,
     BatchResult,
     batch_process,
+    auto_jobs,
     scan_directory,
     format_size,
     _resolve_folder_pattern,
@@ -57,7 +58,7 @@ except ImportError:
 # ── Constants ───────────────────────────────────────────────────────────────
 
 APP_NAME = "PhotoS"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 WINDOW_WIDTH = 1120
 WINDOW_HEIGHT = 720
 MIN_WIDTH = 980
@@ -453,6 +454,9 @@ STRINGS = {
         "log_curve_hint": "SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG（空 = 关闭）",
         "denoise": "降噪强度 (0-20)",
         "denoise_hint": "NLM 降噪（空 = 关闭；需 photo-s-tools[enhance] 或 SCUNet 插件）",
+        "lut": "LUT 调色 (.cube)",
+        "lut_hint": ".cube 文件或预设名（装 photo-s-plugin-lut 后可用 "
+                    "filmic-v1 等；空 = 关闭）",
         "auto_straighten": "自动扶正地平线",
         "max_straighten_angle": "最大扶正角°",
         # White balance / color / evaluation
@@ -856,6 +860,9 @@ STRINGS = {
         "log_curve_hint": "SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG (blank = off)",
         "denoise": "Denoise strength (0-20)",
         "denoise_hint": "NLM denoise (blank = off; needs photo-s-tools[enhance] or SCUNet plugin)",
+        "lut": "LUT grading (.cube)",
+        "lut_hint": ".cube file or preset name (filmic-v1 etc. with "
+                    "photo-s-plugin-lut; blank = off)",
         "auto_straighten": "Auto-straighten horizon",
         "max_straighten_angle": "Max straighten angle°",
         # White balance / color / evaluation
@@ -1208,6 +1215,7 @@ class PhotoSApp:
         self.auto_exposure = tk.StringVar(value="")
         self.log_curve = tk.StringVar(value="")
         self.denoise = tk.StringVar(value="")
+        self.lut_file = tk.StringVar(value="")
         self.auto_straighten = tk.BooleanVar(value=False)
         self.max_straighten_angle = tk.StringVar(value="10")
         # White balance / color / evaluation
@@ -1241,7 +1249,7 @@ class PhotoSApp:
         self._dims_cache: dict = {}
         self.rename_pattern = tk.StringVar(value="")
         self.folder_pattern = tk.StringVar(value="")
-        self.jobs = tk.StringVar(value="4")  # parallel workers
+        self.jobs = tk.StringVar(value=str(auto_jobs()))  # parallel workers
 
         self._configure_ttk_styles()
 
@@ -2260,6 +2268,24 @@ class PhotoSApp:
                  bg=COLORS["card"]).grid(
             row=7, column=0, columnspan=3, sticky="w", pady=(2, 0))
 
+        # LUT color grade (.cube file or preset name)
+        tk.Label(corr_frame, text=self._t("lut"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=8, column=0, sticky="w")
+        lut_entry = ttk.Entry(corr_frame, textvariable=self.lut_file,
+                              font=FONT_SMALL)
+        lut_entry.grid(row=8, column=1, sticky="ew", padx=(8, 0))
+        FlatButton(corr_frame, text=self._t("browse"),
+                   command=self._browse_lut,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=8, pady=2, border_color=COLORS["border"]).grid(
+            row=8, column=2, sticky="e", padx=(4, 0))
+        tk.Label(corr_frame, text=self._t("lut_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=9, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
         # Auto-straighten + max angle
         self._add_checkbox(corr_frame, self._t("auto_straighten"),
                            self.auto_straighten, row=8)
@@ -2368,6 +2394,18 @@ class PhotoSApp:
         self._after_file_dialog()
         if path:
             self.wb_reference.set(path)
+
+    def _browse_lut(self):
+        """Pick a .cube LUT file."""
+        if self._dlg_cooldown_active():
+            return
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            title=self._t("lut"),
+            filetypes=[("LUT 文件 LUT", "*.cube"), ("全部 All", "*.*")])
+        self._after_file_dialog()
+        if path:
+            self.lut_file.set(path)
 
     def _browse_gpx(self):
         """Pick a GPX track file."""
@@ -3062,7 +3100,7 @@ class PhotoSApp:
         for name in ("output_dir", "prefix", "suffix", "scale_percent",
                      "max_width", "max_height", "max_pixels",
                      "watermark_text", "watermark_image", "auto_exposure",
-                     "log_curve", "denoise", "max_straighten_angle",
+                     "log_curve", "denoise", "lut_file", "max_straighten_angle",
                      "wb_temp", "wb_reference", "print_size", "crop",
                      "crop_ratio", "rotate_bg", "flip", "pad_ratio",
                      "pad_bg", "rename_pattern", "folder_pattern"):
@@ -4508,6 +4546,7 @@ class PhotoSApp:
             log_curve=self.log_curve.get() or None,
             denoise=_to_float(self.denoise.get(), 0.0)
             if self.denoise.get().strip() else None,
+            lut_file=self.lut_file.get().strip() or None,
             auto_straighten=self.auto_straighten.get(),
             wb_temp=_to_float(self.wb_temp.get(), 0.0)
             if self.wb_temp.get().strip() else None,

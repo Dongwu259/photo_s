@@ -106,6 +106,20 @@ if _HAS_PILLOW_AVIF:
 
 # ── Data classes ────────────────────────────────────────────────────────────
 
+def auto_jobs() -> int:
+    """Smart default for parallel workers: capped CPU count.
+
+    The heavy pipeline stages (RAW decode, OpenCV NLM/straighten, onnxruntime,
+    Pillow resize/encode) all release the GIL, so a thread pool at
+    ``min(cpu_count, 8)`` typically scales near-linearly without oversubscribing.
+    Explicit user choice always wins — this is only the fallback default.
+    """
+    try:
+        return max(1, min(os.cpu_count() or 2, 8))
+    except Exception:  # noqa: BLE001 — never let the default computation break a run
+        return 1
+
+
 @dataclass
 class ProcessOptions:
     """Options for batch image processing."""
@@ -161,6 +175,7 @@ class ProcessOptions:
     auto_levels: bool = False      # auto histogram stretch (2% clip)
     ev: Optional[float] = None     # exposure compensation in stops (2^EV gain)
     auto_exposure: Optional[float] = None  # normalize mean luminance to target (0-1)
+    lut_file: Optional[str] = None  # .cube 3D/1D LUT color grade (provider or built-in)
     log_curve: Optional[str] = None  # LOG recovery curve name (SLOG3, CLOG3, ...)
     denoise: Optional[float] = None  # denoise strength; SCUNet plugin provider
     #                                # preferred when installed, else NLM
@@ -938,6 +953,16 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
             grayscale=options.grayscale,
             sepia=options.sepia,
         )
+
+        # ── LUT color grade (plugin provider preferred, else built-in .cube)
+        if options.lut_file:
+            from .plugin import find_provider
+            provider = find_provider("lut")
+            if provider is not None:
+                img = provider.lut(img, options.lut_file, ctx)
+            else:
+                from .lut import apply_lut
+                img = apply_lut(img, options.lut_file)
 
         # ── White balance (Kelvin or reference image) ────────────────────────
         img = apply_white_balance(

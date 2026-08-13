@@ -270,7 +270,8 @@ class TestAdjustUnits:
             for x in range(64):
                 px[x, y] = 200
         out = apply_auto_levels(im)
-        vals = list(out.getdata())  # getdata works across supported Pillows
+        # get_flattened_data (Pillow 12+) with getdata fallback (Pillow 11 / py3.9)
+        vals = list(getattr(out, "get_flattened_data", out.getdata)())
         assert min(vals) <= 5   # dark end stretched toward black
         assert max(vals) >= 250  # bright end stretched toward white
 
@@ -331,7 +332,8 @@ class TestExposure:
         im = Image.new("RGB", (64, 64), (60, 60, 60))  # mean 60/255 ≈ 0.235
         out = apply_exposure(im, auto_exposure=0.5)
         gray = out.convert("L")
-        mean = sum(gray.getdata()) / (64 * 64)
+        flat = getattr(gray, "get_flattened_data", gray.getdata)()
+        mean = sum(flat) / (64 * 64)
         assert 125 <= mean <= 130  # ~128
 
     def test_batch_ev(self, tmp_path, capsys):

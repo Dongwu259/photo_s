@@ -35,7 +35,8 @@ class TestTools:
     def test_registered_tools(self):
         names = {t.name for t in asyncio.run(create_server().list_tools())}
         assert names == {"process", "info", "exif", "dedup", "cull",
-                         "hash", "plugin"}
+                         "hash", "plugin", "contact_sheet", "gallery",
+                         "watermark", "preset"}
 
 
 class TestProcessTool:
@@ -193,7 +194,7 @@ class TestCliListTools:
         out = capsys.readouterr().out
         assert rc == 0
         data = json.loads(out)
-        assert len(data["tools"]) == 7
+        assert len(data["tools"]) == 11
         for t in data["tools"]:
             assert "input_schema" in t
             assert "properties" in t["input_schema"]
@@ -222,7 +223,9 @@ class TestStdioEndToEnd:
                     tools = await session.list_tools()
                     names = {t.name for t in tools.tools}
                     assert names == {"process", "info", "exif", "dedup",
-                                     "cull", "hash", "plugin"}
+                                     "cull", "hash", "plugin",
+                                     "contact_sheet", "gallery",
+                                     "watermark", "preset"}
                     result = await session.call_tool(
                         "process",
                         {"paths": [img], "output_dir": str(out),
@@ -233,3 +236,57 @@ class TestStdioEndToEnd:
                     assert os.path.isfile(data["results"][0]["output"])
 
         asyncio.run(run())
+
+
+class TestContactSheetTool:
+    def test_builds_montage(self, tmp_path):
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg")
+        out = str(tmp_path / "sheet.jpg")
+        r = _call("contact_sheet", {"paths": [a, b], "output": out,
+                                    "cols": 2})
+        assert r["ok"] is True
+        assert r["count"] == 2
+        assert os.path.isfile(r["output"])
+
+    def test_no_files(self, tmp_path):
+        r = _call("contact_sheet", {"paths": [str(tmp_path / "nope.jpg")],
+                                    "output": str(tmp_path / "x.jpg")})
+        assert r["ok"] is False
+
+
+class TestGalleryTool:
+    def test_builds_html(self, tmp_path):
+        a = _img(tmp_path / "a.jpg")
+        out = str(tmp_path / "gal")
+        r = _call("gallery", {"paths": [a], "out_dir": out})
+        assert r["ok"] is True
+        assert r["count"] == 1
+        assert os.path.isfile(r["output"])  # output == index.html path
+        assert r["output"].endswith("index.html")
+
+
+class TestWatermarkTool:
+    def test_text_watermark(self, tmp_path):
+        a = _img(tmp_path / "a.jpg", size=(64, 64))
+        out = str(tmp_path / "out")
+        r = _call("watermark", {"paths": [a], "text": "PhotoS",
+                                "output_dir": out})
+        assert r["ok"] is True
+        assert r["summary"]["success"] == 1
+
+
+class TestPresetTool:
+    def test_roundtrip(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PHOTOS_HOME", str(tmp_path / "home"))
+        r = _call("preset", {"action": "save", "name": "p1",
+                             "options": {"quality": 72, "grayscale": True}})
+        assert r["ok"] is True
+        loaded = _call("preset", {"action": "load", "name": "p1"})
+        assert loaded["ok"] is True
+        assert loaded["options"]["quality"] == 72
+        assert loaded["options"]["grayscale"] is True
+        lst = _call("preset", {"action": "list"})
+        assert "p1" in lst["presets"]
+        deleted = _call("preset", {"action": "delete", "name": "p1"})
+        assert deleted["deleted"] is True

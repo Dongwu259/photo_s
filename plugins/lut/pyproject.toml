@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photo-s-plugin-lut"
+version = "0.1.0"
+description = "PhotoS LUT plugin: tetrahedral .cube grading + film presets (pure numpy)"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = ["photo-s-tools>=1.3.0", "numpy>=1.20"]
+
+[project.entry-points."photo_s.plugins"]
+lut = "photo_s_plugin_lut:LutPlugin"
+
+[tool.setuptools.packages.find]
+include = ["photo_s_plugin_lut*"]

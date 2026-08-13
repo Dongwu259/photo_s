@@ -70,6 +70,22 @@ class PhotoSPlugin:
             "{} declares 'denoise' but does not implement denoise()"
             .format(self.name))
 
+    def lut(self, img, lut_path, ctx: PluginContext):
+        """Engine lut-slot provider. Called when 'lut' in self.provides.
+
+        Args:
+            img: PIL Image (mutable).
+            lut_path: --lut .cube path (or preset name the provider resolves).
+            ctx: PluginContext with input_path, options.
+        Returns:
+            Modified PIL Image.
+        Raises:
+            Exceptions propagate as per-file errors (unlike generic hooks).
+        """
+        raise NotImplementedError(
+            "{} declares 'lut' but does not implement lut()"
+            .format(self.name))
+
     def on_pre_process(self, img, options, ctx: PluginContext) -> None:
         """Called after image is loaded, before any transformation.
 

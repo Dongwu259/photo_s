@@ -367,3 +367,14 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   竞态：观察器就绪前写入的文件会丢事件 → 先等 1.5s 再落文件）、
   `test_gui_workflows.py` 增 seam 直调 + 5 对话框 smoke + 预览渲染/临时目录清理 +
   锁定扩展。全量 476 个。
+
+### 8.14 LUT 调色入口（v1.3.0 内）
+
+- 设置面板「校正」区新增 **LUT 调色**：`.cube` 文件路径输入 + 浏览按钮
+  （`_browse_lut`），也可直接填预设名（装 `photo-s-plugin-lut` 后可用
+  `filmic-v1` 等）。`self.lut_file` 放 `__init__`（不变量 #4）；STRINGS zh/en
+  各 2 key（`lut`/`lut_hint`，#5）。
+- `_build_options` 接 `lut_file`（空 → None）；`_apply_options_to_ui` 反向映射
+  加入 `lut_file`（预设加载往返）。
+- 引擎侧：`ProcessOptions.lut_file` + 管线新 provider 槽位（影调段后、白平衡前，
+  `find_provider("lut")` 优先，否则 `photo_s.lut.apply_lut` 内置三线性）。

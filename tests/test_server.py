@@ -488,3 +488,58 @@ def test_start_task_cancel_honored(monkeypatch):
             break
         time.sleep(0.001)
     assert state["status"] == "cancelled"
+
+
+class TestProcessStreamSSE:
+    """POST /process/stream: per-file SSE frames + final done frame."""
+
+    def _stream(self, port, token, body):
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        conn.request("POST", "/process/stream", body=json.dumps(body),
+                     headers=headers)
+        resp = conn.getresponse()
+        raw = resp.read().decode("utf-8")
+        status = resp.status
+        ctype = resp.getheader("Content-Type", "")
+        conn.close()
+        return status, ctype, raw
+
+    @staticmethod
+    def _parse_frames(raw):
+        frames = []
+        for block in raw.split("\n\n"):
+            block = block.strip()
+            if block.startswith("data: "):
+                frames.append(json.loads(block[len("data: "):]))
+        return frames
+
+    def test_streams_progress_and_done(self, tmp_path, server):
+        s, img = server
+        out = tmp_path / "out"
+        status, ctype, raw = self._stream(
+            s.port, s.token,
+            {"paths": [img], "options": {"output_dir": str(out),
+                                         "output_format": "PNG",
+                                         "suffix": ""}})
+        assert status == 200
+        assert ctype.startswith("text/event-stream")
+        frames = self._parse_frames(raw)
+        progress = [f for f in frames if "current" in f]
+        done = [f for f in frames if f.get("status") == "done"]
+        assert progress, "expected at least one progress frame"
+        assert progress[0]["total"] == 1
+        assert progress[0]["current"] == 1
+        assert done and done[-1]["result"]["summary"]["success"] == 1
+
+    def test_unauthorized(self, tmp_path):
+        s = ServerFixture(tmp_path, token="secret")
+        try:
+            status, ctype, raw = self._stream(s.port, "wrong", {"paths": []})
+            assert status == 401
+            assert "error" in json.loads(raw)
+        finally:
+            s.close()

@@ -36,6 +36,7 @@ from .engine import (
     ProcessResult,
     BatchResult,
     batch_process,
+    auto_jobs,
     scan_directory,
     format_size,
     apply_exif_tags,
@@ -257,6 +258,12 @@ def _add_transform_args(parser):
         "--denoise", type=float, default=argparse.SUPPRESS, metavar="N",
         help="降噪强度（需 photo-s-tools[enhance]）NLM denoise strength 3-20 "
              "(needs optional opencv)",
+    )
+    parser.add_argument(
+        "--lut", type=str, default=argparse.SUPPRESS, metavar="FILE|PRESET",
+        help="3D/1D .cube LUT 调色（内置三线性；装 photo-s-plugin-lut 后 "
+             "用四面体插值 + 电影预设）Apply a .cube LUT (built-in; "
+             "photo-s-plugin-lut adds tetrahedral + film presets)",
     )
     parser.add_argument(
         "--auto-straighten", action="store_true", default=argparse.SUPPRESS,
@@ -533,7 +540,8 @@ def run_cli(args: List[str] = None) -> int:
     )
     compress_parser.add_argument(
         "-j", "--jobs", type=int, default=argparse.SUPPRESS, metavar="N",
-        help="并行处理线程数 Parallel worker threads (默认 default: 1)",
+        help="并行处理线程数 Parallel worker threads (默认 default: auto, "
+             "即 min(CPU核数, 8))",
     )
     compress_parser.add_argument(
         "--target-size", type=str, default=argparse.SUPPRESS, metavar="SIZE",
@@ -722,7 +730,8 @@ def run_cli(args: List[str] = None) -> int:
     )
     batch_parser.add_argument(
         "-j", "--jobs", type=int, default=argparse.SUPPRESS, metavar="N",
-        help="并行处理线程数 Parallel worker threads (默认 default: 1)",
+        help="并行处理线程数 Parallel worker threads (默认 default: auto, "
+             "即 min(CPU核数, 8))",
     )
     batch_parser.add_argument(
         "--overwrite", action="store_true", default=argparse.SUPPRESS,
@@ -962,6 +971,21 @@ def run_cli(args: List[str] = None) -> int:
     )
     plugin_fetch.add_argument("name", help="插件名 Plugin name")
     plugin_fetch.add_argument(
+        "--json", action="store_true",
+        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+    )
+
+    plugin_scaffold = plugin_subs.add_parser(
+        "scaffold", help="生成插件开发脚手架 Scaffold a new plugin",
+    )
+    plugin_scaffold.add_argument(
+        "name", help="插件名（字母数字连字符）Plugin name (alnum + -)",
+    )
+    plugin_scaffold.add_argument(
+        "--dir", type=str, default=None, metavar="DIR",
+        help="生成目录（默认 plugins/<name>）Output dir (default plugins/<name>)",
+    )
+    plugin_scaffold.add_argument(
         "--json", action="store_true",
         help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
     )
@@ -1213,6 +1237,32 @@ def run_cli(args: List[str] = None) -> int:
         help="递归搜索目录 Recursively search subdirectories",
     )
     gallery_parser.add_argument(
+        "--json", action="store_true",
+        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+    )
+
+    # ── bench subcommand ────────────────────────────────────────────────────
+    bench_parser = subparsers.add_parser(
+        "bench", help="批量处理基准测试 Batch pipeline benchmark",
+    )
+    bench_parser.add_argument(
+        "--dir", type=str, required=True, metavar="DIR",
+        help="图片目录（含 RAW/JPEG 等）Directory with images to benchmark",
+    )
+    bench_parser.add_argument(
+        "-j", "--jobs", type=str, default="1,2,4,8", metavar="N,N,...",
+        help="要测的并发数列表 Comma-separated worker counts "
+             "(默认 default: 1,2,4,8)",
+    )
+    bench_parser.add_argument(
+        "--images", type=int, default=None, metavar="N",
+        help="最多取前 N 张图（默认全部）Limit to first N images",
+    )
+    bench_parser.add_argument(
+        "--denoise", type=float, default=None, metavar="N",
+        help="附加降噪强度（模拟高负载管线）Add denoise to the workload",
+    )
+    bench_parser.add_argument(
         "--json", action="store_true",
         help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
     )
@@ -1889,6 +1939,62 @@ def run_cli(args: List[str] = None) -> int:
                   f"({len(files)} 项)")
         return 0
 
+    # ── Handle 'bench' command ───────────────────────────────────────────────
+    if parsed.command == "bench":
+        import json as _json
+        import time as _time
+        from dataclasses import replace
+        files = _collect_files([parsed.dir], recursive=True)
+        if not files:
+            print("❌ 目录里没有找到支持的图片文件。No images found.",
+                  file=sys.stderr)
+            return 1
+        if parsed.images:
+            files = files[:parsed.images]
+        try:
+            job_list = [int(x.strip()) for x in parsed.jobs.split(",") if x.strip()]
+        except ValueError:
+            print("❌ --jobs 格式应为逗号分隔的数字。Bad --jobs list.",
+                  file=sys.stderr)
+            return 1
+        if not job_list or any(j < 1 for j in job_list):
+            print("❌ --jobs 需要 >= 1 的整数。--jobs needs ints >= 1.",
+                  file=sys.stderr)
+            return 1
+        job_list = list(dict.fromkeys(job_list))  # dedupe, keep order
+
+        base = ProcessOptions(
+            quality=getattr(parsed, 'quality', 85),
+            output_format=getattr(parsed, 'format', 'JPEG'),
+            denoise=parsed.denoise,
+        )
+        runs = []
+        baseline = None
+        for j in job_list:
+            opts = replace(base, jobs=j)
+            t0 = _time.monotonic()
+            batch_process(files, opts)  # progress via no-op default
+            dt = _time.monotonic() - t0
+            if baseline is None:
+                baseline = dt
+            runs.append({
+                "jobs": j,
+                "files": len(files),
+                "seconds": round(dt, 3),
+                "speedup": round(baseline / dt, 3) if dt > 0 else 1.0,
+            })
+        out = {"dir": parsed.dir, "files": len(files), "runs": runs}
+        if getattr(parsed, 'json', False):
+            print(_json.dumps(out, indent=2, ensure_ascii=False))
+        else:
+            print(f"bench: {len(files)} files in {parsed.dir}")
+            for r in runs:
+                print(f"  jobs={r['jobs']:<3} {r['seconds']:>6.2f}s  "
+                      f"speedup={r['speedup']:>4.2f}x")
+            print("提示 Tip: 在真实照片集上跑，用结果决定并发数；"
+                  "多进程一般不必要（重活释放 GIL）")
+        return 0
+
     # ── Handle 'gallery' command ────────────────────────────────────────────
     if parsed.command == "gallery":
         from .gallery import build_gallery
@@ -1911,6 +2017,11 @@ def run_cli(args: List[str] = None) -> int:
     target_size_str = getattr(parsed, 'target_size', None)
     if target_size_str:
         target_size_bytes = _parse_size(target_size_str)
+
+    # auto-jobs: explicit -j / config wins, else smart default (CPU count)
+    _jobs = getattr(parsed, 'jobs', None)
+    if _jobs is None:
+        _jobs = auto_jobs()
 
     options = ProcessOptions(
         quality=getattr(parsed, 'quality', 85),
@@ -1952,6 +2063,7 @@ def run_cli(args: List[str] = None) -> int:
         auto_exposure=getattr(parsed, 'auto_exposure', None),
         log_curve=getattr(parsed, 'log_curve', None),
         denoise=getattr(parsed, 'denoise', None),
+        lut_file=getattr(parsed, 'lut', None),
         auto_straighten=getattr(parsed, 'auto_straighten', False),
         max_straighten_angle=getattr(parsed, 'max_straighten_angle', 10.0),
         print_size=getattr(parsed, 'print_size', None),
@@ -1970,7 +2082,7 @@ def run_cli(args: List[str] = None) -> int:
         flatten_cmyk=getattr(parsed, 'flatten_cmyk', False),
         resume=getattr(parsed, 'resume', False),
         gpx_trace=getattr(parsed, 'gpx_trace', None),
-        jobs=getattr(parsed, 'jobs', 1),
+        jobs=_jobs,
     )
 
     # Handle --resize

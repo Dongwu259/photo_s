@@ -129,3 +129,82 @@ class TestFindProvider:
         plugin_mod._PLUGINS = ["stale"]
         plugin_mod.clear_cache()
         assert plugin_mod._PLUGINS is None
+
+
+class _MarkerLut(PhotoSPlugin):
+    """LUT provider that paints a known marker block instead of grading."""
+    name = "marker-lut"
+    provides = ("lut",)
+    pre_called = False
+
+    def lut(self, img, lut_path, ctx):
+        px = img.load()
+        for y in range(0, 8):
+            for x in range(0, 8):
+                px[x, y] = (0, 255, 0)  # unmistakable green block
+        return img
+
+    def on_pre_process(self, img, options, ctx):
+        type(self).pre_called = True
+
+
+class TestProviderLutSlot:
+    """--lut flows to the provider when installed; falls back to built-in."""
+
+    def _make_cube(self, tmp_path):
+        p = tmp_path / "id.cube"
+        rows = []
+        n = 17
+        for b in range(n):
+            for g in range(n):
+                for r in range(n):
+                    rows.append(f"{r/(n-1):.6f} {g/(n-1):.6f} {b/(n-1):.6f}")
+        p.write_text(f"LUT_3D_SIZE {n}\n" + "\n".join(rows) + "\n")
+        return str(p)
+
+    def test_provider_used_when_installed(self, tmp_path, monkeypatch, capsys):
+        lut = self._make_cube(tmp_path)
+        src = _img(tmp_path / "a.jpg")
+        out = tmp_path / "out"
+        monkeypatch.setattr(plugin_mod, "discover_plugins",
+                            lambda: [_MarkerLut()])
+        rc = run_cli(["batch", src, "--lut", lut, "-o", str(out), "--json"])
+        assert rc == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["results"][0]["status"] == "ok"
+        # provider painted green at top-left; built-in identity would keep 120,100,80
+        px = Image.open(out / "a_processed.jpg").convert("RGB").getpixel((2, 2))
+        assert px[1] > 200 and px[0] < 60  # green block present → provider ran
+
+    def test_builtin_fallback_when_no_provider(self, tmp_path, monkeypatch, capsys):
+        lut = self._make_cube(tmp_path)
+        src = _img(tmp_path / "b.jpg", color=(120, 100, 80))
+        out = tmp_path / "out"
+        monkeypatch.setattr(plugin_mod, "discover_plugins", lambda: [])
+        rc = run_cli(["batch", src, "--lut", lut, "-o", str(out), "--json"])
+        assert rc == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["results"][0]["status"] == "ok"
+        # identity built-in LUT ≈ unchanged (within JPEG tolerance)
+        px = Image.open(out / "b_processed.jpg").convert("RGB").getpixel((2, 2))
+        assert abs(px[0] - 120) <= 12 and abs(px[1] - 100) <= 12
+
+    def test_provider_excluded_from_pre_process(self, tmp_path, monkeypatch, capsys):
+        lut = self._make_cube(tmp_path)
+        src = _img(tmp_path / "c.jpg")
+        out = tmp_path / "out"
+        _MarkerLut.pre_called = False
+        monkeypatch.setattr(plugin_mod, "discover_plugins",
+                            lambda: [_MarkerLut()])
+        run_cli(["batch", src, "--lut", lut, "-o", str(out)])
+        assert _MarkerLut.pre_called is False  # slot provider, not a generic hook
+
+    def test_no_lut_flag_does_not_call_provider(self, tmp_path, monkeypatch, capsys):
+        src = _img(tmp_path / "d.jpg")
+        out = tmp_path / "out"
+        monkeypatch.setattr(plugin_mod, "discover_plugins",
+                            lambda: [_MarkerLut()])
+        rc = run_cli(["batch", src, "-o", str(out), "--json"])
+        assert rc == 0
+        px = Image.open(out / "d_processed.jpg").convert("RGB").getpixel((2, 2))
+        assert not (px[1] > 200 and px[0] < 60)  # provider not invoked

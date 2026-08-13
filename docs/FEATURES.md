@@ -3,7 +3,7 @@
 > 以代码实际为准（v1.2.0），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
-## 1. CLI 命令（18 个）
+## 1. CLI 命令（19 个）
 
 | 命令 | 作用 |
 |---|---|
@@ -22,15 +22,16 @@
 | `preset` | 预设配置管理 |
 | `config` | TOML 配置文件管理 |
 | `info` | 格式/环境探测（`--json`） |
-| `serve` | REST API（AI agent 集成） |
-| `mcp` | MCP server（stdio，7 工具，py3.10+） |
-| `plugin` | 插件管理 install/list/info/fetch |
+| `serve` | REST API（AI agent 集成，含 `/process/stream` SSE 进度） |
+| `mcp` | MCP server（stdio，11 工具，py3.10+） |
+| `plugin` | 插件管理 install/list/info/fetch/**scaffold** |
+| `bench` | 批量基准：`--dir -j 1,2,4,8 --denoise` 实测各并发耗时/加速比 |
 
-全局：`--json`（agent 友好输出）、`--version`。
+全局：`--json`（agent 友好输出）、`--version`。`-j/--jobs` 默认 **auto**（min(CPU核数,8)）。
 
 ## 2. 引擎处理能力（ProcessOptions 61 字段）
 
-**管线顺序**：open → 插件 pre_process → auto_rotate → auto_straighten → log_curve → 色彩管理 → 影调 → 白平衡 → 曝光 → denoise → 自动色阶 → crop/rotate/flip → resize → pad → 打印尺寸 → watermark → save
+**管线顺序**：open → 插件 pre_process → auto_rotate → auto_straighten → log_curve → 色彩管理 → 影调 → **LUT 调色（`--lut` .cube/预设，plugin provider 优先否则内置三线性）** → 白平衡 → 曝光 → denoise → 自动色阶 → crop/rotate/flip → resize → pad → 打印尺寸 → watermark → save
 
 | 类别 | 能力 |
 |---|---|
@@ -65,24 +66,27 @@
 - 校验和清单（生成/校验 manifest）
 - 预设管理（保存当前设置/加载/删除，加载映射回全部 UI 变量）
 - 摘要对话框、全局撤销（栈 10 项）
-**设置面板**：格式（8 种）、压缩模式（质量/target-size）、缩放、输出、命名、子文件夹、选项、水印、多尺寸、影调、构图、校正（白平衡/曝光/自动色阶/LOG/降噪/扶正）、元数据
+**设置面板**：格式（8 种）、压缩模式（质量/target-size）、缩放、输出、命名、子文件夹、选项、水印、多尺寸、影调、构图、校正（白平衡/曝光/自动色阶/LOG/降噪/LUT 调色/扶正）、元数据
 **全局快捷键**：⌘O 加文件 · ⌘⇧O 加文件夹 · ⌘R 处理 · ⌘P 预览 · ⌘E 审查 · ⌘D 去重 · ⌘G 画廊 · ⌘Z 撤销 · Esc 取消
 **其它**：设置对话框（MCP 状态/依赖安装/插件管理）、插件管理器、拖放（可选）、RAW 预览
 
 ## 4. REST API（`photo-s serve`）
 
-`/health` `/info` `/plugins` `/tasks`(+id) `/process` `/dedup` `/rename` `/contact-sheet` `/check` `/plugins`(POST)
+`/health` `/info` `/plugins` `/tasks`(+id) `/process` `/process/stream`(SSE) `/dedup` `/rename` `/contact-sheet` `/check` `/plugins`(POST)
 - Bearer token 认证（`--token auto` 随机生成）+ ready-file 握手
 - 无 token 时 CSRF Origin 防护（拒绝跨域浏览器请求）
+- **`POST /process/stream`**：text/event-stream 实时进度（每文件一条 `data:` 帧 + 结束 `done` 帧），agent 免轮询
 
-## 5. MCP server（7 工具）
+## 5. MCP server（11 工具）
 
-`process` `info` `exif` `dedup` `cull` `hash` `plugin` — dedup 默认 dry_run 安全；模块级零 mcp import
+`process` `info` `exif` `dedup` `cull` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` — dedup 默认 dry_run 安全；模块级零 mcp import
 
 ## 6. 插件系统
 
 - 官方插件 **scunet**（SCUNet 强降噪，ONNX）：强度感知混合（0-20）、权重 modelstore 下载 + sha256 校验
-- 协议：`provides` operation provider + pre/post 过滤钩子
+- 官方插件 **lut**（LUT 调色，纯 numpy 无权重）：四面体插值 override 内置三线性 + 5 个电影预设（filmic-v1/warm、cinema-cool、portrait-soft、punchy）
+- 开发脚手架：`photo-s plugin scaffold <name>` 生成插件包骨架
+- 协议：`provides` operation provider（denoise/lut）+ pre/post 过滤钩子
 
 ## 7. 其它模块
 
@@ -95,4 +99,4 @@
 ## 9. 平台 / 验证
 
 - macOS / Linux / Windows（CI 7 jobs：py3.9-3.12 全量 + Windows 真实 Tk + SCUNet 真推理 + exe 打包）
-- 测试 480 个全绿
+- 测试 521 个全绿

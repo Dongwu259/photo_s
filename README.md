@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-480%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-521%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **PhotoS** is a cross-platform batch image processing tool with **both GUI and CLI**. Built for photographers who need to deliver images at specific sizes, and for AI agents that need reliable image processing pipelines.
@@ -31,6 +31,7 @@
 | Exposure | ✅ | ✅ | `--ev +1` stops, or `--auto-exposure 0.45` normalize to target |
 | Auto levels | ✅ | ✅ | `--auto-levels` 2% clip histogram stretch |
 | LOG recovery | ✅ | ✅ | `--log-curve SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG` (1D LUT, no deps) |
+| LUT grading | ✅ | ✅ | `--lut film.cube` or preset names (built-in trilinear; `photo-s-plugin-lut` adds tetrahedral + 5 film presets) |
 | Denoise | ✅ | ✅¹ | `--denoise 10` NLM (`[enhance]` extra) |
 | Auto-straighten | ✅ | ✅¹ | `--auto-straighten` level the horizon, confidence-gated (`[enhance]` extra) |
 | Crop / Rotate / Flip / Pad | ✅ | ✅ | `--crop 800x600+0+0`, `--rotate 90`, `--flip h`, `--pad 16:9` |
@@ -66,7 +67,8 @@
 | REST API | — | ✅ | `photo-s serve` for AI agents |
 | Plugin system | — | ✅ | Third-party plugin support |
 | Official plugin manager | — | ✅ | `photo-s plugin list/install/info/fetch` + `pip install photo-s-plugin-scunet` |
-| MCP server | — | ✅ | `photo-s mcp` expose 7 tools to MCP clients (Claude Desktop) |
+| MCP server | — | ✅ | `photo-s mcp` expose 11 tools to MCP clients (Claude Desktop) |
+| Batch benchmark | — | ✅ | `photo-s bench --dir ~/shoot -j 1,2,4,8` measure worker scaling |
 
 > ¹ Denoise / auto-straighten need an optional dependency: `pip install photo-s-tools[enhance]` (opencv-python-headless).
 > When missing, these features give a clear install hint and the rest keeps working.

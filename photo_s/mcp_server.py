@@ -358,6 +358,130 @@ def plugin_tool(
     return payload
 
 
+def contact_sheet_tool(
+    paths: list,
+    output: str,
+    recursive: bool = False,
+    cols: int = 4,
+    thumb: int = 240,
+    captions: bool = True,
+    bg: str = "#000000",
+) -> dict:
+    """Build a contact sheet (grid montage) from images.
+
+    ``output`` is the destination image path. Returns ``{"output", "count"}``
+    (same shape as ``photo-s contact-sheet --json``).
+    """
+    from .adjust import hex_to_rgb
+    from .cli import _collect_files
+    from .contact import build_contact_sheet
+
+    files = _collect_files(list(paths), recursive=recursive)
+    if not files:
+        return {"ok": False, "error": "no supported image files found",
+                "paths": list(paths)}
+    try:
+        bg_rgb = hex_to_rgb(bg)
+    except ValueError:
+        bg_rgb = (0, 0, 0)
+    out = build_contact_sheet(files, output, cols=cols,
+                              thumb_size=(thumb, thumb), captions=captions,
+                              bg=bg_rgb)
+    return {"ok": True, "output": out, "count": len(files)}
+
+
+def gallery_tool(
+    paths: list,
+    out_dir: str,
+    recursive: bool = False,
+    title: str = "PhotoS Gallery",
+    thumb: int = 360,
+) -> dict:
+    """Generate an HTML gallery from images.
+
+    Returns ``{"output", "count"}`` (same shape as ``photo-s gallery --json``).
+    """
+    from .cli import _collect_files
+    from .gallery import build_gallery
+
+    files = _collect_files(list(paths), recursive=recursive)
+    if not files:
+        return {"ok": False, "error": "no supported image files found",
+                "paths": list(paths)}
+    res = build_gallery(files, out_dir, title=title, thumb_size=thumb)
+    res["ok"] = True
+    return res
+
+
+def watermark_tool(
+    paths: list,
+    text: str = "",
+    image: str = "",
+    position: str = "BOTTOM_RIGHT",
+    opacity: int = 50,
+    output_format: Optional[str] = None,
+    quality: Optional[int] = None,
+    output_dir: Optional[str] = None,
+) -> dict:
+    """Overlay a text or image watermark on images via the batch pipeline.
+
+    Returns a BatchResult JSON with per-file status, plus ``ok``.
+    """
+    from .server import _options_from_dict
+
+    data = {
+        "watermark_text": text, "watermark_image": image,
+        "watermark_position": position, "watermark_opacity": opacity,
+        "output_format": output_format, "quality": quality,
+        "output_dir": output_dir,
+    }
+    data = {k: v for k, v in data.items() if v is not None}
+    opts = _options_from_dict(data, base=_base_options)
+    result = batch_process(list(paths), opts)
+    payload = result.to_dict()
+    payload["ok"] = result.fail_count == 0
+    return payload
+
+
+def preset_tool(
+    action: str,
+    name: str = "",
+    description: str = "",
+    options: dict = {},
+) -> dict:
+    """Manage processing presets: list / save / load / delete.
+
+    ``load`` returns the preset's ProcessOptions as a JSON dict that can be
+    fed straight back into ``process``. ``save`` takes an ``options`` dict.
+    """
+    from .presets import (delete_preset, list_presets, load_preset,
+                          save_preset)
+
+    if action == "list":
+        return {"ok": True, "presets": list_presets()}
+    if not name:
+        return {"ok": False, "error": "name is required for this action"}
+
+    if action == "save":
+        from .server import _options_from_dict
+        opts = _options_from_dict(options or {}, base=_base_options)
+        save_preset(name, opts, description=description)
+        return {"ok": True, "name": name, "action": "save"}
+
+    if action == "load":
+        opts = load_preset(name)
+        if opts is None:
+            return {"ok": False, "name": name, "error": "preset not found"}
+        return {"ok": True, "name": name, "options": opts.__dict__}
+
+    if action == "delete":
+        ok = delete_preset(name)
+        return {"ok": ok, "name": name, "action": "delete",
+                "deleted": ok}
+    return {"ok": False, "error": f"unknown action: {action}",
+            "actions": ["list", "save", "load", "delete"]}
+
+
 # ── Server assembly ─────────────────────────────────────────────────────────
 
 
@@ -403,6 +527,19 @@ def create_server(config_path: Optional[str] = None):
     mcp.add_tool(plugin_tool, name="plugin",
                  description="Manage official plugins: list installed/"
                              "available, install, uninstall (shells to pip).")
+    mcp.add_tool(contact_sheet_tool, name="contact_sheet",
+                 description="Build a contact sheet (grid montage) from "
+                             "images; returns the output path and count.")
+    mcp.add_tool(gallery_tool, name="gallery",
+                 description="Generate an HTML gallery from images; returns "
+                             "the output directory and count.")
+    mcp.add_tool(watermark_tool, name="watermark",
+                 description="Overlay a text or image watermark on images "
+                             "via the batch pipeline.")
+    mcp.add_tool(preset_tool, name="preset",
+                 description="Manage processing presets: list / save / load "
+                             "/ delete. 'load' returns options JSON for "
+                             "'process'.")
     return mcp
 
 

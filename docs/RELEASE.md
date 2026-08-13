@@ -24,7 +24,7 @@
 
 ```bash
 # 1. 本地验证（必须全绿）
-python3 -m pytest tests/ -q                 # 480 个
+python3 -m pytest tests/ -q                 # 521 个
 python3 -m photo_s.cli --help               # CLI 冒烟
 python3 -m photo_s.cli plugin list --json   # 官方插件目录
 
@@ -71,6 +71,16 @@ photo-s batch ~/highiso/ --denoise 12       # 端到端（首次使用自动下�
 
 > 插件与核心是**独立发行版**：插件修复不必等核心发版。`registry.py` 里
 > `min_photo_s_version` 约束核心最低版本；核心发版无需重新发布插件。
+>
+> **新插件发布（v1.3.0 起）**：publish.yml 的 publish-plugin job 已参数化——插件
+> 目录从 tag 前缀自动推导（`scunet-v*` → plugins/scunet，`lut-v*` → plugins/lut）。
+> 发布 `photo-s-plugin-lut`（纯 numpy，无权重）：
+> ```bash
+> git tag lut-v0.1.0 && git push origin lut-v0.1.0
+> pip install photo-s-tools photo-s-plugin-lut
+> photo-s plugin list --json                  # installed: lut, provides: [lut]
+> photo-s batch ~/shoot/ --lut filmic-v1      # 预设名即用（无插件时用内置三线性读 .cube）
+> ```
 
 ## 常见问题
 

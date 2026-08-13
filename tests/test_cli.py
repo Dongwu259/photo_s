@@ -336,3 +336,61 @@ class TestCliDedupJson:
         assert rc == 0
         d = json.loads(capsys.readouterr().out)
         assert d["count"] == 0
+
+
+class TestAutoJobsCli:
+    """-j not passed → auto_jobs() default; explicit -j wins."""
+
+    def _recorder(self, captured):
+        from photo_s.engine import BatchResult
+
+        def _fake(p, o, **kw):
+            captured.update(paths=p, options=o)
+            return BatchResult(results=[], total_input_size=0,
+                               total_output_size=0, success_count=0,
+                               fail_count=0)
+        return _fake
+
+    def test_auto_when_not_passed(self, tmp_path, monkeypatch):
+        import photo_s.cli as cli_mod
+        captured = {}
+        monkeypatch.setattr(cli_mod, "auto_jobs", lambda: 5)
+        monkeypatch.setattr(cli_mod, "batch_process", self._recorder(captured))
+        img = _make_image(tmp_path / "in.jpg")
+        rc = run_cli(["compress", img, "-o", str(tmp_path / "out")])
+        assert rc == 0
+        assert captured["options"].jobs == 5
+
+    def test_explicit_jobs_wins(self, tmp_path, monkeypatch):
+        import photo_s.cli as cli_mod
+        captured = {}
+        monkeypatch.setattr(cli_mod, "auto_jobs", lambda: 5)
+        monkeypatch.setattr(cli_mod, "batch_process", self._recorder(captured))
+        img = _make_image(tmp_path / "in.jpg")
+        rc = run_cli(["compress", img, "-j", "2", "-o", str(tmp_path / "out")])
+        assert rc == 0
+        assert captured["options"].jobs == 2
+
+
+class TestBench:
+    """bench: structure present, jobs list honored, no timing assertions."""
+
+    def test_structure_and_dedupe(self, tmp_path, monkeypatch, capsys):
+        import photo_s.cli as cli_mod
+        seen = []
+        monkeypatch.setattr(cli_mod, "batch_process",
+                            lambda p, o, **kw: seen.append(o.jobs))
+        _make_image(tmp_path / "in.jpg")
+        rc = run_cli(["bench", "--dir", str(tmp_path), "-j", "1,2,2", "--json"])
+        assert rc == 0
+        d = json.loads(capsys.readouterr().out)
+        assert set(d) == {"dir", "files", "runs"}
+        assert [r["jobs"] for r in d["runs"]] == [1, 2]  # dedup, keep order
+        assert all(r["speedup"] > 0 for r in d["runs"])
+        assert seen == [1, 2]
+
+    def test_bad_jobs_rejected(self, tmp_path, monkeypatch):
+        import photo_s.cli as cli_mod
+        monkeypatch.setattr(cli_mod, "batch_process", lambda *a, **k: None)
+        _make_image(tmp_path / "in.jpg")
+        assert run_cli(["bench", "--dir", str(tmp_path), "-j", "abc", "--json"]) != 0

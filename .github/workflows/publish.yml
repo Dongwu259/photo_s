@@ -2,22 +2,24 @@ name: Publish to PyPI
 
 # 发布到 PyPI（Trusted Publishing，无需密码/token 明文）
 #
-# 两个 PyPI 项目共用本 workflow（同一个 environment: pypi）：
+# 共用一个 workflow（同一个 environment: pypi）：
 #   · photo-s-tools           —— tag v*          （core）
-#   · photo-s-plugin-scunet   —— tag scunet-v*   （plugins/scunet/ 下构建）
+#   · photo-s-plugin-<name>   —— tag <name>-v*   （plugins/<name>/ 下构建）
+#     插件目录从 tag 前缀自动推导：scunet-v* → plugins/scunet，lut-v* → plugins/lut
 #
 # 每个 PyPI 项目都需要在自己的 Publishing 设置里登记 trusted publisher：
 #   仓库 Dongwu259/photo_s, workflow publish.yml, environment pypi
 #
 # 打 tag 即触发：
-#   git tag v1.1.0 && git push origin v1.1.0
+#   git tag v1.3.0 && git push origin v1.3.0
 #   git tag scunet-v0.2.0 && git push origin scunet-v0.2.0
+#   git tag lut-v0.1.0 && git push origin lut-v0.1.0
 #
 # 完整发布清单见 docs/RELEASE.md。
 
 on:
   push:
-    tags: ["v*", "scunet-v*"]
+    tags: ["v*", "scunet-v*", "lut-v*"]
   workflow_dispatch:
     inputs:
       target:
@@ -51,22 +53,29 @@ jobs:
 
   publish-plugin:
     name: Build wheel & publish (plugin)
-    if: (github.event_name == 'workflow_dispatch' && inputs.target == 'plugin') || startsWith(github.ref, 'refs/tags/scunet-v')
+    if: (github.event_name == 'workflow_dispatch' && inputs.target == 'plugin') || startsWith(github.ref, 'refs/tags/scunet-v') || startsWith(github.ref, 'refs/tags/lut-v')
     runs-on: ubuntu-latest
     environment: pypi
-    defaults:
-      run:
-        working-directory: plugins/scunet
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Resolve plugin dir from tag prefix
+        id: plugindir
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "dir=plugins/scunet" >> "$GITHUB_OUTPUT"
+          else
+            PREFIX="$(basename "${{ github.ref }}" | sed -E 's/-v[0-9].*//')"
+            echo "dir=plugins/${PREFIX}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build
         run: |
           pip install build
           python -m build
+        working-directory: ${{ steps.plugindir.outputs.dir }}
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: plugins/scunet/dist
+          packages-dir: ${{ steps.plugindir.outputs.dir }}/dist

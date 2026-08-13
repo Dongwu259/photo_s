@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-480%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-521%20passed-brightgreen)]()
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **PhotoS** 是一款跨平台批量图片处理工具，同时提供 **GUI 和 CLI**。为需要按指定尺寸交付图片的摄影师，
@@ -32,6 +32,7 @@
 | 曝光 | ✅ | ✅ | `--ev +1` 档，或 `--auto-exposure 0.45` 归一化到目标 |
 | 自动色阶 | ✅ | ✅ | `--auto-levels` 2% 裁切直方图拉伸 |
 | LOG 还原 | ✅ | ✅ | `--log-curve SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG`（1D LUT，零依赖） |
+| LUT 调色 | ✅ | ✅ | `--lut film.cube` 或预设名（内置三线性；`photo-s-plugin-lut` 加四面体 + 5 电影预设） |
 | 降噪 | ✅ | ✅¹ | `--denoise 10` NLM（`[enhance]` 可选依赖） |
 | 自动扶正 | ✅ | ✅¹ | `--auto-straighten` 校正地平线，置信度门控（`[enhance]` 可选依赖） |
 | 裁剪 / 旋转 / 翻转 / 留边 | ✅ | ✅ | `--crop 800x600+0+0`、`--rotate 90`、`--flip h`、`--pad 16:9` |
@@ -67,7 +68,8 @@
 | REST API | — | ✅ | `photo-s serve` 供 AI agent 使用 |
 | 插件系统 | — | ✅ | 第三方插件支持 |
 | 官方插件管理 | — | ✅ | `photo-s plugin list/install/info/fetch` + `pip install photo-s-plugin-scunet` |
-| MCP server | — | ✅ | `photo-s mcp` 向 MCP 客户端（Claude Desktop）暴露 7 个工具 |
+| MCP server | — | ✅ | `photo-s mcp` 向 MCP 客户端（Claude Desktop）暴露 11 个工具 |
+| 批量基准 | — | ✅ | `photo-s bench --dir ~/shoot -j 1,2,4,8` 实测并发扩展 |
 
 > ¹ 降噪 / 自动扶正需要可选依赖：`pip install photo-s-tools[enhance]`（opencv-python-headless）。
 > 未安装时这两个功能会给出明确的安装提示，不影响其余功能。
