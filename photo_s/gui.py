@@ -190,8 +190,14 @@ STRINGS = {
         "files_count_checked": "{n} 个文件 · 已勾选 {m} 个",
         "check_none": "请先勾选要处理的图片（勾选框切换，用「全选/全不选」按钮批量切换）",
         "check_toggle_all": "全选/全不选",
+        "undo": "撤销",
+        "undo_none": "没有可撤销的操作",
+        "undo_failed": "撤销失败: {err}",
+        "undo_removed": "撤销移除 {n} 张",
+        "undo_dedup": "撤销去重移动 {n} 张",
+        "undo_tag": "撤销打标: {name}",
         "about_shortcuts": "快捷键 Shortcuts",
-        "shortcuts_text": "⌘O / Ctrl+O 添加图片\n⌘⇧O / Ctrl+Shift+O 添加文件夹\n⌘R / Ctrl+R 开始处理（Esc 取消）\n⌘P / Ctrl+P 预览参数\n⌘E / Ctrl+E 审查打分\n⌘D / Ctrl+D 去重查看\n⌘G / Ctrl+G 导出画廊\n（审查窗口内：←/→ 翻页，0-5 评分，Esc 关闭）",
+        "shortcuts_text": "⌘O / Ctrl+O 添加图片\n⌘⇧O / Ctrl+Shift+O 添加文件夹\n⌘R / Ctrl+R 开始处理（Esc 取消）\n⌘P / Ctrl+P 预览参数\n⌘E / Ctrl+E 审查打分\n⌘D / Ctrl+D 去重查看\n⌘G / Ctrl+G 导出画廊\n⌘Z / Ctrl+Z 撤销\n（审查窗口内：←/→ 翻页，0-5 评分，Esc 关闭）",
         "dlg_skipped": "已导入 {n} 张图片，跳过 {m} 个不支持的文件",
         "dlg_no_supported": "未找到支持的图片（跳过 {m} 个不支持的文件）",
         "hint_dnd": "将图片或文件夹拖入列表，或使用上方按钮添加",
@@ -501,8 +507,14 @@ STRINGS = {
         "files_count_checked": "{n} files · {m} checked",
         "check_none": "Check the images to process first (use the checkboxes, or the check-all button)",
         "check_toggle_all": "Check all / none",
+        "undo": "Undo",
+        "undo_none": "Nothing to undo",
+        "undo_failed": "Undo failed: {err}",
+        "undo_removed": "Undo removal of {n}",
+        "undo_dedup": "Undo dedup move of {n}",
+        "undo_tag": "Undo tagging: {name}",
         "about_shortcuts": "Shortcuts 快捷键",
-        "shortcuts_text": "⌘O / Ctrl+O Add images\n⌘⇧O / Ctrl+Shift+O Add folder\n⌘R / Ctrl+R Start processing (Esc cancels)\n⌘P / Ctrl+P Preview options\n⌘E / Ctrl+E Review & rate\n⌘D / Ctrl+D Duplicates\n⌘G / Ctrl+G Export gallery\n(In review: ←/→ navigate, 0-5 rate, Esc close)",
+        "shortcuts_text": "⌘O / Ctrl+O Add images\n⌘⇧O / Ctrl+Shift+O Add folder\n⌘R / Ctrl+R Start processing (Esc cancels)\n⌘P / Ctrl+P Preview options\n⌘E / Ctrl+E Review & rate\n⌘D / Ctrl+D Duplicates\n⌘G / Ctrl+G Export gallery\n⌘Z / Ctrl+Z Undo\n(In review: ←/→ navigate, 0-5 rate, Esc close)",
         "dlg_skipped": "Imported {n} images, skipped {m} unsupported files",
         "dlg_no_supported": "No supported images found (skipped {m} unsupported files)",
         "hint_dnd": "Drag & drop images/folders into the list, or use the buttons above",
@@ -973,6 +985,11 @@ class PhotoSApp:
         # scope, selection is a temporary multi-mark like the old
         # Treeview selection.
         self._selected_rows: set = set()
+        # Undo stack (survives rebuilds): list of {"label", "run"} for
+        # reversible actions — list removal, dedup trash moves, tagging
+        # writes. Capped; the toolbar Undo button / ⌘Z pops the latest.
+        self._undo_stack: list = []
+        self._undo_max = 10
         self.processing = False
         self.cancel_requested = False
         self.output_dir = tk.StringVar(value="")
@@ -1129,6 +1146,8 @@ class PhotoSApp:
             ("<Control-d>", self._show_dedup, False),
             ("<Command-g>", self._show_gallery_export, False),
             ("<Control-g>", self._show_gallery_export, False),
+            ("<Command-z>", self._undo, False),
+            ("<Control-z>", self._undo, False),
         ]
         for seq, fn, allow in binds:
             self.root.bind(seq, wrap(fn, allow))
@@ -1399,6 +1418,14 @@ class PhotoSApp:
             border_color=COLORS["border"], font=FONT_SMALL,
         )
         self.gallery_btn.pack(side="left", padx=(8, 0))
+
+        self.undo_btn = FlatButton(
+            wf, text=self._t("undo"), command=self._undo,
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+        )
+        self.undo_btn.pack(side="left", padx=(8, 0))
+        self._sync_undo_btn()
 
         self.file_count_label = tk.Label(
             toolbar, text=self._t("files_count", n=0), font=FONT_SMALL,
@@ -2956,21 +2983,26 @@ class PhotoSApp:
 
     def _dedup_move_to_trash(self, paths, trash_dir, progress_cb=None):
         """Sync: move ``paths`` into ``trash_dir`` (created if needed).
-        Returns (moved, failed). Tk-free so tests can call it directly."""
+        Returns (moved, failed, moved_map) where moved_map maps
+        original -> trash destination (for undo). Tk-free so tests can
+        call it directly."""
         moved, failed = 0, 0
+        moved_map = {}
         try:
             os.makedirs(trash_dir, exist_ok=True)
         except OSError:
-            return 0, len(paths)
+            return 0, len(paths), moved_map
         for i, p in enumerate(paths):
             try:
-                os.rename(p, self._dedup_trash_path(p, trash_dir))
+                dest = self._dedup_trash_path(p, trash_dir)
+                os.rename(p, dest)
+                moved_map[p] = dest
                 moved += 1
             except OSError:
                 failed += 1
             if progress_cb:
                 progress_cb(i + 1, len(paths))
-        return moved, failed
+        return moved, failed, moved_map
 
     def _show_dedup(self):
         """Duplicate viewer: scan in a background thread, render groups
@@ -3163,14 +3195,15 @@ class PhotoSApp:
                             text="{} {}/{}".format(self._t("dedup_moving"),
                                                    cur, total)))
 
-                    moved, failed = self._dedup_move_to_trash(
+                    moved, failed, moved_map = self._dedup_move_to_trash(
                         unchecked, trash_dir, progress_cb=cb)
                 except Exception as e:
                     schedule(lambda: _scan_failed(str(e)))
                     return
-                schedule(lambda: _moved(moved, failed, unchecked, trash_dir))
+                schedule(lambda: _moved(moved, failed, moved_map, unchecked,
+                                        trash_dir))
 
-            def _moved(moved, failed, unchecked, trash_dir):
+            def _moved(moved, failed, moved_map, unchecked, trash_dir):
                 if not win.winfo_exists():
                     return
                 moved_set = set(unchecked)
@@ -3189,6 +3222,10 @@ class PhotoSApp:
                 if failed:
                     msg += "（{} 失败）".format(failed)
                 status_lbl.configure(text=msg, fg=COLORS["accent"])
+                if moved_map:
+                    self._push_undo(
+                        self._t("undo_dedup", n=len(moved_map)),
+                        lambda: self._restore_dedup(dict(moved_map)))
                 render()
 
             threading.Thread(target=move_thread, daemon=True).start()
@@ -3247,12 +3284,26 @@ class PhotoSApp:
             tags["title"] = tl
         if not tags:
             return True, ""
+        prev = {"rating": m.get("rating"),
+                "keywords": ",".join(m.get("keywords") or []),
+                "title": m.get("title") or ""}
         try:
             msg = apply_exif_tags(path, tags)
         except Exception as e:
             return False, self._t("review_save_failed", err=str(e))
         if msg.startswith("⚠️"):
             return False, msg
+
+        def revert():
+            # keywords/title always restore ("" clears); rating only
+            # when it existed before (the engine cannot clear a rating)
+            t = {"keywords": prev["keywords"], "title": prev["title"]}
+            if prev["rating"] is not None:
+                t["rating"] = prev["rating"]
+            apply_exif_tags(path, t)
+
+        self._push_undo(self._t("undo_tag", name=os.path.basename(path)),
+                        revert)
         return True, msg
 
     def _show_review(self):
@@ -3712,6 +3763,64 @@ class PhotoSApp:
             var.set(path in self._checked)
         self._update_count_label()
 
+    def _push_undo(self, label, run):
+        """Record a reversible action (label for display, run restores
+        the previous state)."""
+        self._undo_stack.append({"label": label, "run": run})
+        if len(self._undo_stack) > self._undo_max:
+            self._undo_stack.pop(0)
+        self._sync_undo_btn()
+
+    def _sync_undo_btn(self):
+        btn = getattr(self, "undo_btn", None)
+        if btn is not None:
+            state = ("normal" if self._undo_stack
+                     and not self.processing else "disabled")
+            btn.configure(state=state)
+
+    def _undo(self):
+        """Pop and run the latest undo entry."""
+        if not self._undo_stack:
+            messagebox.showinfo(self._t("undo"), self._t("undo_none"))
+            return
+        entry = self._undo_stack.pop()
+        try:
+            entry["run"]()
+        except Exception as e:
+            messagebox.showerror(self._t("undo"),
+                                 self._t("undo_failed", err=str(e)))
+        self._sync_undo_btn()
+
+    def _restore_removed(self, pairs, checked):
+        """Undo a list removal: re-insert the rows at their original
+        positions with their check state."""
+        for idx, p in sorted(pairs, reverse=True):
+            if os.path.exists(p) and p not in self.files:
+                self.files.insert(min(idx, len(self.files)), p)
+        if checked:
+            self._checked.update(checked)
+        self._refresh_file_list()
+        self._update_stats()
+
+    def _restore_dedup(self, moved_map):
+        """Undo a dedup trash move: rename the files back to their
+        original locations and return them to the list (unchecked, as
+        they were)."""
+        restored = []
+        for original, trash_dest in moved_map.items():
+            if not os.path.exists(trash_dest):
+                continue  # already gone (user cleaned the trash)
+            if os.path.exists(original):
+                continue  # original spot taken — leave the file in trash
+            os.rename(trash_dest, original)
+            restored.append(original)
+        for p in restored:
+            if p not in self.files:
+                self.files.append(p)
+        if restored:
+            self._refresh_file_list()
+            self._update_stats()
+
     def _toggle_all_checks(self):
         """Uncheck all when everything is checked, else check all."""
         if self._checked and len(self._checked) == len(self.files):
@@ -3749,10 +3858,16 @@ class PhotoSApp:
 
         remove_paths = set(selected)
         self._selected_rows -= remove_paths
+        removed = [(i, f) for i, f in enumerate(self.files)
+                   if f in remove_paths]
+        was_checked = remove_paths & self._checked
         self.files = [f for f in self.files if f not in remove_paths]
         self._checked -= remove_paths
         self._refresh_file_list()
         self._update_stats()
+        self._push_undo(
+            self._t("undo_removed", n=len(removed)),
+            lambda: self._restore_removed(list(removed), set(was_checked)))
 
     def _count_unsupported(self, directory) -> int:
         """Count non-hidden files under ``directory`` that PhotoS cannot

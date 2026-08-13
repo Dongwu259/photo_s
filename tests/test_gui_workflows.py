@@ -160,8 +160,9 @@ class TestDedupHelpers:
         trash = tmp_path / "_duplicates_trash"
         trash.mkdir()
         (trash / "a.jpg").write_bytes(b"existing")
-        moved, failed = app._dedup_move_to_trash([a], str(trash))
+        moved, failed, moved_map = app._dedup_move_to_trash([a], str(trash))
         assert (moved, failed) == (1, 0)
+        assert moved_map == {a: str(trash / "a_1.jpg")}
         assert not os.path.exists(a)
         assert os.path.exists(trash / "a.jpg")      # pre-existing kept
         assert os.path.exists(trash / "a_1.jpg")    # moved with suffix
@@ -174,7 +175,7 @@ class TestDedupHelpers:
         app.files = [a, b]
         app._refresh_file_list()
         trash = tmp_path / "_duplicates_trash"
-        moved, failed = app._dedup_move_to_trash([b], str(trash))
+        moved, failed, _ = app._dedup_move_to_trash([b], str(trash))
         assert (moved, failed) == (1, 0)
         app.files = [f for f in app.files if os.path.exists(f)]
         app._refresh_file_list()
@@ -349,7 +350,8 @@ class TestGlobalShortcuts:
         root, app = _make_app()
         for seq in ("<Command-o>", "<Control-o>", "<Command-r>",
                     "<Control-r>", "<Command-p>", "<Command-e>",
-                    "<Command-d>", "<Command-g>", "<Escape>"):
+                    "<Command-d>", "<Command-g>", "<Command-z>",
+                    "<Escape>"):
             assert root.bind(seq), f"{seq} must be bound"
         root.destroy()
 
@@ -401,6 +403,90 @@ class TestGlobalShortcuts:
         app.processing = True
         root.event_generate("<Escape>")
         assert cancels == [1], "Esc cancels a running batch"
+        root.destroy()
+
+
+class TestUndo:
+    def test_undo_remove_rows(self, tmp_path):
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", seed=2)
+        app._append_files([a, b])
+        app._selected_rows = {a}
+        app._remove_selected()
+        assert app.files == [b]
+        assert app.undo_btn.cget("state") == "normal"
+        app._undo()
+        assert app.files == [a, b], "undo restores the removed rows"
+        assert app._checked == {a, b}, "check state restored too"
+        assert app.undo_btn.cget("state") == "disabled"
+        root.destroy()
+
+    def test_undo_dedup_restores_files_and_list(self, tmp_path):
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg")
+        app._append_files([a, b])
+        trash = str(tmp_path / "_duplicates_trash")
+        moved, failed, moved_map = app._dedup_move_to_trash([b], trash)
+        assert (moved, failed) == (1, 0)
+        app.files = [a]
+        app._checked = {a}
+        app._refresh_file_list()
+        app._push_undo(app._t("undo_dedup", n=1),
+                       lambda: app._restore_dedup(dict(moved_map)))
+        app._undo()
+        assert os.path.exists(b), "file moved back to its original spot"
+        assert app.files == [a, b], "restored to the list"
+        root.destroy()
+
+    def test_undo_stack_capped(self):
+        root, app = _make_app()
+        for i in range(12):
+            app._push_undo("op{}".format(i), lambda: None)
+        assert len(app._undo_stack) == app._undo_max == 10
+        assert app._undo_stack[-1]["label"] == "op11"
+        root.destroy()
+
+    def test_undo_none_message(self, monkeypatch):
+        from photo_s import gui as gui_mod
+        shown = []
+        monkeypatch.setattr(gui_mod.messagebox, "showinfo",
+                            lambda *a, **k: shown.append(a))
+        root, app = _make_app()
+        app._undo()
+        assert len(shown) == 1
+        assert "撤销" in str(shown[0]) or "Undo" in str(shown[0])
+        root.destroy()
+
+    def test_undo_tag_restores_keywords_title(self, tmp_path):
+        pytest.importorskip("piexif")
+        from photo_s.engine import read_exif_metadata
+        root, app = _make_app()
+        p = _img(tmp_path / "a.jpg")
+        ok, _ = app._review_save(p, rating=4, keywords="beach,trip",
+                                 title="Summer Trip")
+        assert ok
+        m = read_exif_metadata(p)
+        assert m["keywords"] == ["beach", "trip"]
+        app._undo()
+        m2 = read_exif_metadata(p)
+        assert m2["keywords"] == [] and m2["title"] == "", \
+            "keywords/title restored (rating had no previous value)"
+        root.destroy()
+
+    def test_undo_tag_restores_previous_rating(self, tmp_path):
+        pytest.importorskip("piexif")
+        from photo_s.engine import read_exif_metadata
+        root, app = _make_app()
+        p = _img(tmp_path / "a.jpg")
+        app._review_save(p, rating=4, keywords="beach", title="S")
+        app._review_save(p, rating=5, keywords="beach", title="S")
+        m = read_exif_metadata(p)
+        assert m["rating"] == 5
+        app._undo()
+        assert read_exif_metadata(p)["rating"] == 4, \
+            "undo restores the previous rating"
         root.destroy()
 
 

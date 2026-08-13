@@ -227,7 +227,7 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 
 新增 `tests/test_gui_workflows.py`（15 个）：同步 helper 全覆盖 +
 对话框冒烟（有界 `root.update()` 轮询，不点启动按钮、不挂线程）。
-全量 428 个。
+全量 434 个。
 
 ### 8.8 勾选式文件列表（替代选中集）
 
@@ -287,3 +287,18 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   锁定一致）。About 对话框新增快捷键清单（`shortcuts_text`）。
 - 注意：root 绑定在 `__init__` 时捕获方法引用——测试补丁需在建 app 前
   改类方法；macOS 合成按键事件需 `focus_force()`。
+
+### 8.11 全局撤销（v1.1.0 内）
+
+- **撤销栈**：`self._undo_stack`（上限 10，`__init__` 创建，跨重建存活）；
+  `_push_undo(label, run)` 记录，工具栏「撤销」按钮（`undo_btn`）+
+  ⌘Z/Ctrl+Z（`_undo`）。栈空时按钮禁用；处理中锁定（`_sync_undo_btn`
+  尊重 `self.processing`）。
+- **可撤销操作**：
+  - 列表移除 → `_restore_removed(pairs, checked)` 按原索引插回 + 恢复勾选；
+  - 去重移入回收 → `_dedup_move_to_trash` 现返回 `(moved, failed,
+    moved_map)`（original→trash 路径），`_restore_dedup` 移回原位并回到
+    列表（目标位被占则跳过）；
+  - 审查打标写入 → `_review_save` 成功后入栈：keywords/title 恒可还原
+    （""=清空）；rating 仅当写入前存在才还原（引擎无"清除评分"语义）。
+- 快捷键清单（About + STRINGS）同步加入 ⌘Z 行。
