@@ -227,7 +227,7 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 
 新增 `tests/test_gui_workflows.py`（15 个）：同步 helper 全覆盖 +
 对话框冒烟（有界 `root.update()` 轮询，不点启动按钮、不挂线程）。
-全量 434 个。
+全量 435 个。
 
 ### 8.8 勾选式文件列表（替代选中集）
 
@@ -299,6 +299,10 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   - 去重移入回收 → `_dedup_move_to_trash` 现返回 `(moved, failed,
     moved_map)`（original→trash 路径），`_restore_dedup` 移回原位并回到
     列表（目标位被占则跳过）；
-  - 审查打标写入 → `_review_save` 成功后入栈：keywords/title 恒可还原
-    （""=清空）；rating 仅当写入前存在才还原（引擎无"清除评分"语义）。
+  - 审查打标写入 → `_review_save` 成功后入栈，**全量还原**：
+    `apply_exif_tags` 现支持显式清除语义（`rating=None` / `keywords=""` /
+    `title=""` 清空对应字段，三者全空时整个 PhotoS: 段被移除）——首次打分
+    也能撤销回"未评分"（`_write_usercomment` 同时修正空段残留）。
+  - 审查窗口每次翻页从磁盘重读元数据（撤销 / 外部 CLI 写入在下次翻页时
+    可见，不再用过期缓存）。
 - 快捷键清单（About + STRINGS）同步加入 ⌘Z 行。

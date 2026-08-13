@@ -39,6 +39,19 @@ class TestExifTagAndFilter:
         assert m["keywords"] == ["beach", "trip"]
         assert m["title"] == "Summer"
 
+    def test_clear_rating_keywords_title(self, tmp_path):
+        """rating=None / keywords='' / title='' explicitly clear the
+        fields (the undo path relies on this semantics)."""
+        img = _img(tmp_path / "a.jpg")
+        apply_exif_tags(img, {"rating": 4, "keywords": "beach,trip",
+                              "title": "Summer"})
+        assert read_exif_metadata(img)["rating"] == 4
+        apply_exif_tags(img, {"rating": None, "keywords": "", "title": ""})
+        m = read_exif_metadata(img)
+        assert m["rating"] is None
+        assert m["keywords"] == []
+        assert m["title"] == ""
+
     def test_write_and_read_multiword_title(self, tmp_path):
         """Multi-word titles round-trip: title= is the last UserComment
         segment, so the parser must join the remaining tokens."""

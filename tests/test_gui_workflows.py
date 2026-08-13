@@ -471,8 +471,9 @@ class TestUndo:
         assert m["keywords"] == ["beach", "trip"]
         app._undo()
         m2 = read_exif_metadata(p)
-        assert m2["keywords"] == [] and m2["title"] == "", \
-            "keywords/title restored (rating had no previous value)"
+        assert m2["rating"] is None and m2["keywords"] == [] \
+            and m2["title"] == "", \
+            "full restore — first-time rating is cleared back to unrated"
         root.destroy()
 
     def test_undo_tag_restores_previous_rating(self, tmp_path):

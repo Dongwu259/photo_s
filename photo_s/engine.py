@@ -1548,10 +1548,16 @@ def _write_usercomment(exif_dict: dict, rating=None, keywords=None,
     if title:
         seg += f" title={title}"
     human = existing_text.split(_USERCOMMENT_PREFIX, 1)[0].strip(" ,|")
-    parts = [p for p in (human, seg.strip()) if p]
-    payload = (" | ".join(parts)).encode("utf-8")
-    exif_dict["Exif"][piexif.ExifIFD.UserComment] = (
-        b"ASCII\x00\x00\x00" + payload)
+    if seg.strip() == _USERCOMMENT_PREFIX:
+        seg = ""  # all fields cleared — drop the PhotoS: segment
+    parts = [p for p in (human, seg) if p]
+    if parts:
+        payload = (" | ".join(parts)).encode("utf-8")
+        exif_dict["Exif"][piexif.ExifIFD.UserComment] = (
+            b"ASCII\x00\x00\x00" + payload)
+    else:
+        # nothing left at all — remove the tag entirely
+        exif_dict["Exif"].pop(piexif.ExifIFD.UserComment, None)
 
 
 def apply_exif_tags(image_path: str, tags: dict) -> str:
@@ -1562,7 +1568,9 @@ def apply_exif_tags(image_path: str, tags: dict) -> str:
     datetime/date, title, keywords (comma list), rating (int 0-5).
     rating/keywords/title are packed into EXIF UserComment (PhotoS: payload);
     the rest are standard EXIF fields. All tags are written in a single
-    load/dump/insert pass.
+    load/dump/insert pass. ``rating=None`` / ``keywords=""`` / ``title=""``
+    explicitly CLEAR the corresponding field (the PhotoS: segment is
+    dropped entirely when all three end up empty).
 
     Returns a message string describing what was written.
     """
@@ -1577,10 +1585,13 @@ def apply_exif_tags(image_path: str, tags: dict) -> str:
     # rating / keywords / title → UserComment payload
     meta = _parse_usercomment(_usercomment_text_from_dict(exif_dict))
     if "rating" in tags:
-        try:
-            meta["rating"] = int(tags["rating"])
-        except (TypeError, ValueError):
-            pass
+        if tags["rating"] is None:
+            meta["rating"] = None  # explicit clear (undo etc.)
+        else:
+            try:
+                meta["rating"] = int(tags["rating"])
+            except (TypeError, ValueError):
+                pass
     if "keywords" in tags:
         meta["keywords"] = [k.strip() for k in str(tags["keywords"]).split(",")
                             if k.strip()]

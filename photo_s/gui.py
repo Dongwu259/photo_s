@@ -3295,11 +3295,11 @@ class PhotoSApp:
             return False, msg
 
         def revert():
-            # keywords/title always restore ("" clears); rating only
-            # when it existed before (the engine cannot clear a rating)
-            t = {"keywords": prev["keywords"], "title": prev["title"]}
-            if prev["rating"] is not None:
-                t["rating"] = prev["rating"]
+            # full restore — None / "" explicitly clear the fields
+            # (engine clear semantics, added for undo)
+            t = {"rating": prev["rating"],
+                 "keywords": prev["keywords"],
+                 "title": prev["title"]}
             apply_exif_tags(path, t)
 
         self._push_undo(self._t("undo_tag", name=os.path.basename(path)),
@@ -3323,6 +3323,7 @@ class PhotoSApp:
                                 self._t("check_none"))
             return
 
+        from .engine import read_exif_metadata
         has_piexif = importlib.util.find_spec("piexif") is not None
 
         win = tk.Toplevel(self.root)
@@ -3511,7 +3512,13 @@ class PhotoSApp:
                 return
             idx = state["idx"]
             p = state["seq"][idx]
-            m = state["meta"].get(p, {})
+            try:
+                # keep the dialog honest: re-read from disk so undo /
+                # external CLI writes show up on the next navigation
+                m = read_exif_metadata(p)
+                state["meta"][p] = m
+            except Exception:
+                m = state["meta"].get(p, {})
             state["rating"] = m.get("rating")
             keywords_var.set(",".join(m.get("keywords") or []))
             title_var.set(m.get("title") or "")
