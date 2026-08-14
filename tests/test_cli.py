@@ -285,6 +285,51 @@ class TestCliJsonCoverage:
         assert exc.value.code == 0
         assert "photo-s {}".format(__version__) in capsys.readouterr().out
 
+
+class TestLiteEditionFallback:
+    """Builds without the GUI module (photo-s-lite exe) must degrade
+    gracefully instead of crashing on `from .gui import run_gui`."""
+
+    @staticmethod
+    def _block_gui(monkeypatch):
+        # None in sys.modules makes `from .gui import run_gui` raise
+        # ImportError — exactly what the lite exe's excludes cause.
+        monkeypatch.setitem(sys.modules, "photo_s.gui", None)
+
+    def test_no_args_prints_help_instead_of_crashing(self, monkeypatch,
+                                                     capsys):
+        import photo_s.cli as cli_mod
+        self._block_gui(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["photo-s"])
+        rc = cli_mod.main()
+        assert rc == 0
+        out, err = capsys.readouterr()
+        assert "Commands" in out or "命令" in out  # argparse help body
+        assert "lite" in err or "精简" in err      # the no-GUI hint
+
+    def test_gui_subcommand_exits_1_with_hint(self, monkeypatch, capsys):
+        import photo_s.cli as cli_mod
+        self._block_gui(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["photo-s", "gui"])
+        rc = cli_mod.main()
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "lite" in err or "精简" in err
+
+    def test_version_marks_lite_build(self, monkeypatch, capsys):
+        import photo_s.cli as cli_mod
+        monkeypatch.setattr(cli_mod, "_gui_module_available",
+                            lambda: False)
+        with pytest.raises(SystemExit) as exc:
+            run_cli(["--version"])
+        assert exc.value.code == 0
+        assert "(lite)" in capsys.readouterr().out
+
+    def test_version_unmarked_when_gui_present(self, capsys):
+        with pytest.raises(SystemExit):
+            run_cli(["--version"])
+        assert "(lite)" not in capsys.readouterr().out
+
     def test_convert_format_case_insensitive(self, tmp_path, capsys):
         # regression: -f png (lowercase) used to be rejected by choices
         img = _make_image(tmp_path / "in.png", color=(1, 2, 3))

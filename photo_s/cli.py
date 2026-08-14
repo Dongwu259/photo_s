@@ -489,8 +489,13 @@ def run_cli(args: List[str] = None) -> int:
         "--json", action="store_true",
         help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
     )
+    _version_str = f"photo-s {__version__}"
+    if not _gui_module_available():
+        # Lite build (no GUI module bundled) — mark it so bug reports can
+        # tell the two editions apart.
+        _version_str += " (lite)"
     parser.add_argument(
-        "--version", action="version", version=f"photo-s {__version__}",
+        "--version", action="version", version=_version_str,
         help="显示版本号 Show version",
     )
 
@@ -2357,11 +2362,44 @@ def run_cli(args: List[str] = None) -> int:
     return 0 if result.fail_count == 0 else 1
 
 
+_NO_GUI_MSG = (
+    "⚠️  此版本为 CLI/MCP 精简版，不含图形界面 / This is the CLI+MCP (lite) "
+    "build without the GUI.\n"
+    "   完整版 Full edition: "
+    "https://github.com/Dongwu259/photo_s/releases")
+
+
+def _gui_module_available() -> bool:
+    """Whether the GUI module exists in this build.
+
+    The lite executable excludes ``photo_s.gui`` at PyInstaller level, so
+    this is False there; full wheels/exes always ship the module.
+    """
+    import importlib.util
+    try:
+        return importlib.util.find_spec("photo_s.gui") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _run_gui() -> bool:
+    """Launch the GUI; print a hint and return False when this build /
+    system has no GUI (lite exe, or tkinter missing)."""
+    try:
+        from .gui import run_gui
+    except ImportError:
+        print(_NO_GUI_MSG, file=sys.stderr)
+        return False
+    run_gui()
+    return True
+
+
 def main():
     """Entry point for the photo-s command.
 
     Dispatches to GUI if no args are given or first arg is 'gui',
-    otherwise runs CLI mode.
+    otherwise runs CLI mode. Builds without the GUI (lite) print a hint
+    and fall back to --help / exit 1 instead of crashing on ImportError.
     """
     # Force UTF-8 console output: CLI status lines use emoji, which crashes
     # on Windows' default cp1252 code page (e.g. redirected/piped output).
@@ -2371,13 +2409,15 @@ def main():
         except (AttributeError, ValueError):
             pass
     if len(sys.argv) <= 1:
-        from .gui import run_gui
-        run_gui()
+        if _run_gui():
+            return 0
+        try:
+            run_cli(["--help"])
+        except SystemExit as e:  # argparse --help raises SystemExit(0)
+            return int(e.code or 0)
         return 0
     if sys.argv[1] == "gui":
-        from .gui import run_gui
-        run_gui()
-        return 0
+        return 0 if _run_gui() else 1
     return run_cli(sys.argv[1:])
 
 

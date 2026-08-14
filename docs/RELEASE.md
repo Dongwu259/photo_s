@@ -88,5 +88,6 @@ photo-s batch ~/highiso/ --denoise 12       # 端到端（首次使用自动下�
   PyPI trusted publisher 已配置 `Dongwu259/photo_s` + environment `pypi`。
 - **wheel 里混入 scunet**：核心 `pyproject.toml` 的 `packages.find` 只含
   `photo_s*`，`plugins/` 不在内——如果出现，检查是否误把 `plugins` 加进了包含。
-- **Windows 打包**：`python packaging/build.py` 构建 `.exe`；注意 `plugins/`
-  插件是独立包，打包核心 exe 时默认不带（需要时单独处理）。
+- **Windows 打包**：`python packaging/build.py` 构建完整版 `.exe`（GUI+CLI+MCP）；
+  `--lite` 构建精简版 `photo-s-lite.exe`（CLI+MCP，构建期剔除 gui/tkinter）。
+  注意 `plugins/` 插件是独立包，打包核心 exe 时默认不带（需要时单独处理）。

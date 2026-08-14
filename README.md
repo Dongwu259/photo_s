@@ -423,11 +423,18 @@ Claude Desktop config (`claude_desktop_config.json`):
 
 ```bash
 pip install pyinstaller piexif pillow-heif   # optional features too
-python packaging/build.py                    # → dist/photo-s/photo-s.exe
+python packaging/build.py                    # full: dist/photo-s/photo-s.exe (GUI+CLI+MCP)
+python packaging/build.py --lite             # lite: dist/photo-s-lite/photo-s-lite.exe (CLI+MCP, no GUI)
 ```
 
+Two editions: the **full** bundle ships the GUI; the **lite** bundle excludes
+`photo_s.gui` + tkinter at build level (smaller, display-free) — ideal for
+agent-spawned `serve`/`mcp` processes. In the lite build `photo-s-lite` with
+no args prints help, `gui` exits 1 with a hint, and `--version` shows
+`(lite)`.
+
 The host launches by **absolute path**, no environment variables needed (see the spawn mode above).
-CI builds a `windows-latest` artifact (`.github/workflows/ci.yml`).
+CI builds both `windows-latest` artifacts (`.github/workflows/ci.yml`).
 
 ---
 

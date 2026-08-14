@@ -2,7 +2,8 @@
 """Build the PhotoS bundled executable with PyInstaller.
 
 Usage:
-    python packaging/build.py            # one-dir build
+    python packaging/build.py            # full edition (GUI + CLI + MCP)
+    python packaging/build.py --lite     # lite edition (CLI + MCP, no GUI)
 
 Prereqs:
     pip install pyinstaller
@@ -31,23 +32,28 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build bundled PhotoS")
-    parser.parse_args()
+    parser.add_argument(
+        "--lite", action="store_true",
+        help="精简版：不含 GUI/tkinter CLI+MCP only build (no GUI/tkinter)",
+    )
+    args = parser.parse_args()
 
     if shutil.which("pyinstaller") is None:
         print("❌ PyInstaller 未安装 Not installed: pip install pyinstaller")
         return 1
 
+    edition = "photo-s-lite" if args.lite else "photo-s"
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm",
-           str(ROOT / "photo-s.spec")]
+           str(ROOT / f"{edition}.spec")]
 
-    print("🚀 Building PhotoS bundle ...")
+    print(f"🚀 Building PhotoS bundle ({edition}) ...")
     result = subprocess.run(cmd, cwd=ROOT)
     if result.returncode != 0:
         print("❌ Build failed")
         return result.returncode
 
     ext = ".exe" if os.name == "nt" else ""
-    out = ROOT / "dist" / "photo-s" / f"photo-s{ext}"
+    out = ROOT / "dist" / edition / f"{edition}{ext}"
     print(f"✅ 构建完成 Built: {out}")
     print(f"   Windows 打包场景 Windows bundling: 用绝对路径拉起子进程，"
           f"不依赖 PATH/环境变量:")

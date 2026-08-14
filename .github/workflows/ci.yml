@@ -108,3 +108,16 @@ jobs:
         with:
           name: photo-s-windows
           path: dist/photo-s/
+      - name: Build lite bundle (CLI + MCP, no GUI)
+        run: python packaging/build.py --lite
+      - name: Smoke test the lite exe
+        run: |
+          .\dist\photo-s-lite\photo-s-lite.exe --help | Select-Object -First 3
+          .\dist\photo-s-lite\photo-s-lite.exe --version
+          # lite has no GUI: the gui command must fail gracefully (exit 1)
+          .\dist\photo-s-lite\photo-s-lite.exe gui
+          if ($LASTEXITCODE -ne 1) { throw "lite gui should exit 1" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photo-s-lite-windows
+          path: dist/photo-s-lite/
