@@ -74,14 +74,26 @@ def run_scunet(img: Image.Image, strength: float, model_path: str) -> Image.Imag
 
     # PIL → float32 NCHW [1,3,H,W] normalized to 0..1
     arr = np.asarray(rgb, dtype=np.float32) / 255.0
-    tensor = np.transpose(arr, (2, 0, 1))[None, ...]
+
+    # SCUNet reshapes H,W into (n, 8) window blocks at EVERY scale, and its
+    # encoder downsamples 3 times (÷8): scale dims are H, H/2, H/4, H/8, so
+    # the input dims must be multiples of 64. Pad by edge replication (safe
+    # even for tiny dims), run inference, then crop the padding off.
+    h, w = arr.shape[:2]
+    pad_h = (64 - h % 64) % 64
+    pad_w = (64 - w % 64) % 64
+    if pad_h or pad_w:
+        padded = np.pad(arr, ((0, pad_h), (0, pad_w), (0, 0)), mode="edge")
+    else:
+        padded = arr
+    tensor = np.transpose(padded, (2, 0, 1))[None, ...]
 
     sess = _session(model_path)
     input_name = sess.get_inputs()[0].name
     out = sess.run(None, {input_name: tensor})[0]
 
-    # [1,C,H,W] → [H,W,C], mix by strength, clamp, back to 0..255 uint8
-    denoised = np.transpose(out[0], (1, 2, 0))
+    # [1,C,H,W] → [H,W,C], crop padding, mix by strength, clamp, → uint8
+    denoised = np.transpose(out[0], (1, 2, 0))[:h, :w]
     mixed = _blend(arr, denoised, float(strength))
     out = np.clip(mixed, 0.0, 1.0) * 255.0
     result = Image.fromarray(out.astype(np.uint8), mode="RGB")

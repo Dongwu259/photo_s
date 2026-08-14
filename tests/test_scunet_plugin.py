@@ -161,6 +161,19 @@ class TestScunetDenoise:
         out = plugin.denoise(img, 10.0, type("C", (), {})())
         assert out.info.get("icc_profile") == b"fake-icc"
 
+    def test_non_multiple_of_8_dims_padded(self, tmp_path, monkeypatch):
+        """SCUNet needs H,W divisible by 8: odd dims must be padded to the
+        model and cropped back, so output size always equals input size."""
+        _setup_env(tmp_path, monkeypatch)
+        plugin = ScunetPlugin()
+        # 61x59 pads to 64x64 — exactly the tiny test model's input shape
+        img = Image.new("RGB", (61, 59), (120, 100, 80))
+        out = plugin.denoise(img, 10.0, type("C", (), {})())
+        assert out.size == (61, 59)
+        assert out.mode == "RGB"
+        # identity conv → interior pixels ≈ input
+        assert abs(out.getpixel((30, 30))[0] - 120) <= 3
+
 
 class TestBlend:
     """Pure math of the strength→t mapping (no model, no runtime)."""
