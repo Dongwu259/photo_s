@@ -348,7 +348,15 @@ def _get_output_path(input_path: str, output_format: str, output_dir: Optional[s
 
     If rename_pattern is set, use template-based naming instead of prefix/suffix.
     """
-    fmt_info = SUPPORTED_FORMATS[output_format]
+    # Canonicalize here too: process_image already does this, but the resume
+    # pre-pass in batch_process calls this directly with the raw option — a
+    # lowercase format would otherwise raise a bare KeyError on the whole batch.
+    fmt = _canonical_format(output_format)
+    if fmt not in SUPPORTED_FORMATS:
+        raise ValueError(
+            f"unsupported output format {output_format!r}; "
+            f"supported: {sorted(SUPPORTED_FORMATS)}")
+    fmt_info = SUPPORTED_FORMATS[fmt]
     in_path = Path(input_path)
 
     if rename_pattern and exif_meta is not None:

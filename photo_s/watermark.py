@@ -52,7 +52,10 @@ DEFAULT_POSITION = "BOTTOM_RIGHT"
 def _get_position_xy(img_w: int, img_h: int, wm_w: int, wm_h: int,
                      position: str, margin: int = 20):
     """Calculate (x, y) for watermark placement."""
-    h_align, v_align = POSITIONS.get(position, POSITIONS["BOTTOM_RIGHT"])
+    # Case-insensitive: library callers may pass "top_left"; the constants and
+    # CLI choices are uppercase. Unknown values still fall back to bottom-right.
+    h_align, v_align = POSITIONS.get(str(position).upper(),
+                                     POSITIONS["BOTTOM_RIGHT"])
 
     if h_align == "left":
         x = margin
@@ -164,10 +167,12 @@ def apply_image_watermark(
     except Exception:
         return img
 
-    # Scale overlay
-    target_w = int(img.width * scale / 100)
+    # Scale overlay (clamp to >= 1px; a 0-size resize raises in Pillow)
+    if scale <= 0:
+        return img
+    target_w = max(1, int(img.width * scale / 100))
     ratio = target_w / wm.width
-    target_h = int(wm.height * ratio)
+    target_h = max(1, int(wm.height * ratio))
     wm = wm.resize((target_w, target_h), Image.LANCZOS)
 
     # Apply opacity

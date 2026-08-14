@@ -84,16 +84,36 @@ def load_cube(path):
 
 
 def _apply_1d(img, table):
-    """Apply a 1D LUT via per-channel 256-entry point tables (C-fast)."""
+    """Apply a 1D LUT via per-channel 256-entry point tables (C-fast).
+
+    Handles L / RGB / RGBA / P: L gets the first channel's curve, RGBA keeps
+    its alpha band, and palette images are converted to RGB.
+    """
+    if img.mode == "P":
+        img = img.convert("RGB")
+    if img.mode == "RGBA":
+        alpha = img.getchannel("A")
+        img = img.convert("RGB")
+    else:
+        alpha = None
+
     n = table.shape[0]
     idx = np.linspace(0, n - 1, 256)
     luts = []
     for ch in range(3):
         lut = np.interp(idx, np.arange(n), table[:, ch])
         luts.append(np.clip(lut * 255, 0, 255).astype(np.uint8).tolist())
+
+    if img.mode == "L":
+        # single band → the average channel curve (table rows are RGB-ish)
+        out = img.point(luts[1])
+        return out
     r, g, b = img.split()
-    return Image.merge("RGB", (r.point(luts[0]), g.point(luts[1]),
-                               b.point(luts[2])))
+    out = Image.merge("RGB", (r.point(luts[0]), g.point(luts[1]),
+                              b.point(luts[2])))
+    if alpha is not None:
+        out.putalpha(alpha)
+    return out
 
 
 def _apply_3d(img, table):

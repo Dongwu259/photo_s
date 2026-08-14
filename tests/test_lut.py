@@ -124,3 +124,28 @@ class TestEngineSlot:
         )
         assert result.success_count == 1
         assert (out_dir / "in.png").exists()
+
+
+class TestApply1dMultiMode:
+    """Regression: 1D LUT assumed exactly 3 bands (crashed on RGBA/L/P)."""
+
+    def _cube(self, tmp_path):
+        p = tmp_path / "d.cube"
+        p.write_text("LUT_1D_SIZE 4\n0 0 0\n0.2 0.2 0.2\n0.5 0.5 0.5\n0.8 0.8 0.8\n")
+        return str(p)
+
+    def test_rgba_keeps_alpha(self, tmp_path):
+        im = Image.new("RGBA", (8, 8), (100, 100, 100, 200))
+        out = apply_lut(im, self._cube(tmp_path))
+        assert out.mode == "RGBA"
+        assert out.getpixel((0, 0))[3] == 200
+
+    def test_grayscale_ok(self, tmp_path):
+        im = Image.new("L", (8, 8), 128)
+        out = apply_lut(im, self._cube(tmp_path))
+        assert out.mode == "L"
+
+    def test_palette_converts(self, tmp_path):
+        im = Image.new("P", (8, 8))
+        out = apply_lut(im, self._cube(tmp_path))
+        assert out.mode == "RGB"

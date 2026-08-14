@@ -88,7 +88,14 @@ def _srgb_oetf(lin: float) -> float:
 
 def build_log_recovery_lut(curve: str) -> list:
     """256-entry point table: 8-bit LOG code → 8-bit sRGB display value."""
-    decode = LOG_CURVES[curve]["decode"]
+    # Case-insensitive (library callers may pass "slog3"); clear error listing
+    # the supported curves instead of a bare KeyError.
+    key = str(curve).upper()
+    if key not in LOG_CURVES:
+        raise ValueError(
+            f"unsupported log curve {curve!r}; supported: "
+            f"{sorted(LOG_CURVES)}")
+    decode = LOG_CURVES[key]["decode"]
     lut = []
     for v in range(256):
         lin = max(0.0, min(1.0, decode(v / 255.0)))

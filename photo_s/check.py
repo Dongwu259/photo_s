@@ -60,7 +60,13 @@ def compute_checksums(paths: List[str], algorithm: str = "sha256",
     Returns list of {"path", "size", <algorithm>}. Unreadable/missing files
     get an empty checksum (verify_manifest treats those as missing).
     """
-    algo = getattr(hashlib, algorithm, None) or hashlib.sha256
+    # No silent fallback: an unknown algorithm name would otherwise compute
+    # sha256 but label it with the bogus name — an invisible wrong result.
+    algo = getattr(hashlib, algorithm, None)
+    if algo is None:
+        raise ValueError(
+            f"unsupported checksum algorithm {algorithm!r}; "
+            f"supported: {sorted(h for h in hashlib.algorithms_available)}")
     results = []
     for i, path in enumerate(paths):
         if progress_callback:

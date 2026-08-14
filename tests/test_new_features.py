@@ -463,3 +463,19 @@ class TestAutoStraighten:
         r = json.loads(capsys.readouterr().out)["results"][0]
         assert r["status"] == "ok"
         assert r["auto_straightened"] is True
+
+
+class TestLogCurveLibraryPath:
+    """Regression: apply_log_recovery was case-sensitive / bare KeyError."""
+
+    def test_lowercase_curve_ok(self):
+        from photo_s.logcurve import apply_log_recovery
+        im = Image.new("RGB", (4, 4), (100, 100, 100))
+        out = apply_log_recovery(im, "slog3")
+        assert out.mode == "RGB"
+
+    def test_unknown_curve_clear_error(self):
+        from photo_s.logcurve import apply_log_recovery
+        im = Image.new("RGB", (4, 4), (100, 100, 100))
+        with pytest.raises(ValueError, match="unsupported log curve"):
+            apply_log_recovery(im, "SLOG4")

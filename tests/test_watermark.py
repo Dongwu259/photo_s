@@ -6,6 +6,8 @@ import os
 # Ensure src package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from PIL import Image
+
 from photo_s.watermark import _get_position_xy
 
 
@@ -65,3 +67,30 @@ class TestGetPositionXY:
         x, y = _get_position_xy(1920, 1080, 200, 50, "TOP_LEFT", margin=50)
         assert x == 50
         assert y == 50
+
+
+class TestPositionCaseInsensitive:
+    """Regression: lowercase position silently landed in the wrong corner."""
+
+    def test_lowercase_top_left(self):
+        assert _get_position_xy(400, 400, 20, 20, "top_left") == (20, 20)
+
+    def test_lowercase_bottom_right(self):
+        assert _get_position_xy(400, 400, 20, 20, "bottom_right") == \
+            (400 - 20 - 20, 400 - 20 - 20)
+
+    def test_unknown_falls_back(self):
+        assert _get_position_xy(400, 400, 20, 20, "wibble") == \
+            (400 - 20 - 20, 400 - 20 - 20)
+
+
+class TestImageWatermarkScaleGuard:
+    """Regression: scale <= 0 crashed Pillow resize (0-size target)."""
+
+    def test_scale_zero_no_crash(self, tmp_path):
+        from photo_s.watermark import apply_image_watermark
+        logo = tmp_path / "logo.png"
+        Image.new("RGBA", (32, 32), (255, 0, 0, 255)).save(logo)
+        im = Image.new("RGB", (100, 100), (0, 0, 0))
+        out = apply_image_watermark(im, str(logo), scale=0)
+        assert out is im or out.mode == "RGBA"

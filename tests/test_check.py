@@ -6,6 +6,7 @@ import sys
 # Ensure src package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
 from PIL import Image
 
 from photo_s.check import verify_images
@@ -39,3 +40,21 @@ class TestVerifyImages:
         p.write_bytes(b"this is not an image at all")
         results = verify_images([str(p)])
         assert not results[0]["ok"]
+
+
+class TestChecksumAlgorithmValidation:
+    """Regression: unknown algorithm silently fell back to sha256."""
+
+    def test_unknown_algo_raises(self, tmp_path):
+        from photo_s.check import compute_checksums
+        p = tmp_path / "a.bin"
+        p.write_bytes(b"data")
+        with pytest.raises(ValueError, match="unsupported checksum algorithm"):
+            compute_checksums([str(p)], algorithm="sha99")
+
+    def test_valid_algo_works(self, tmp_path):
+        from photo_s.check import compute_checksums
+        p = tmp_path / "a.bin"
+        p.write_bytes(b"data")
+        res = compute_checksums([str(p)], algorithm="md5")
+        assert "md5" in res[0]

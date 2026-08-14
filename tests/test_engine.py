@@ -360,3 +360,17 @@ class TestOutputFormatCanonical:
         with pytest.raises(ValueError, match="unsupported output format"):
             batch_process([src], ProcessOptions(
                 output_dir=str(tmp_path / "out"), output_format="bogus"))
+
+
+class TestResumeCanonicalFormat:
+    """Regression: resume pre-pass + lowercase format crashed the whole batch."""
+
+    def test_resume_lowercase_ok(self, tmp_path):
+        from PIL import Image
+        from photo_s.engine import ProcessOptions, batch_process
+        p = tmp_path / "a.png"
+        Image.new("RGB", (8, 8), (100, 100, 100)).save(p)
+        res = batch_process([str(p)], ProcessOptions(
+            output_dir=str(tmp_path / "out"), output_format="jpeg",
+            resume=True))
+        assert res.success_count == 1

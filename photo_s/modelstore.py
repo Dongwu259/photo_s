@@ -17,6 +17,7 @@ Stdlib only (urllib.request) — matches the project's no-heavy-deps stance.
 import hashlib
 import os
 import sys
+import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -111,7 +112,10 @@ def ensure(spec: WeightSpec, timeout: int = 30) -> str:
         return cached
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    part = "{}.{}.part".format(path, os.getpid())
+    # pid alone collides when two threads (parallel batch workers) download the
+    # same weight in one process — add the thread id so they write to distinct
+    # .part files instead of truncating each other's stream.
+    part = "{}.{}.{}.part".format(path, os.getpid(), threading.get_ident())
     try:
         _download(spec, part, timeout)
         if verify(part, spec.sha256):

@@ -145,3 +145,12 @@ class TestStatus:
         assert s["cached"] is False
         assert s["path"] is None
         assert s["size"] == 42
+
+
+class TestPartFileThreadUnique:
+    """Regression: ensure() used pid-only .part — collided across threads."""
+
+    def test_part_name_contains_thread_id(self):
+        import photo_s.modelstore as ms
+        src = open(ms.__file__).read()
+        assert "threading.get_ident()" in src

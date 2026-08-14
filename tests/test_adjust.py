@@ -248,3 +248,18 @@ class TestColorManagement:
     def test_neutral_returns_same_object(self):
         img = _img()
         assert apply_color_management(img) is img
+
+
+class TestRotateGrayscale:
+    """Regression: L-mode rotate crashed (PIL needs a scalar fill color)."""
+
+    def test_grayscale_rotate_no_crash(self):
+        im = Image.new("L", (16, 16), 128)
+        out = apply_rotate(im, 15)
+        assert out.mode == "L"  # stays grayscale
+        assert out.size != (16, 16)  # expanded
+
+    def test_grayscale_rotate_with_fill(self):
+        im = Image.new("L", (16, 16), 128)
+        out = apply_rotate(im, 15, fill="#FF0000")
+        assert out.mode == "RGB"  # colored fill promotes to RGB

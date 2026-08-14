@@ -390,6 +390,9 @@ def apply_rotate(img: Image.Image, degrees: float,
         except ValueError:
             r, g, b = 0, 0, 0
         fillcolor = (r, g, b, 255) if img.mode == "RGBA" else (r, g, b)
+    elif img.mode == "L":
+        # PIL L-mode rotate requires a scalar fill color (no 3-tuple)
+        fillcolor = 0
     else:
         fillcolor = (0, 0, 0, 255) if img.mode == "RGBA" else (0, 0, 0)
 
