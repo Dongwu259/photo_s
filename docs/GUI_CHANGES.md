@@ -16,6 +16,7 @@
 | 第四轮 | 工具箱补全 | 4 个新区块（水印/多尺寸/影调/构图）、双击对比、处理队列追加 |
 | 第五轮 | 界面现代化 | FlatButton 改 Canvas 药丸、卡片化布局、clam 主题（主题切换全量重染 ttk）、滚动抖动修复（卡片级绑定 + 边界吸附 + 去抖）、设置/MCP 对话框、插件管理器 |
 | 第六轮 | 工作流补全 | 审查打分灯箱、去重查看器、画廊导出、摘要对话框可滚动（v1.2.0，见 §8） |
+| 第七轮 | v1.4.0 深化 | EXIF 编辑器扩拍摄信息 7 字段、批量重命名实时预览、多图并排对比（首个 Canvas 缩放视口，见 §9） |
 
 ---
 
@@ -378,3 +379,54 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   加入 `lut_file`（预设加载往返）。
 - 引擎侧：`ProcessOptions.lut_file` + 管线新 provider 槽位（影调段后、白平衡前，
   `find_provider("lut")` 优先，否则 `photo_s.lut.apply_lut` 内置三线性）。
+
+---
+
+## 9. 第七轮：v1.4.0 深化（EXIF 扩展 / 重命名预览 / 多图对比）
+
+### 9.1 EXIF 编辑器扩展（review 灯箱内）
+
+- `_review_save` 签名扩展：`make/model/lens/iso/shutter/aperture/date` 关键字参数。
+  `None` = 不动；字符串（含空串 = 清除）= 写入；与当前值相同不进 tags（diff-only）。
+  键映射：`aperture`→引擎 `fnumber`、`date`→引擎 `datetime`、`model` 对比 meta
+  的 `camera` 键。undo revert 覆盖全部新字段。
+- `_review_scan` 的 meta 含 `lens/fnumber/shutter`（来自 `read_exif_metadata` 新键）。
+- 注意坑：meta 的 `date` 是 `YYYY-MM-DD` 显示格式，写 EXIF 前须经模块级
+  `_exif_datetime_str(meta)` 拼 `time` 并转成 `YYYY:MM:DD HH:MM:SS`。
+- 引擎侧（同轮落地）：`_EXIF_TYPED_TAGS`（engine.py）支持 SHORT/RATIONAL 写入
+  （iso/fnumber/shutter/focal/lens），`_parse_rational_str` 容错；CLI `exif`
+  新增 `--lens/--iso/--shutter/--aperture/--focal`。
+
+### 9.2 批量重命名实时预览（`_show_rename`）
+
+- 入口：工具行 `rename_btn`；作用于 `_checked_files()`。
+- **同步 helper**：`_rename_preview(paths, pattern, output_dir, overwrite) -> rows`。
+  `rename_files(dry_run=True)` + **批内撞名检测**：逐字重放引擎 `_unique_target`
+  循环（含 `photo_1_2.jpg` 式连续加后缀怪癖——预览必须与真实执行逐字节一致，
+  parity 测试钉住），重复目标标 `conflict`。
+- UI：模板 Entry（默认取 `rename_pattern` var）/ 就地或复制单选 / overwrite 复选 /
+  三列 Treeview（conflict 黄、error 红）；300ms debounce + token 防过期 worker 覆盖。
+- 执行前 `askyesno`（不接 undo 体系）；就地重命名后 `self.files`/`self._checked`
+  按 ok 行 old→new 重映射再 `_refresh_file_list()`。
+
+### 9.3 多图并排对比（`_show_compare`）—— 首个 Canvas 缩放视口
+
+- 入口：工具行 `compare_btn`（`_set_state_recursive` 白名单，处理中可用）；
+  2-4 张 checked，超出取前 4。
+- **Tk-free `_ZoomPanState`**（模块级纯数学）：zoom ∈ [1,16]（1=适配），中心点
+  比例坐标 clamp 到 `[1/(2·zoom), 1-1/(2·zoom)]`；zoom 回 1 中心重置 (0.5,0.5)。
+- N 个 `tk.Canvas` 各自持有独立 `_ZoomPanState`：滚轮缩放与左键拖拽默认只
+  作用于鼠标下面板（per-panel）；左下角「同步缩放」勾选框（`compare_sync_zoom`，
+  默认关）勾选后滚轮联动全部面板；双击全部复位。
+- 渲染：比例窗口 → `Image.resize(size, LANCZOS, box=...)` 一步裁剪+缩放（保持
+  宽高比，背景留白）→ ImageTk 存 panel dict 防 GC；`after(60)` 单槽 debounce；
+  `<Configure>` 重绘。滚轮（macOS `<MouseWheel>` + X11 `Button-4/5` 按平台绑）
+  缩放、左键拖拽 pan、双击 fit。
+- 加载：worker `_open_image_safe(path).convert("RGB")`（解码留在 worker），
+  queue+drain 回 UI；失败面板画错误文字。
+
+### 9.4 测试
+
+`test_gui_workflows.py` 新增 23 项：`TestReviewExifEditor`(6)、`TestRenamePreview`(6，
+含预览=真实执行 parity)、`TestZoomPanState`(8 纯数学)、`TestCompareDialog`(3 smoke)。
+全量 689 个。

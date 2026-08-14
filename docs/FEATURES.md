@@ -1,6 +1,6 @@
 # PhotoS 功能清单 — Feature Inventory
 
-> 以代码实际为准（v1.2.0），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
+> 以代码实际为准（v1.4.0），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
 ## 1. CLI 命令（19 个）
@@ -10,7 +10,7 @@
 | `compress` | 压缩体积：`-q` 质量、`--target-size` 自动调优、RAW→JPEG、`--raw-half-size` |
 | `convert` | 格式转换（`-f`），8 种输出格式 |
 | `batch` | 批量处理：压缩+转换+缩放+全部引擎能力，`-r` 递归、`--organize` 子文件夹 |
-| `exif` | 批量读写元数据 / 打标（rating/keywords/title）/ 按评分筛选 |
+| `exif` | 批量读写元数据（make/model/lens/iso/shutter/aperture/focal/date）/ 打标（rating/keywords/title）/ 按评分筛选 |
 | `rename` | 智能模板重命名 `{date}/{make}/{camera}/{seq}/…`，`-o` 复制改名 |
 | `dedup` | 查重 + `keep-sharpest`（保留最锐） |
 | `cull` | 曝光/清晰度筛选（过曝/欠曝/亮暗范围/模糊分） |
@@ -57,7 +57,9 @@
 **文件区**：添加文件/文件夹（不支持自动跳过+提醒）、勾选式二次选定（全选/全不选）、移除、分析
 **处理**：批量处理+进度、Esc 取消、队列追加续跑、双击对比、RAW 原生预览、**视觉预览**（⌘P：真实管线渲染原图↔处理后并排，设置变化防抖自动刷新，只写临时目录绝不删源）
 **工作流**（工具栏「更多工具」菜单）：
-- 审查打分灯箱（0-5 评分/关键词/标题、过滤、翻页、灯箱内撤销）
+- 审查打分灯箱（0-5 评分/关键词/标题 + 拍摄信息编辑：品牌/型号/镜头/ISO/快门/光圈/日期、过滤、翻页、灯箱内撤销）
+- 批量重命名（模板实时预览、批内撞名检测、就地/复制两模式，预览=真实执行结果）
+- 多图并排对比（2-4 张，滚轮缩放/拖拽平移/双击复位，共享视口状态天然同步）
 - 去重查看器（缩略图+清晰度+★最锐预选、移入回收不删除、撤销回移）
 - 画廊导出（HTML + 浏览器打开）
 - 目录监视（watchdog，后台自动处理新图，关闭对话框即停）
@@ -83,7 +85,7 @@
 
 ## 6. 插件系统
 
-- 官方插件 **scunet**（SCUNet 强降噪，ONNX）：强度感知混合（0-20）、权重 modelstore 下载 + sha256 校验
+- 官方插件 **scunet**（SCUNet 强降噪，ONNX）：强度感知混合（0-20）、分块推理（tile 512 + overlap 64 线性斜坡融合，大图不 OOM）、输入自动补齐到 64 倍数、权重 modelstore 下载 + sha256 校验
 - 官方插件 **lut**（LUT 调色，纯 numpy 无权重）：四面体插值 override 内置三线性 + 5 个电影预设（filmic-v1/warm、cinema-cool、portrait-soft、punchy）
 - 开发脚手架：`photo-s plugin scaffold <name>` 生成插件包骨架
 - 协议：`provides` operation provider（denoise/lut）+ pre/post 过滤钩子
