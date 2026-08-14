@@ -6,6 +6,7 @@ no additional dependencies required.
 """
 
 import os
+import shutil
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
@@ -74,6 +75,18 @@ def _load_image_safe(path: str):
         return None
 
 
+class DuplicateGroups(dict):
+    """find_duplicates() result — a plain ``hash → [paths]`` dict, plus a
+    ``skipped`` attribute: how many input files could not be opened or
+    hashed (RAW, corrupt). Keeps the dict contract for existing callers,
+    but "no duplicates found" no longer implies "every file was checked".
+    """
+
+    def __init__(self, *args, skipped: int = 0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.skipped = skipped
+
+
 def find_duplicates(
     paths: List[str],
     threshold: int = 5,
@@ -90,20 +103,24 @@ def find_duplicates(
 
     Returns:
         Dict mapping representative hash → list of duplicate paths.
-        Each group has ≥ 2 images.
+        Each group has ≥ 2 images. The returned dict carries a ``skipped``
+        attribute: count of files that could not be opened/hashed.
     """
     # Phase 1: compute hashes
     hashes: Dict[str, str] = {}
+    skipped = 0
     total = len(paths)
     for i, path in enumerate(paths):
         if progress_callback:
             progress_callback(i + 1, total)
         img = _load_image_safe(path)
-        if img is not None:
-            try:
-                hashes[path] = dhash(img)
-            except Exception:
-                pass
+        if img is None:
+            skipped += 1  # unopenable (RAW, corrupt) — don't skip silently
+            continue
+        try:
+            hashes[path] = dhash(img)
+        except Exception:
+            skipped += 1
 
     # Phase 2: group by hash (exact match first)
     hash_groups: Dict[str, List[str]] = defaultdict(list)
@@ -129,7 +146,20 @@ def find_duplicates(
         if len(group) >= 2:
             merged[h1] = group
 
-    return merged
+    return DuplicateGroups(merged, skipped=skipped)
+
+
+class HandleResult(tuple):
+    """handle_duplicates() result — a plain ``(kept, removed)`` 2-tuple
+    (unchanged unpacking contract), plus a ``failed`` attribute: files
+    whose move failed with OSError (cross-device, permission, in use) are
+    counted there instead of crashing the batch halfway through.
+    """
+
+    def __new__(cls, kept: int, removed: int, failed: int = 0):
+        self = super().__new__(cls, (kept, removed))
+        self.failed = failed
+        return self
 
 
 def handle_duplicates(
@@ -147,9 +177,10 @@ def handle_duplicates(
         dry_run: If True, only print what would happen.
 
     Returns:
-        (files_kept, files_removed)
+        (files_kept, files_removed) — the tuple also carries a ``failed``
+        attribute with the count of moves that failed (see HandleResult).
     """
-    kept, removed = 0, 0
+    kept, removed, failed = 0, 0, 0
 
     for group_id, paths in dup_groups.items():
         if action == "keep-sharpest":
@@ -174,17 +205,26 @@ def handle_duplicates(
             if action == "move":
                 dup_dir = Path(keeper).parent / "_duplicates"
                 if not dry_run:
-                    dup_dir.mkdir(parents=True, exist_ok=True)
-                    dest = dup_dir / Path(dup).name
-                    counter = 1
-                    while dest.exists():
-                        dest = dup_dir / f"{Path(dup).stem}_{counter}{Path(dup).suffix}"
-                        counter += 1
-                    os.rename(dup, str(dest))
+                    try:
+                        dup_dir.mkdir(parents=True, exist_ok=True)
+                        dest = dup_dir / Path(dup).name
+                        counter = 1
+                        while dest.exists():
+                            dest = dup_dir / f"{Path(dup).stem}_{counter}{Path(dup).suffix}"
+                            counter += 1
+                        # shutil.move falls back to copy+unlink across
+                        # devices; os.rename dies there with errno 18 EXDEV
+                        shutil.move(dup, str(dest))
+                    except OSError:
+                        # permission / file-in-use / cross-device: count the
+                        # failure and continue (mirrors gui
+                        # ._dedup_move_to_trash) instead of crashing mid-move
+                        removed -= 1
+                        failed += 1
             elif action in ("delete", "keep-sharpest"):
                 # keep-sharpest removes the non-keepers (the blurry rest of a
                 # burst), keeping only the sharpest image per group
                 if not dry_run:
                     os.unlink(dup)
 
-    return kept, removed
+    return HandleResult(kept, removed, failed)

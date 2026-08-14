@@ -26,12 +26,25 @@ class _DebouncedHandler:
     Wraps watchdog's FileSystemEventHandler pattern.
     """
 
+    # A file whose size never stops changing is abandoned after this many
+    # stability checks (one per tick, so ≈ one per second).
+    _MAX_STABILIZE_ATTEMPTS = 30
+
     def __init__(self, options: ProcessOptions,
                  on_process: Optional[Callable[[ProcessResult], None]] = None):
         self.options = options
         self.on_process = on_process
         self._pending = {}   # path → first seen time
         self._processed = set()  # paths already processed
+        self._attempts = {}  # path → failed stability-check count
+
+    def _is_own_output(self, path) -> bool:
+        """True for files this watcher writes itself (stem ends with the
+        output suffix). Without -o the output lands back in the watched
+        directory and would retrigger processing forever:
+        a.jpg → a_compressed.jpg → a_compressed_compressed.jpg → …"""
+        suffix = self.options.suffix
+        return bool(suffix) and Path(path).stem.endswith(suffix)
 
     def on_created(self, event):
         """Called when a file is created."""
@@ -41,6 +54,8 @@ class _DebouncedHandler:
         ext = Path(path).suffix.lower()
         if ext not in ALL_INPUT_EXTENSIONS:
             return
+        if self._is_own_output(path):
+            return
         self._pending[path] = time.time()
 
     def tick(self):
@@ -49,18 +64,40 @@ class _DebouncedHandler:
         to_process = []
 
         for path, first_seen in list(self._pending.items()):
-            if now - first_seen >= 2.0:  # 2-second debounce
-                if path not in self._processed:
-                    # Also check file is still there and hasn't changed
-                    try:
-                        size = os.path.getsize(path)
-                        time.sleep(0.3)
-                        if os.path.getsize(path) == size:
-                            to_process.append(path)
-                    except OSError:
-                        pass
+            if now - first_seen < 2.0:  # 2-second debounce
+                continue
+            if path in self._processed or self._is_own_output(path):
+                del self._pending[path]
+                continue
+            # Also check the file is still there and hasn't changed
+            try:
+                size = os.path.getsize(path)
+                time.sleep(0.3)
+                stable = os.path.getsize(path) == size
+            except OSError:
+                # Vanished before it could be processed — drop it quietly.
+                del self._pending[path]
+                continue
+            if stable:
+                to_process.append(path)
+                # Mark processed / leave pending ONLY when the file actually
+                # goes out for processing. Doing it unconditionally stranded
+                # slow-copying files (never processed) and made later
+                # re-drops of the same name get skipped forever.
                 self._processed.add(path)
                 del self._pending[path]
+                self._attempts.pop(path, None)
+            else:
+                # Still being written (e.g. a large file mid-copy) — retry
+                # next tick, with a cap so a perpetually-changing file is
+                # eventually abandoned instead of re-statted forever.
+                attempts = self._attempts.get(path, 0) + 1
+                self._attempts[path] = attempts
+                if attempts >= self._MAX_STABILIZE_ATTEMPTS:
+                    print(f"⚠️  文件一直未稳定，已跳过 "
+                          f"File never stabilized, skipped: {path}")
+                    del self._pending[path]
+                    self._attempts.pop(path, None)
 
         results = []
         for path in to_process:

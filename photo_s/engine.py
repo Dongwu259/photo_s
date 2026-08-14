@@ -343,10 +343,13 @@ def _get_output_path(input_path: str, output_format: str, output_dir: Optional[s
                      rename_pattern: str = "",
                      exif_meta: Optional[dict] = None,
                      seq_counter: Optional[List[int]] = None,
-                     folder_pattern: str = "") -> str:
+                     folder_pattern: str = "",
+                     preassigned: Optional[str] = None,
+                     reserved: Optional[set] = None) -> str:
     """Generate output file path.
 
     If rename_pattern is set, use template-based naming instead of prefix/suffix.
+    A ``preassigned`` path (reserved by batch_process) wins over deriving one.
     """
     # Canonicalize here too: process_image already does this, but the resume
     # pre-pass in batch_process calls this directly with the raw option — a
@@ -356,6 +359,12 @@ def _get_output_path(input_path: str, output_format: str, output_dir: Optional[s
         raise ValueError(
             f"unsupported output format {output_format!r}; "
             f"supported: {sorted(SUPPORTED_FORMATS)}")
+
+    # batch_process pre-assigns a unique path per input up front — parallel
+    # workers can't race the exists() dedup below, so trust it as-is.
+    if preassigned:
+        return preassigned
+
     fmt_info = SUPPORTED_FORMATS[fmt]
     in_path = Path(input_path)
 
@@ -365,8 +374,9 @@ def _get_output_path(input_path: str, output_format: str, output_dir: Optional[s
         if seq_counter:
             seq_counter[0] += 1
         new_stem = _render_rename_pattern(rename_pattern, exif_meta, seq)
-        if _has_path_traversal(new_stem):
-            # Defense-in-depth: fall back to prefix/suffix naming
+        if not new_stem.strip() or _has_path_traversal(new_stem):
+            # An all-empty render (e.g. "{date}" on an EXIF-less photo) would
+            # produce a hidden ".jpg" — same fallback as the traversal guard.
             new_stem = f"{prefix}{in_path.stem}{suffix}"
     else:
         new_stem = f"{prefix}{in_path.stem}{suffix}"
@@ -388,12 +398,17 @@ def _get_output_path(input_path: str, output_format: str, output_dir: Optional[s
 
     out_path = out_dir / f"{new_stem}{fmt_info['ext']}"
 
-    # Avoid overwriting unless explicitly allowed
+    # Avoid overwriting unless explicitly allowed. `reserved` holds the paths
+    # batch_process already assigned to earlier inputs this run — the plain
+    # exists() check races when workers run in parallel.
     if not overwrite:
         counter = 1
-        while out_path.exists():
+        while (out_path.exists()
+               or (reserved is not None and str(out_path) in reserved)):
             out_path = out_dir / f"{new_stem}_{counter}{fmt_info['ext']}"
             counter += 1
+        if reserved is not None:
+            reserved.add(str(out_path))
 
     return str(out_path)
 
@@ -473,13 +488,14 @@ def _extract_exif_metadata(img: Image.Image, path: str) -> dict:
             meta["make"] = safe.strip("_")
 
         # ISO (digits only — a crafted tag must not carry separators into
-        # {iso} rename filenames)
-        iso = exif.get(0x8827)
+        # {iso} rename filenames). Like DateTimeOriginal above, ISO lives in
+        # the Exif sub-IFD — a 0th IFD lookup never sees it.
+        iso = exif_sub.get(0x8827)
         if iso:
             meta["iso"] = "".join(c for c in str(iso) if c.isdigit())
 
-        # Focal length
-        focal = exif.get(0x920A)
+        # Focal length (Exif sub-IFD as well)
+        focal = exif_sub.get(0x920A)
         if focal:
             if isinstance(focal, tuple):  # (numerator, denominator)
                 meta["focal"] = f"{focal[0] // focal[1]}mm" if focal[1] else ""
@@ -701,9 +717,18 @@ def _normalize_exif_orientation(img: Image.Image) -> None:
     """Reset the EXIF Orientation tag to 1 after pixel rotation is applied.
 
     Without this, outputs carry a stale Orientation value and get
-    double-rotated by downstream viewers. Best-effort (requires piexif).
+    double-rotated by downstream viewers. Best-effort.
     """
     if not _HAS_PIEXIF:
+        # PIL fallback: rewrite the tag via getexif() and hand the bytes to
+        # the save path through img.info, same as the piexif branch does.
+        try:
+            exif = img.getexif()
+            if 0x0112 in exif:
+                exif[0x0112] = 1
+                img.info["exif"] = exif.tobytes()
+        except Exception:
+            pass  # best-effort — never fail rotation for a metadata fix
         return
     try:
         exif_bytes = img.info.get("exif")
@@ -928,14 +953,33 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
         raise ValueError(
             f"unsupported output format {options.output_format!r}; "
             f"supported: {sorted(SUPPORTED_FORMATS)}")
+    # replace() only carries dataclass fields — batch_process attaches the
+    # {seq} counter and the reserved output path dynamically, so hand them
+    # over explicitly (same dynamic-attribute hand-off as _gpx_pos below).
+    seq_counter = getattr(options, '_seq_counter', None)
+    preassigned_output = getattr(options, '_preassigned_output', None)
     options = replace(options, output_format=fmt)
+    options._seq_counter = seq_counter
+    options._preassigned_output = preassigned_output
 
-    input_size = os.path.getsize(input_path)
     input_fmt = _format_from_path(input_path)
-    src_stat = os.stat(input_path)  # for --keep-mtime
+    input_size = 0
+    src_stat = None    # for --keep-mtime
+    temp_files = []    # sips-fallback temp files parked on the loaded image
 
     try:
+        # Stat inside the try: an input deleted after the batch scan must
+        # surface as a per-file error, not kill the whole sequential batch.
+        input_size = os.path.getsize(input_path)
+        src_stat = os.stat(input_path)
         img = _get_image(input_path, options)
+        # Record sips-fallback temp paths NOW: pipeline transforms swap in
+        # fresh Image objects that no longer carry the attribute, so cleanup
+        # that only inspects the final image would leak the file.
+        for attr in ('_temp_png', '_temp_raw_tiff'):
+            parked = getattr(img, attr, None)
+            if parked:
+                temp_files.append(parked)
         input_dims = img.size  # (width, height)
 
         # ── Plugin hook: pre_process ────────────────────────────────────────
@@ -1078,7 +1122,8 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
             options._gpx_pos = gpx_pos  # consumed by _save_image
 
         # ── Output path ─────────────────────────────────────────────────────
-        # Seq counter is passed from batch_process for {seq} support
+        # Seq counter is passed from batch_process for {seq} support; a
+        # batch-reserved output path (parallel-collision-safe) wins when set.
         seq_counter = getattr(options, '_seq_counter', None)
         output_path = _get_output_path(
             input_path, options.output_format, options.output_dir,
@@ -1087,6 +1132,7 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
             exif_meta=exif_meta,
             seq_counter=seq_counter,
             folder_pattern=options.folder_pattern,
+            preassigned=getattr(options, '_preassigned_output', None),
         )
 
         # Ensure output directory exists
@@ -1164,14 +1210,6 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
         else:
             _do_save(img, output_path, options.output_format, save_options_base)
 
-        # ── Clean up temp files ─────────────────────────────────────────────
-        for attr in ('_temp_png', '_temp_raw_tiff'):
-            if hasattr(img, attr):
-                try:
-                    os.unlink(getattr(img, attr))
-                except OSError:
-                    pass
-
         output_size = os.path.getsize(output_path)
 
         # ── Optional SSIM evaluation (input vs output) ──────────────────────
@@ -1238,6 +1276,14 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
             success=False,
             error=str(e),
         )
+    finally:
+        # sips-fallback temp files (recorded right after _get_image) — the
+        # finally also covers mid-pipeline exceptions, not just the happy path.
+        for temp_file in temp_files:
+            try:
+                os.unlink(temp_file)
+            except OSError:
+                pass
 
 
 def batch_process(
@@ -1266,18 +1312,18 @@ def batch_process(
 
     # ── Resume: skip inputs whose output already exists ─────────────────────
     if options.resume:
-        if options.rename_pattern:
-            # predicting {date}/{camera}/{seq} names requires per-file EXIF and
-            # a fragile seq model — resume is only reliable without rename
-            print("⚠️  --resume 与智能重命名不兼容，已忽略 resume "
-                  "(ignored, incompatible with --rename)", file=sys.stderr)
+        if options.rename_pattern or options.folder_pattern:
+            # predicting {date}/{camera}/{seq} names or {year}/{month}
+            # subfolders requires per-file EXIF and a fragile seq model —
+            # resume is only reliable without rename/organize patterns
+            print("⚠️  --resume 与智能重命名/子文件夹分类不兼容，已忽略 resume "
+                  "(ignored, incompatible with --rename/--organize)", file=sys.stderr)
         else:
             kept = []
             for path in input_paths:
                 predicted = _get_output_path(
                     path, options.output_format, options.output_dir,
-                    options.prefix, options.suffix, overwrite=True,
-                    folder_pattern=options.folder_pattern)
+                    options.prefix, options.suffix, overwrite=True)
                 if os.path.exists(predicted):
                     continue
                 kept.append(path)
@@ -1299,11 +1345,23 @@ def batch_process(
     # silent-loss trap: fields added but not copied here).
     per_image_options = []
     seq = 1
+    # Reserve output paths up front against this set: the exists() dedup in
+    # _get_output_path alone races — two same-stem inputs from different
+    # source dirs both see "not exists" and collide under parallel workers.
+    # Paths depending on per-file EXIF (rename/folder patterns) can't be
+    # predicted here, so those keep their per-file computation.
+    reserved_paths = set()
+    predictable = not options.rename_pattern and not options.folder_pattern
     for path in input_paths:
         opts_copy = replace(options, jobs=1)
         # Pre-assign sequence number (mutable list for process_image compatibility)
         opts_copy._seq_counter = [seq]
         seq += 1
+        if not options.overwrite and predictable:
+            opts_copy._preassigned_output = _get_output_path(
+                path, options.output_format, options.output_dir,
+                options.prefix, options.suffix, overwrite=False,
+                reserved=reserved_paths)
         per_image_options.append(opts_copy)
 
     # ── Process images ─────────────────────────────────────────────────────
@@ -1699,9 +1757,13 @@ def _usercomment_text_from_dict(exif_dict: dict) -> str:
     raw = _exif_bytes(exif_dict.get("Exif", {}).get(piexif.ExifIFD.UserComment))
     if not raw:
         return ""
+    # The 8-byte charset header (EXIF spec) must be detected at BYTES level —
+    # the old post-decode check could never match, so every apply_exif_tags
+    # rewrite piled another "ASCII\0\0\0" prefix onto the comment.
+    if raw[:8] in (b"ASCII\x00\x00\x00", b"UNICODE\x00",
+                   b"JIS\x00\x00\x00\x00\x00", b"\x00" * 8):
+        raw = raw[8:]
     text = raw.decode("utf-8", errors="ignore").strip("\x00")
-    if len(text) >= 8 and text[:8].strip("\x00") == "":
-        text = text[8:]
     return text.strip()
 
 

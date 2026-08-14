@@ -123,3 +123,41 @@ class TestCollision:
         results = rename_files(paths, "Same_{seq}")
         assert all(r["status"] == "ok" for r in results)
         assert os.path.basename(results[0]["output"]) == "Same_001_1.png"
+
+    def test_overwrite_replaces_existing_target(self, tmp_path):
+        # Regression: in-place rename used os.rename, which raises
+        # FileExistsError on Windows when the target exists — making
+        # --overwrite useless there. os.replace clobbers on every OS.
+        src = tmp_path / "a.png"
+        Image.new("RGB", (8, 8), (1, 2, 3)).save(src)
+        target = tmp_path / "b.png"
+        Image.new("RGB", (8, 8), (9, 9, 9)).save(target)
+        results = rename_files([str(src)], "b", overwrite=True)
+        assert results[0]["status"] == "ok"
+        assert results[0]["output"] == str(target)
+        assert not src.exists()
+        with Image.open(target) as img:
+            assert img.getpixel((0, 0)) == (1, 2, 3)  # target has src content
+
+
+class TestEmptyRenderFallback:
+    """Regression: a pure-EXIF template ({date}, {year}{month}{day}) on a
+    file without EXIF rendered an empty stem → hidden ".png"/".png_1"
+    files reported as ok. The stem must fall back to the original name."""
+
+    def test_empty_render_falls_back_to_original(self, tmp_path):
+        paths = _make_images(tmp_path, count=2)  # PNGs carry no EXIF dates
+        out_dir = tmp_path / "out"
+        results = rename_files(paths, "{date}", output_dir=str(out_dir))
+        assert all(r["status"] == "ok" for r in results)
+        names = sorted(p.name for p in out_dir.iterdir())
+        assert names == ["IMG_0000.png", "IMG_0001.png"]
+
+    def test_empty_render_in_place_makes_no_hidden_file(self, tmp_path):
+        paths = _make_images(tmp_path, count=1)
+        results = rename_files(paths, "{year}{month}{day}")
+        assert results[0]["status"] == "ok"
+        names = [p.name for p in tmp_path.iterdir()]
+        # exactly one visible file remains; no ".png"-style hidden output
+        assert len(names) == 1
+        assert not any(n.startswith(".") for n in names)

@@ -14,6 +14,20 @@ from typing import List
 
 from PIL import Image
 
+from .engine import RAW_EXTENSIONS
+
+
+class VerifyResults(list):
+    """verify_images() result — a plain list of per-file dicts, plus a
+    ``skipped`` attribute: how many files were skipped unverified (camera
+    RAW, which PIL cannot decode). Keeps the list contract for existing
+    callers.
+    """
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.skipped = 0
+
 
 def collect_files(paths: List[str], recursive: bool = False) -> List[str]:
     """Collect ANY files (not just images) from paths/globs/dirs.
@@ -39,17 +53,29 @@ def collect_files(paths: List[str], recursive: bool = False) -> List[str]:
 def verify_images(files: List[str]) -> List[dict]:
     """Verify each image file.
 
-    Returns a list of dicts: {"path", "ok", "error"} — error is "" when ok.
-    Missing files, unreadable files, and truncated data all count as broken.
+    Returns a list of dicts: {"path", "ok", "error", "skipped"} — error is
+    "" when ok. Missing files, unreadable files, and truncated data all
+    count as broken. Camera RAW files (engine.RAW_EXTENSIONS) are the one
+    exception: PIL has no CR2/NEF/ARW/... decoder, so verify() would
+    condemn every RAW as corrupt. They are reported ok with skipped=True
+    instead (RAW archive integrity is covered by checksum manifests). The
+    returned list carries a ``skipped`` attribute with their count.
     """
-    results = []
+    results = VerifyResults()
     for path in files:
+        if Path(path).suffix.lower() in RAW_EXTENSIONS:
+            results.append({"path": path, "ok": True, "error": "",
+                            "skipped": True})
+            results.skipped += 1
+            continue
         try:
             with Image.open(path) as img:
                 img.verify()
-            results.append({"path": path, "ok": True, "error": ""})
+            results.append({"path": path, "ok": True, "error": "",
+                            "skipped": False})
         except Exception as e:
-            results.append({"path": path, "ok": False, "error": str(e)})
+            results.append({"path": path, "ok": False, "error": str(e),
+                            "skipped": False})
     return results
 
 

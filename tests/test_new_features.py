@@ -314,6 +314,21 @@ class TestAdjustUnits:
         assert abs(r.getpixel((0, 0)) - g.getpixel((0, 0))) <= 3
         assert abs(g.getpixel((0, 0)) - b.getpixel((0, 0))) <= 3
 
+    def test_white_balance_low_temp_no_crash(self):
+        # Regression: k <= 19（约 1900K 以下，烛光）黑体公式 b=0.0 → 除零崩溃
+        im = Image.new("RGB", (16, 16), (128, 128, 128))
+        for temp in (1000, 1500, 1800, 1900):
+            out = apply_white_balance(im, temp=temp)
+            r, g, b = out.split()
+            # 极低色温 → 蓝色增益远大于红色，不崩溃即可
+            assert b.getpixel((0, 0)) >= r.getpixel((0, 0))
+
+    def test_white_balance_neutral_temp_unchanged(self):
+        # 正常色温段行为不变：6500K 即中性，增益恰为 1.0
+        im = Image.new("RGB", (16, 16), (128, 128, 128))
+        out = apply_white_balance(im, temp=6500)
+        assert out.getpixel((0, 0)) == (128, 128, 128)
+
 
 class TestKeepSharpest:
     def test_keeps_sharpest(self, tmp_path):
@@ -463,6 +478,24 @@ class TestAutoStraighten:
         r = json.loads(capsys.readouterr().out)["results"][0]
         assert r["status"] == "ok"
         assert r["auto_straightened"] is True
+
+    def test_rotate_expand_single_band_modes(self):
+        # Regression: _rotate_expand 对 L/LA/I;16/1 传了三元组 fillcolor 崩溃
+        from photo_s.straighten import _rotate_expand
+        for mode, color in [("L", 128), ("LA", (128, 255)),
+                            ("I;16", 1000), ("1", 1)]:
+            out = _rotate_expand(Image.new(mode, (20, 20), color), 15)
+            assert out.mode == mode  # 模式保留
+            assert out.size != (20, 20)  # 画布已扩展
+
+    def test_straighten_grayscale_horizon(self, tmp_path):
+        # Regression: 灰度图检测到地平线后 rotate fillcolor 崩溃
+        pytest.importorskip("cv2")
+        from photo_s.straighten import apply_auto_straighten
+        im = Image.open(self._tilted(tmp_path)).convert("L")
+        out, ok = apply_auto_straighten(im)
+        assert ok is True
+        assert out.mode == "L"
 
 
 class TestLogCurveLibraryPath:

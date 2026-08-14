@@ -58,7 +58,7 @@ except ImportError:
 # ── Constants ───────────────────────────────────────────────────────────────
 
 APP_NAME = "PhotoS"
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"
 WINDOW_WIDTH = 1120
 WINDOW_HEIGHT = 720
 MIN_WIDTH = 980
@@ -334,8 +334,8 @@ STRINGS = {
         "plugins_uninstall": "卸载",
         "plugins_fetch": "预下载权重",
         "plugins_refresh": "刷新",
-        "plugins_ok": "✅ {}",
-        "plugins_err": "❌ {}",
+        "plugins_ok": "✅ {what}",
+        "plugins_err": "❌ {detail}",
         # Exposure analysis
         "analyze": "曝光分析",
         "review_btn": "审查打分",
@@ -740,8 +740,8 @@ STRINGS = {
         "plugins_uninstall": "Uninstall",
         "plugins_fetch": "Fetch weights",
         "plugins_refresh": "Refresh",
-        "plugins_ok": "✅ {}",
-        "plugins_err": "❌ {}",
+        "plugins_ok": "✅ {what}",
+        "plugins_err": "❌ {detail}",
         # Exposure analysis
         "analyze": "Exposure analysis",
         "review_btn": "Review & Rate",
@@ -1274,6 +1274,26 @@ class PhotoSApp:
         text = STRINGS[self.lang].get(key) or STRINGS[DEFAULT_LANG].get(key) or key
         return text.format(**kwargs) if kwargs else text
 
+    def _close_dialogs(self):
+        """Close open Toplevel dialogs via their WM_DELETE_WINDOW protocol.
+
+        A bare destroy() skips the protocol callback — dialogs use it for
+        cleanup (stopping the watch observer, saving a pending rating), so
+        a UI rebuild must close them properly first. Dialogs without a
+        protocol handler are simply destroyed.
+        """
+        for child in self.root.winfo_children():
+            if not isinstance(child, tk.Toplevel):
+                continue
+            try:
+                cmd = child.wm_protocol("WM_DELETE_WINDOW")
+                if cmd:
+                    child.tk.call(cmd)
+                if child.winfo_exists():
+                    child.destroy()
+            except tk.TclError:
+                pass
+
     def _set_language(self, lang):
         """Switch UI language by rebuilding the interface.
 
@@ -1286,6 +1306,7 @@ class PhotoSApp:
         self.lang = lang
         self.root.title(self._t("window_title"))
 
+        self._close_dialogs()
         for child in self.root.winfo_children():
             child.destroy()
         self._build_ui()
@@ -1350,6 +1371,7 @@ class PhotoSApp:
         _apply_palette(self.dark_mode)
         self._configure_ttk_styles()  # styles persist — must follow the palette
         self.root.configure(bg=COLORS["bg"])
+        self._close_dialogs()
         for child in self.root.winfo_children():
             child.destroy()
         self._build_ui()
@@ -2608,7 +2630,7 @@ class PhotoSApp:
         `photo-s plugin` CLI (photo_s.plugincmd)."""
         from .registry import OFFICIAL_PLUGINS, to_dict
         from .plugincmd import _pip_run, _installed_version
-        from .plugin import discover_plugins
+        from .plugin import clear_cache, discover_plugins
 
         win = tk.Toplevel(self.root)
         win.title(self._t("plugins_title"))
@@ -2623,6 +2645,24 @@ class PhotoSApp:
 
         body = tk.Frame(win, bg=COLORS["bg"])
         body.pack(fill="both", expand=True, padx=18, pady=(0, 10))
+
+        # Worker threads must never touch Tk directly: they put UI
+        # callbacks on a queue and a main-thread after-loop drains it.
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if win.winfo_exists():
+                win.after(80, drain)
+
+        win.after(80, drain)
 
         def _section_title(text):
             tk.Label(body, text=text, font=FONT_SECTION,
@@ -2653,8 +2693,8 @@ class PhotoSApp:
             def _run(verb):
                 # pip runs in a background thread (it blocks for seconds
                 # on real installs — freezing the UI otherwise); Tk updates
-                # go back through win.after.
-                _set_status(self._t("plugins_ok", verb))
+                # go back through the drain queue.
+                _set_status(self._t("plugins_ok", what=verb))
 
                 def worker():
                     try:
@@ -2671,13 +2711,18 @@ class PhotoSApp:
                         if not win.winfo_exists():
                             return
                         if ok:
+                            # drop the entry-point cache so a freshly
+                            # installed/removed plugin lists correctly
+                            clear_cache()
                             _set_status(self._t(
-                                "plugins_ok", f"{plugin_name} {verb}"))
+                                "plugins_ok",
+                                what="{} {}".format(plugin_name, verb)))
                         else:
-                            _set_status(self._t("plugins_err", detail),
+                            _set_status(self._t("plugins_err",
+                                                detail=detail),
                                         is_err=True)
                         win.after(600, _refresh)
-                    win.after(0, finish)
+                    schedule(finish)
 
                 threading.Thread(target=worker, daemon=True).start()
 
@@ -2890,14 +2935,27 @@ class PhotoSApp:
         """Install an optional dependency in a background thread.
 
         pip is subprocess-based (thread-safe); Tk must only be touched from
-        the main thread, so all UI updates go through win.after(). All
-        install buttons are disabled during the run (pip holds a global
-        lock — concurrent installs would wedge).
+        the main thread, so all UI updates go through a queue drained by a
+        main-thread after-loop. All install buttons are disabled during the
+        run (pip holds a global lock — concurrent installs would wedge).
         """
         for b in getattr(self, "_settings_install_btns", []):
             if b is not None:
                 b.configure(state="disabled")
         status_lbl.config(text=self._t("dep_installing"))
+
+        q = queue.Queue()
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if win.winfo_exists():
+                win.after(80, drain)
+
+        win.after(80, drain)
 
         def worker():
             try:
@@ -2909,8 +2967,7 @@ class PhotoSApp:
                 ok, detail = False, "pip not available"
 
             def finish():
-                # The dialog may have been closed while pip ran (after is
-                # interp-global — not cancelled by widget destruction).
+                # The dialog may have been closed while pip ran.
                 if not win.winfo_exists():
                     return
                 for b in getattr(self, "_settings_install_btns", []):
@@ -2923,7 +2980,7 @@ class PhotoSApp:
                     status_lbl.config(
                         text="❌ " + (detail or self._t("mcp_missing")),
                         fg=COLORS["danger"])
-            win.after(0, finish)
+            q.put(finish)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -3134,8 +3191,11 @@ class PhotoSApp:
         try:
             sizes = getattr(opts, "output_sizes", None)
             if sizes:
+                def _dim(v):
+                    return "" if v is None else str(v)
                 self.output_sizes.set(",".join(
-                    f"{label}:{w}x{h}" for label, w, h in sizes))
+                    "{}:{}x{}".format(label, _dim(w), _dim(h))
+                    for label, w, h in sizes))
         except Exception:
             pass
 
@@ -3250,7 +3310,7 @@ class PhotoSApp:
                     title=title_var.get().strip() or "PhotoS Gallery",
                     thumb_size=int(thumb_combo.get()))
             except Exception as e:
-                schedule(lambda: _failed(str(e)))
+                schedule(lambda err=str(e): _failed(err))
             else:
                 schedule(lambda: _done(res))
 
@@ -3491,7 +3551,7 @@ class PhotoSApp:
                 groups, scores = self._dedup_scan(list(files),
                                                   progress_cb=cb)
             except Exception as e:
-                schedule(lambda: _scan_failed(str(e)))
+                schedule(lambda err=str(e): _scan_failed(err))
                 return
             schedule(lambda: _scanned(groups, scores))
 
@@ -3533,7 +3593,7 @@ class PhotoSApp:
                     moved, failed, moved_map = self._dedup_move_to_trash(
                         unchecked, trash_dir, progress_cb=cb)
                 except Exception as e:
-                    schedule(lambda: _scan_failed(str(e)))
+                    schedule(lambda err=str(e): _scan_failed(err))
                     return
                 schedule(lambda: _moved(moved, failed, moved_map, unchecked,
                                         trash_dir))
@@ -3541,7 +3601,9 @@ class PhotoSApp:
             def _moved(moved, failed, moved_map, unchecked, trash_dir):
                 if not win.winfo_exists():
                     return
-                moved_set = set(unchecked)
+                # Only files that actually moved leave the UI — a failed
+                # move must keep its row (set(unchecked) would hide it).
+                moved_set = set(moved_map)
                 self.files = [f for f in self.files if f not in moved_set]
                 self._checked -= moved_set
                 self._refresh_file_list()
@@ -4020,8 +4082,8 @@ class PhotoSApp:
 
                 meta = self._review_scan(all_paths, progress_cb=cb)
             except Exception as e:
-                schedule(lambda: set_status(
-                    self._t("op_failed", err=str(e)), COLORS["danger"]))
+                schedule(lambda err=str(e): set_status(
+                    self._t("op_failed", err=err), COLORS["danger"]))
                 return
             schedule(lambda: _scanned(meta))
 
@@ -4512,6 +4574,15 @@ class PhotoSApp:
 
         from .cli import _parse_sizes  # lazy: cli imports engine only
 
+        # Invalid sizes input degrades to None instead of raising — this
+        # runs on the preview drain tick and before processing starts, so
+        # a ValueError here would kill the drain / wedge the app.
+        try:
+            output_sizes = _parse_sizes(self.output_sizes.get().strip()
+                                        or None)
+        except ValueError:
+            output_sizes = None
+
         return ProcessOptions(
             quality=self.quality.get(),
             output_format=self.output_format.get(),
@@ -4541,7 +4612,7 @@ class PhotoSApp:
             grayscale=self.grayscale.get(),
             sepia=self.sepia.get(),
             ev=_to_float(self.ev.get(), 0.0),
-            auto_exposure=_to_float(self.auto_exposure.get(), 0.0)
+            auto_exposure=_to_float(self.auto_exposure.get(), None)
             if self.auto_exposure.get().strip() else None,
             log_curve=self.log_curve.get() or None,
             denoise=_to_float(self.denoise.get(), 0.0)
@@ -4574,7 +4645,7 @@ class PhotoSApp:
             watermark_image=self.watermark_image.get().strip(),
             watermark_position=self.watermark_position.get() or "BOTTOM_RIGHT",
             watermark_opacity=int(self.watermark_opacity.get()),
-            output_sizes=_parse_sizes(self.output_sizes.get().strip() or None),
+            output_sizes=output_sizes,
             rename_pattern=self.rename_pattern.get(),
             folder_pattern=_resolve_folder_pattern(self.folder_pattern.get()),
             jobs=jobs,
@@ -4870,7 +4941,7 @@ class PhotoSApp:
                         thumb_size=_parse_thumb(), captions=captions, bg=bg)
                     schedule(lambda: _done(result))
                 except Exception as e:
-                    schedule(lambda: _done(None, str(e)))
+                    schedule(lambda err=str(e): _done(None, err))
 
             threading.Thread(target=run, daemon=True).start()
 
@@ -4942,7 +5013,10 @@ class PhotoSApp:
         def _thresholds():
             def _num(v):
                 v = v.get().strip()
-                return float(v) if v else None
+                try:
+                    return float(v) if v else None
+                except ValueError:
+                    return None  # non-numeric input → threshold unset
             return {"overexposed_max": _num(ov),
                     "underexposed_max": _num(un),
                     "luminance_min": _num(lmin),
@@ -4999,8 +5073,8 @@ class PhotoSApp:
                     results = self._cull_scan(self.files, th)
                     schedule(lambda: _scanned(results))
                 except Exception as e:
-                    schedule(lambda: status.configure(
-                        text=self._t("cull_failed", err=str(e)),
+                    schedule(lambda err=str(e): status.configure(
+                        text=self._t("cull_failed", err=err),
                         fg=COLORS["danger"]))
 
             threading.Thread(target=run, daemon=True).start()
@@ -5173,8 +5247,8 @@ class PhotoSApp:
                     self._hash_generate(files, output)
                     schedule(lambda: _gen_done())
                 except Exception as e:
-                    schedule(lambda: status_g.configure(
-                        text=self._t("hash_failed", err=str(e)),
+                    schedule(lambda err=str(e): status_g.configure(
+                        text=self._t("hash_failed", err=err),
                         fg=COLORS["danger"]))
 
             threading.Thread(target=run, daemon=True).start()
@@ -5199,8 +5273,8 @@ class PhotoSApp:
                     report = self._hash_verify(m)
                     schedule(lambda: _ver_done(report))
                 except Exception as e:
-                    schedule(lambda: status_v.configure(
-                        text=self._t("hash_failed", err=str(e)),
+                    schedule(lambda err=str(e): status_v.configure(
+                        text=self._t("hash_failed", err=err),
                         fg=COLORS["danger"]))
 
             threading.Thread(target=run, daemon=True).start()
@@ -5459,7 +5533,11 @@ class PhotoSApp:
             state["idx"] = (state["idx"] + delta) % n
             state["sig"] = None
             state["stable"] = 0
-            state["inflight"] = False
+            # NOTE: inflight is left alone — clearing it would let a second
+            # render launch while the old one is still running. The pending
+            # render's signature is invalidated instead, so its (now stale)
+            # result is discarded when it lands.
+            state["render_sig"] = None
             nav_lbl.configure(text=f"{state['idx'] + 1}/{n} · "
                               f"{os.path.basename(state['files'][state['idx']])}")
             _render_image(orig_lbl, state["files"][state["idx"]])
@@ -5491,7 +5569,11 @@ class PhotoSApp:
         def launch(sig, path, opts):
             from .engine import ProcessResult
             state["inflight"] = True
-            state["render_sig"] = sig
+            # The staleness signature must include the file: ProcessOptions
+            # compares by value, so an options-only sig cannot tell a stale
+            # render of the previous file from a fresh one of this file.
+            rsig = (sig, path)
+            state["render_sig"] = rsig
             proc_lbl.configure(image="", text=self._t("preview_render"))
             status.configure(text=self._t("preview_render"))
 
@@ -5504,7 +5586,7 @@ class PhotoSApp:
                         output_size=0, input_format="", output_format="",
                         input_dims=(0, 0), output_dims=(0, 0),
                         success=False, error=str(e))
-                schedule(lambda: _done(result, sig))
+                schedule(lambda: _done(result, rsig))
 
             threading.Thread(target=render, daemon=True).start()
 
@@ -5571,12 +5653,14 @@ class PhotoSApp:
             ):
                 return
 
+        # Build options BEFORE entering the processing state, so a bad
+        # field can never leave the app stuck in processing=True.
+        options = self._build_options()
+
         self.processing = True
         self.cancel_requested = False
         self._batch_result = None
         self._batch_error = None
-
-        options = self._build_options()
 
         # Update UI to processing state
         self.start_btn.pack_forget()

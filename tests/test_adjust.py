@@ -263,3 +263,26 @@ class TestRotateGrayscale:
         im = Image.new("L", (16, 16), 128)
         out = apply_rotate(im, 15, fill="#FF0000")
         assert out.mode == "RGB"  # colored fill promotes to RGB
+
+
+class TestRotateExoticModes:
+    """Regression: rotate crashed on 1/LA/I/I;16/F (3-tuple fill is illegal)."""
+
+    def test_single_band_modes_no_crash(self):
+        for mode, color in [("1", 1), ("I", 1000), ("I;16", 1000), ("F", 0.5)]:
+            out = apply_rotate(Image.new(mode, (20, 20), color), 15)
+            assert out.mode == mode  # stays single-band (scalar fill)
+            assert out.size != (20, 20)  # expanded
+
+    def test_la_mode_no_crash(self):
+        out = apply_rotate(Image.new("LA", (20, 20), (128, 255)), 15)
+        assert out.mode == "LA"
+
+    def test_exotic_mode_with_fill_becomes_rgb(self):
+        out = apply_rotate(Image.new("I;16", (20, 20), 1000), 15,
+                           fill="#FF0000")
+        assert out.mode == "RGB"  # colored fill promotes to RGB
+
+    def test_cmyk_rotate_unchanged(self):
+        out = apply_rotate(Image.new("CMYK", (20, 20), (0, 0, 0, 0)), 15)
+        assert out.mode == "CMYK"

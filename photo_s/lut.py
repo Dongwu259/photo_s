@@ -87,7 +87,8 @@ def _apply_1d(img, table):
     """Apply a 1D LUT via per-channel 256-entry point tables (C-fast).
 
     Handles L / RGB / RGBA / P: L gets the first channel's curve, RGBA keeps
-    its alpha band, and palette images are converted to RGB.
+    its alpha band, and palette images are converted to RGB. Any other mode
+    (LA / CMYK / I;16 / F / 1) is converted to RGB as well.
     """
     if img.mode == "P":
         img = img.convert("RGB")
@@ -96,6 +97,8 @@ def _apply_1d(img, table):
         img = img.convert("RGB")
     else:
         alpha = None
+    if img.mode not in ("L", "RGB"):
+        img = img.convert("RGB")
 
     n = table.shape[0]
     idx = np.linspace(0, n - 1, 256)

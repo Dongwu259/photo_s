@@ -99,6 +99,17 @@ class TestLutPluginFile:
         out = plugin.lut(im, str(p), None)
         assert abs(out.convert("RGB").getpixel((0, 0))[0] - 50) <= 6
 
+    def test_1d_file_via_plugin_exotic_modes(self, tmp_path):
+        # Regression: the plugin's 1D path reuses photo_s.lut._apply_1d,
+        # which crashed on LA/CMYK/I;16/F (r,g,b = img.split() unpack)
+        p = tmp_path / "d.cube"
+        _write_cube_1d(p)
+        plugin = LutPlugin()
+        for mode, color in [("LA", (128, 255)), ("CMYK", (0, 0, 0, 0)),
+                            ("I;16", 1000)]:
+            out = plugin.lut(Image.new(mode, (8, 8), color), str(p), None)
+            assert out.mode == "RGB"
+
     def test_unknown_preset_raises(self):
         plugin = LutPlugin()
         with pytest.raises(Exception):

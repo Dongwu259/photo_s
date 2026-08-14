@@ -101,6 +101,28 @@ class TestOrientationNormalize:
         # orientation normalized to 1 so no second rotation on view
         assert d["0th"].get(piexif.ImageIFD.Orientation) == 1
 
+    def test_auto_rotate_normalizes_without_piexif(self, tmp_path, monkeypatch):
+        # regression: without piexif the normalize step was skipped entirely,
+        # leaving a stale Orientation that double-rotated downstream viewers
+        import piexif
+        import photo_s.engine as eng
+
+        exif_bytes = piexif.dump({
+            "0th": {piexif.ImageIFD.Orientation: 6},
+            "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None,
+        })
+        src = str(tmp_path / "rot_nopx.jpg")
+        Image.new("RGB", (100, 50), (30, 30, 200)).save(
+            src, quality=95, exif=exif_bytes)
+
+        monkeypatch.setattr(eng, "_HAS_PIEXIF", False)
+        result = _process(src, tmp_path / "out", auto_rotate=True)
+        assert result.success
+        assert result.output_dims == (50, 100)  # pixels rotated
+        # Orientation normalized via the PIL fallback (getexif + tobytes)
+        with Image.open(result.output_path) as out:
+            assert out.getexif().get(0x0112) == 1
+
 
 class TestMaxPixels:
     def test_downscales_long_side(self, tmp_path):
@@ -160,6 +182,40 @@ class TestExifMetaDateExtraction:
         assert meta["time"] == "14-30-00"
         assert meta["year"] == "2024" and meta["month"] == "07" and meta["day"] == "30"
 
+    def test_iso_focal_from_exif_sub_ifd(self, tmp_path):
+        # regression: ISO/FocalLength were read from the 0th IFD, but the
+        # EXIF spec stores them in the Exif sub-IFD (like DateTimeOriginal)
+        from photo_s.engine import _extract_exif_metadata
+        import piexif
+        exif_bytes = piexif.dump({
+            "0th": {},
+            "Exif": {piexif.ExifIFD.ISOSpeedRatings: 400,
+                     piexif.ExifIFD.FocalLength: (50, 1)},
+            "GPS": {}, "1st": {}, "thumbnail": None,
+        })
+        p = tmp_path / "exif.jpg"
+        Image.new("RGB", (20, 20), (1, 2, 3)).save(p, quality=92, exif=exif_bytes)
+        with Image.open(p) as img:
+            meta = _extract_exif_metadata(img, str(p))
+        assert meta["iso"] == "400"
+        assert meta["focal"] == "50mm"
+
+    def test_iso_focal_rename_variables(self, tmp_path):
+        # end-to-end: {iso}/{focal} must be usable in rename patterns
+        import piexif
+        exif_bytes = piexif.dump({
+            "0th": {},
+            "Exif": {piexif.ExifIFD.ISOSpeedRatings: 200,
+                     piexif.ExifIFD.FocalLength: (35, 1)},
+            "GPS": {}, "1st": {}, "thumbnail": None,
+        })
+        src = str(tmp_path / "shot.jpg")
+        Image.new("RGB", (20, 20)).save(src, quality=92, exif=exif_bytes)
+        result = _process(src, tmp_path / "out",
+                          rename_pattern="{iso}_{focal}_{original}")
+        assert result.success
+        assert os.path.basename(result.output_path) == "200_35mm_shot.jpg"
+
 
 class TestResume:
     def test_skips_existing_outputs(self, tmp_path):
@@ -195,6 +251,23 @@ class TestResume:
         # only b processed
         assert result.success_count == 1
         assert os.path.basename(result.results[0].input_path) == "b.jpg"
+
+    def test_folder_pattern_resume_warns_and_processes(self, tmp_path, capsys):
+        # regression: the resume pre-pass called _get_output_path without
+        # exif_meta, so with folder_pattern its prediction never matched the
+        # real (subfolder) output — resume silently misfired and piled up
+        # _1 copies. Now it warns and ignores resume, like --rename.
+        from photo_s.engine import batch_process, ProcessOptions
+        a = _make_image(tmp_path / "fp.jpg")
+        out = str(tmp_path / "out")
+        opts = dict(output_dir=out, suffix="_out", folder_pattern="date")
+        first = batch_process([a], ProcessOptions(**opts))
+        assert first.success_count == 1
+        second = batch_process([a], ProcessOptions(resume=True, **opts))
+        assert second.success_count == 1  # still processed (resume ignored)
+        err = capsys.readouterr().err
+        assert "resume" in err
+        assert "--organize" in err
 
 
 class TestEvaluate:
@@ -420,3 +493,188 @@ class TestColorManagement:
         Image.new("CMYK", (30, 20), (0, 0, 0, 0)).save(src)
         result = _process(src, tmp_path / "out", flatten_cmyk=True)
         assert result.success
+
+
+class TestLowTempWhiteBalance:
+    """Regression: wb_temp <= ~1900K failed every file (float division by zero)."""
+
+    def test_low_kelvin_batch_succeeds(self, tmp_path):
+        src = _make_image(tmp_path / "candle.jpg")
+        result = _process(src, tmp_path / "out", wb_temp=1800)
+        assert result.success
+        assert os.path.exists(result.output_path)
+
+    def test_low_kelvin_output_warmer_than_neutral(self, tmp_path):
+        src = _make_image(tmp_path / "candle2.jpg", color=(128, 128, 128))
+        result = _process(src, tmp_path / "out", wb_temp=1800)
+        assert result.success
+        with Image.open(result.output_path) as out:
+            r, g, b = out.convert("RGB").getpixel((0, 0))
+        assert b >= r  # 暖光校正 → 提蓝
+
+
+class TestBatchSeqCounter:
+    """Regression: process_image's replace() dropped the dynamically attached
+    _seq_counter — every {seq} rendered 000 and overwrite=True batches
+    clobbered each other."""
+
+    def test_seq_increments_in_batch(self, tmp_path):
+        from photo_s.engine import batch_process
+        paths = [_make_image(tmp_path / f"IMG_{i}.jpg") for i in range(3)]
+        out = tmp_path / "out"
+        result = batch_process(paths, ProcessOptions(
+            output_dir=str(out), rename_pattern="photo_{seq}",
+            overwrite=True, jobs=2))
+        assert result.success_count == 3
+        names = sorted(p.name for p in out.iterdir())
+        assert names == ["photo_001.jpg", "photo_002.jpg", "photo_003.jpg"]
+
+
+class TestParallelUniqueOutputs:
+    """Regression: same-name inputs from different source dirs raced the
+    exists() dedup in _get_output_path and overwrote each other's output
+    under parallel workers."""
+
+    def _two_dirs_same_name(self, tmp_path):
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        a = str(d1 / "same.jpg")
+        b = str(d2 / "same.jpg")
+        Image.new("RGB", (40, 30), (255, 0, 0)).save(a, quality=95)
+        Image.new("RGB", (40, 30), (0, 0, 255)).save(b, quality=95)
+        return a, b
+
+    def test_unique_outputs_sequential_and_parallel(self, tmp_path):
+        from photo_s.engine import batch_process
+        a, b = self._two_dirs_same_name(tmp_path)
+        for jobs in (1, 2):
+            out = tmp_path / f"out{jobs}"
+            result = batch_process([a, b], ProcessOptions(
+                output_dir=str(out), suffix="_c", jobs=jobs))
+            assert result.success_count == 2
+            outputs = sorted(r.output_path for r in result.results)
+            assert [os.path.basename(p) for p in outputs] == \
+                ["same_c.jpg", "same_c_1.jpg"]
+            # distinct content survived (no clobber)
+            colors = set()
+            for p in outputs:
+                with Image.open(p) as im:
+                    colors.add(im.convert("RGB").getpixel((5, 5)))
+            assert len(colors) == 2
+
+    def test_resume_consistent_with_preassigned_paths(self, tmp_path):
+        from photo_s.engine import batch_process
+        a, b = self._two_dirs_same_name(tmp_path)
+        out = str(tmp_path / "out")
+        first = batch_process([a, b], ProcessOptions(
+            output_dir=out, suffix="_c"))
+        assert first.success_count == 2
+        second = batch_process([a, b], ProcessOptions(
+            output_dir=out, suffix="_c", resume=True))
+        # both outputs already exist → nothing reprocessed, no _2 copies
+        assert second.success_count == 0
+        assert len(second.results) == 0
+        assert sorted(os.listdir(out)) == ["same_c.jpg", "same_c_1.jpg"]
+
+
+class TestUserCommentHeader:
+    """Regression: the UserComment charset-header check ran after
+    decode/strip and could never match, so repeated apply_exif_tags calls
+    piled another "ASCII\\0\\0\\0" prefix onto the comment each time."""
+
+    def test_known_charset_headers_stripped(self):
+        import piexif
+        from photo_s.engine import _usercomment_text_from_dict
+        for header in (b"ASCII\x00\x00\x00", b"UNICODE\x00",
+                       b"JIS\x00\x00\x00\x00\x00", b"\x00" * 8):
+            d = {"Exif": {piexif.ExifIFD.UserComment: header + b"hello"}}
+            assert _usercomment_text_from_dict(d) == "hello"
+
+    def test_repeated_writes_do_not_accumulate_header(self, tmp_path):
+        import piexif
+        from photo_s.engine import apply_exif_tags, _exif_bytes
+        src = _make_jpeg_with_gps(tmp_path / "uc.jpg")
+        assert apply_exif_tags(src, {"rating": 3})
+        assert apply_exif_tags(src, {"rating": 4})
+        raw = _exif_bytes(
+            piexif.load(src)["Exif"][piexif.ExifIFD.UserComment])
+        assert raw.count(b"ASCII\x00\x00\x00") == 1
+        assert raw.endswith(b"rating=4")
+
+
+class TestMissingInput:
+    """Regression: os.path.getsize/os.stat ran outside the try, so a source
+    deleted after the batch scan killed the whole sequential batch instead
+    of failing just that file."""
+
+    def test_ghost_input_is_per_file_error(self, tmp_path):
+        from photo_s.engine import batch_process
+        a = _make_image(tmp_path / "a.jpg")
+        ghost = str(tmp_path / "ghost.jpg")  # never created
+        result = batch_process([ghost, a], ProcessOptions(
+            output_dir=str(tmp_path / "out"), jobs=1))
+        assert result.fail_count == 1
+        assert result.success_count == 1
+        ghost_result = result.results[0]
+        assert not ghost_result.success
+        assert ghost_result.input_size == 0
+        assert result.results[1].success
+
+
+class TestTempFileCleanup:
+    """Regression: sips-fallback temp files (_temp_png/_temp_raw_tiff) were
+    looked up on the FINAL image object — any pipeline transform swaps in a
+    fresh Image without the attribute, and mid-pipeline exceptions skipped
+    the cleanup entirely."""
+
+    def _parked_get_image(self, monkeypatch, parked):
+        import photo_s.engine as eng
+        real_get_image = eng._get_image
+
+        def fake_get_image(path, options=None):
+            img = real_get_image(path, options)
+            img.load()  # detach pixels from the source file
+            img._temp_png = str(parked)  # stand in for the sips temp file
+            return img
+
+        monkeypatch.setattr(eng, "_get_image", fake_get_image)
+
+    def test_temp_deleted_despite_transform(self, tmp_path, monkeypatch):
+        src = _make_image(tmp_path / "t.jpg", size=(100, 50))
+        parked = tmp_path / "sips_tmp.png"
+        Image.new("RGB", (4, 4)).save(parked)
+        self._parked_get_image(monkeypatch, parked)
+        # rotate forces a fresh Image — the old cleanup lost the attribute
+        result = _process(src, tmp_path / "out", rotate_degrees=90)
+        assert result.success
+        assert not parked.exists()
+
+    def test_temp_deleted_on_pipeline_error(self, tmp_path, monkeypatch):
+        import photo_s.engine as eng
+        src = _make_image(tmp_path / "t2.jpg")
+        parked = tmp_path / "sips_tmp2.png"
+        Image.new("RGB", (4, 4)).save(parked)
+        self._parked_get_image(monkeypatch, parked)
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("simulated save failure")
+
+        monkeypatch.setattr(eng, "_save_image", boom)
+        result = _process(src, tmp_path / "out")
+        assert not result.success
+        assert not parked.exists()
+
+
+class TestRenameEmptyStem:
+    """Regression: an all-empty pattern render (e.g. "{date}" on an
+    EXIF-less photo) produced a hidden ".jpg" output file."""
+
+    def test_empty_render_falls_back_to_prefix_suffix(self, tmp_path):
+        src = _make_image(tmp_path / "plain.jpg")  # no EXIF
+        result = _process(src, tmp_path / "out", rename_pattern="{date}")
+        assert result.success
+        name = os.path.basename(result.output_path)
+        assert name == "plain_out.jpg"  # helper default suffix "_out"
+        assert not name.startswith(".")

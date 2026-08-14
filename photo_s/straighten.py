@@ -70,7 +70,11 @@ def detect_horizon_angle(img: Image.Image, max_angle: float = 10.0):
 def _rotate_expand(img: Image.Image, degrees: float) -> Image.Image:
     if img.mode == "P":
         img = img.convert("RGB")
-    fill = (0, 0, 0, 255) if img.mode == "RGBA" else (0, 0, 0)
+    if img.mode not in ("RGB", "RGBA", "CMYK"):
+        # single-band / LA modes: PIL rotate requires a scalar fill color
+        fill = 0
+    else:
+        fill = (0, 0, 0, 255) if img.mode == "RGBA" else (0, 0, 0)
     out = img.rotate(degrees, expand=True, resample=Image.BICUBIC,
                      fillcolor=fill)
     out.info = dict(img.info)

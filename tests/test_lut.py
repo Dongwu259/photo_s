@@ -149,3 +149,20 @@ class TestApply1dMultiMode:
         im = Image.new("P", (8, 8))
         out = apply_lut(im, self._cube(tmp_path))
         assert out.mode == "RGB"
+
+    def test_la_converts(self, tmp_path):
+        im = Image.new("LA", (8, 8), (128, 255))
+        out = apply_lut(im, self._cube(tmp_path))
+        assert out.mode == "RGB"
+
+    def test_cmyk_converts(self, tmp_path):
+        im = Image.new("CMYK", (8, 8), (0, 0, 0, 0))
+        out = apply_lut(im, self._cube(tmp_path))
+        assert out.mode == "RGB"
+
+    def test_single_band_exotics_convert(self, tmp_path):
+        # Regression: I;16/F/1 crashed unpacking r,g,b = img.split()
+        cube = self._cube(tmp_path)
+        for mode, color in [("I;16", 1000), ("F", 0.5), ("1", 1)]:
+            out = apply_lut(Image.new(mode, (8, 8), color), cube)
+            assert out.mode == "RGB"

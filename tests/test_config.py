@@ -304,3 +304,96 @@ class TestCliPrecedenceIntegration:
         import json
         d = json.loads(out)
         assert d["results"][0]["output"].endswith("_fromcfg.jpg")
+
+
+class TestApplyConfigTypeCoercion:
+    """Config values are coerced to the ProcessOptions field's annotated type;
+    unconvertible values raise a key-named ValueError instead of crashing
+    deep in the processing pipeline."""
+
+    def test_string_int_coerced(self):
+        cfg = {"options": {"jobs": "4"}}
+        opts = apply_config(cfg, ProcessOptions())
+        assert opts.jobs == 4 and isinstance(opts.jobs, int)
+
+    def test_bad_value_raises_key_named_error(self):
+        cfg = {"options": {"jobs": "abc"}}
+        with pytest.raises(ValueError, match="jobs"):
+            apply_config(cfg, ProcessOptions())
+
+    def test_bool_field_rejects_bool_as_int(self):
+        # True is an int subclass — must not slip into an int field
+        cfg = {"options": {"quality": True}}
+        with pytest.raises(ValueError, match="quality"):
+            apply_config(cfg, ProcessOptions())
+
+    def test_bool_from_string(self):
+        cfg = {"options": {"strip_gps": "true", "grayscale": "false"}}
+        opts = apply_config(cfg, ProcessOptions())
+        assert opts.strip_gps is True
+        assert opts.grayscale is False
+
+    def test_bad_bool_raises(self):
+        cfg = {"options": {"strip_gps": "maybe"}}
+        with pytest.raises(ValueError, match="strip_gps"):
+            apply_config(cfg, ProcessOptions())
+
+    def test_float_field_accepts_int(self):
+        cfg = {"options": {"brightness": 2}}
+        opts = apply_config(cfg, ProcessOptions())
+        assert opts.brightness == 2.0
+
+    def test_optional_int_from_string(self):
+        cfg = {"options": {"wb": "5600"}}
+        opts = apply_config(cfg, ProcessOptions())
+        assert opts.wb_temp == 5600
+
+    def test_raw_auto_bright_applied(self):
+        # regression: apply_config silently ignored raw_auto_bright
+        # (only the CLI path in _apply_config_defaults knew the key)
+        cfg = {"options": {"raw_auto_bright": False}}
+        opts = apply_config(cfg, ProcessOptions())
+        assert opts.raw_auto_bright is False
+
+    def test_raw_auto_bright_default_untouched(self):
+        opts = apply_config({"options": {}}, ProcessOptions())
+        assert opts.raw_auto_bright is True
+
+
+class TestCliConfigCoercionIntegration:
+    """The compress/batch --config path goes through _apply_config_defaults —
+    the same coercion must apply there (jobs = "4" used to reach
+    batch_process as a str and TypeError)."""
+
+    def _run(self, capsys, args):
+        from photo_s.cli import run_cli
+        rc = run_cli(args)
+        out = capsys.readouterr().out
+        return rc, out
+
+    def test_string_jobs_coerced_via_cli(self, tmp_path, capsys):
+        from PIL import Image
+        img = tmp_path / "in.jpg"
+        Image.new("RGB", (40, 40), (10, 10, 10)).save(img, quality=95)
+        cfg = tmp_path / "photo-s.toml"
+        cfg.write_text('[options]\njobs = "4"\n')
+        rc, out = self._run(capsys, [
+            "compress", str(img), "--config", str(cfg),
+            "-o", str(tmp_path / "out"), "--json",
+        ])
+        assert rc == 0
+        import json
+        assert json.loads(out)["results"][0]["status"] == "ok"
+
+    def test_bad_value_clean_error_via_cli(self, tmp_path, capsys):
+        from PIL import Image
+        img = tmp_path / "in.jpg"
+        Image.new("RGB", (40, 40), (10, 10, 10)).save(img, quality=95)
+        cfg = tmp_path / "photo-s.toml"
+        cfg.write_text('[options]\njobs = "abc"\n')
+        rc, out = self._run(capsys, [
+            "compress", str(img), "--config", str(cfg),
+            "-o", str(tmp_path / "out"),
+        ])
+        assert rc == 1
+        assert "jobs" in out  # key-named error, no traceback

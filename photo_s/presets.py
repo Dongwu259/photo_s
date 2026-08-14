@@ -35,7 +35,7 @@ def list_presets() -> List[str]:
     for f in PRESETS_DIR.glob("*.json"):
         name = f.stem
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text(encoding="utf-8"))
             desc = data.get("_description", "")
             presets.append((name, desc))
         except Exception:
@@ -53,7 +53,8 @@ def save_preset(name: str, options: ProcessOptions, description: str = ""):
     data.pop("output_sizes", None)  # handled separately
     if options.output_sizes:
         data["output_sizes"] = options.output_sizes
-    _preset_path(name).write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    _preset_path(name).write_text(json.dumps(data, indent=2, ensure_ascii=False),
+                                  encoding="utf-8")
 
 
 def load_preset(name: str) -> Optional[ProcessOptions]:
@@ -72,8 +73,11 @@ def load_preset(name: str) -> Optional[ProcessOptions]:
             return None
 
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
+        return None
+
+    if not isinstance(data, dict):
         return None
 
     # Extract known fields; ignore metadata
@@ -97,7 +101,7 @@ def delete_preset(name: str) -> bool:
 
 def import_presets_from_json(json_path: str) -> int:
     """Import presets from a JSON file (one object per preset name)."""
-    data = json.loads(Path(json_path).read_text())
+    data = json.loads(Path(json_path).read_text(encoding="utf-8"))
     count = 0
     for name, fields in data.items():
         if isinstance(fields, dict):

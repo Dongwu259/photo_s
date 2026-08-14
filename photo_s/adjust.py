@@ -169,9 +169,11 @@ def _kelvin_rgb(kelvin: float) -> Tuple[float, float, float]:
         r = 329.698727446 * (k - 60.0) ** -0.1332047592
         g = 288.1221695283 * (k - 60.0) ** -0.0755148492
         b = 255.0
-    return (max(0.0, min(255.0, r)),
-            max(0.0, min(255.0, g)),
-            max(0.0, min(255.0, b)))
+    # clamp to >= 1.0: k <= 19 (~1900K, candlelight) gives b = 0.0 and
+    # _temperature_gains would divide by zero
+    return (max(1.0, min(255.0, r)),
+            max(1.0, min(255.0, g)),
+            max(1.0, min(255.0, b)))
 
 
 def _temperature_gains(kelvin: float, neutral: float = 6500.0):
@@ -375,13 +377,14 @@ def apply_rotate(img: Image.Image, degrees: float,
     """Rotate by degrees; positive = clockwise (PIL rotates CCW).
 
     expand=True grows the canvas; corners are filled with ``fill`` (hex)
-    or black. P/L modes are converted so a fill color is meaningful.
+    or black. Non-color modes (P/L/1/LA/I/F/I;16) are converted so a fill
+    color is meaningful; without a fill they keep their mode (scalar fill).
     """
     if not degrees:
         return img
     if img.mode == "P":
         img = img.convert("RGB")
-    elif img.mode == "L" and fill:
+    elif fill and img.mode not in ("RGB", "RGBA", "CMYK"):
         img = img.convert("RGB")
 
     if fill is not None:
@@ -390,8 +393,8 @@ def apply_rotate(img: Image.Image, degrees: float,
         except ValueError:
             r, g, b = 0, 0, 0
         fillcolor = (r, g, b, 255) if img.mode == "RGBA" else (r, g, b)
-    elif img.mode == "L":
-        # PIL L-mode rotate requires a scalar fill color (no 3-tuple)
+    elif img.mode not in ("RGB", "RGBA", "CMYK"):
+        # single-band / LA modes: PIL rotate requires a scalar fill color
         fillcolor = 0
     else:
         fillcolor = (0, 0, 0, 255) if img.mode == "RGBA" else (0, 0, 0)

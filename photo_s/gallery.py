@@ -64,7 +64,10 @@ def build_gallery(paths: List[str], out_dir: str, title: str = "PhotoS Gallery",
 
     Thumbnails land in out_dir/thumbs/; each card links to the original via a
     relative path (works when the relative structure is preserved on deploy).
-    Unreadable sources are skipped. Returns {"output", "count"}.
+    When no relative path exists (Windows: source on a different drive than
+    out_dir) the card falls back to an absolute file:// link instead of
+    aborting the whole build. Unreadable sources are skipped.
+    Returns {"output", "count"}.
     """
     out = Path(out_dir)
     thumbs = out / "thumbs"
@@ -74,7 +77,12 @@ def build_gallery(paths: List[str], out_dir: str, title: str = "PhotoS Gallery",
     for i, src in enumerate(paths, 1):
         thumb = thumbs / f"{i}.jpg"
         if _make_thumb(src, str(thumb), thumb_size):
-            rel = os.path.relpath(src, str(out))
+            try:
+                rel = os.path.relpath(src, str(out))
+            except ValueError:
+                # Windows: different drives have no relative path between
+                # them — link the original absolutely rather than crash.
+                rel = Path(src).absolute().as_uri()
             items.append((rel, html.escape(Path(src).name), f"thumbs/{i}.jpg"))
 
     cards = "\n".join(

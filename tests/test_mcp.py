@@ -187,6 +187,14 @@ class TestPluginTool:
         assert r["ok"] is False
         assert "registry" in r["error"]
 
+    def test_unknown_action_rejected(self):
+        # regression: "remove"/"status" fell through to a pip uninstall argv;
+        # with dry_run=False that really uninstalled the plugin
+        r = _call("plugin", {"action": "remove", "name": "scunet"})
+        assert r["ok"] is False
+        assert "unknown action" in r["error"]
+        assert "pip_argv" not in r
+
 
 class TestCliListTools:
     def test_list_tools_json(self, capsys):
@@ -274,6 +282,24 @@ class TestWatermarkTool:
                                 "output_dir": out})
         assert r["ok"] is True
         assert r["summary"]["success"] == 1
+
+    def test_missing_path_returns_error(self, tmp_path):
+        # regression: raw paths went straight to batch_process — a missing
+        # file raised FileNotFoundError and killed the whole batch
+        r = _call("watermark", {"paths": [str(tmp_path / "nope.jpg")],
+                                "text": "PhotoS"})
+        assert r["ok"] is False
+        assert "no supported image files" in r["error"]
+
+    def test_directory_expanded(self, tmp_path):
+        # regression: directories were not expanded (fed raw to the engine)
+        _img(tmp_path / "a.jpg", size=(64, 64))
+        _img(tmp_path / "b.jpg", size=(64, 64))
+        out = str(tmp_path / "out")
+        r = _call("watermark", {"paths": [str(tmp_path)], "text": "PhotoS",
+                                "output_dir": out})
+        assert r["ok"] is True
+        assert r["summary"]["success"] == 2
 
 
 class TestPresetTool:

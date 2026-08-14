@@ -424,7 +424,6 @@ Claude Desktop config (`claude_desktop_config.json`):
 ```bash
 pip install pyinstaller piexif pillow-heif   # optional features too
 python packaging/build.py                    # → dist/photo-s/photo-s.exe
-python packaging/build.py --onefile          # or a single exe (slower first start)
 ```
 
 The host launches by **absolute path**, no environment variables needed (see the spawn mode above).

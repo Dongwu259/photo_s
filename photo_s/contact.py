@@ -37,8 +37,15 @@ def build_contact_sheet(
 
     Returns:
         The absolute path of the saved contact sheet.
+
+    Raises:
+        ValueError: If cols < 1 (a zero/negative column count would crash
+                    the grid math with ZeroDivisionError/ValueError).
     """
+    if cols < 1:
+        raise ValueError(f"cols must be >= 1, got {cols}")
     tw, th = thumb_size
+    tw, th = max(1, tw), max(1, th)  # a 0-sized box crashes thumbnail()
     cell_w = tw + 2 * padding
     cell_h = th + 2 * padding + (CAPTION_H if captions else 0)
     rows = max(1, math.ceil(len(files) / max(1, cols)))

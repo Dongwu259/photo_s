@@ -112,6 +112,10 @@ def _options_from_dict(data: dict, base: Optional[ProcessOptions] = None) -> Pro
             setattr(opts, key, bool(data[key]))
     # case-insensitive format ("png" / "WEBP" → canonical "PNG" / "WebP")
     opts.output_format = _canonical_format(opts.output_format)
+    if opts.output_format not in SUPPORTED_FORMATS:
+        raise ValueError(
+            f"unsupported output format {opts.output_format!r}; "
+            f"supported: {sorted(SUPPORTED_FORMATS)}")
     if data.get("target_size"):
         from .config import _parse_size
         size = _parse_size(data["target_size"])
@@ -130,11 +134,13 @@ def _options_from_dict(data: dict, base: Optional[ProcessOptions] = None) -> Pro
                 label = str(entry.get("label", "") or "")
                 mw = entry.get("width") or entry.get("max_width")
                 mh = entry.get("height") or entry.get("max_height")
-            else:
+            elif isinstance(entry, (list, tuple)):
                 parts = list(entry)
                 label = str(parts[0]) if parts else ""
                 mw = parts[1] if len(parts) > 1 else None
                 mh = parts[2] if len(parts) > 2 else None
+            else:
+                continue  # skip non-dict/non-sequence entries (e.g. 42)
             try:
                 mw = int(mw) if mw else None
             except (TypeError, ValueError):
@@ -392,6 +398,13 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
             self._send_json(401, {"error": "unauthorized"})
             return
         data = self._read_json()
+        try:
+            self._dispatch_post(data)
+        except Exception as e:  # noqa: BLE001 — a bad request must not kill
+            # the connection with an empty reply; report it as a JSON 500.
+            self._send_json(500, {"ok": False, "error": str(e)})
+
+    def _dispatch_post(self, data: dict):
         if self.path == "/process/stream":
             self._handle_process_stream(data)
         elif self.path == "/process":
@@ -400,7 +413,11 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
             if not paths:
                 self._send_json(400, {"error": "no supported image files found"})
                 return
-            opts = _options_from_dict(data.get("options", {}), self.options)
+            try:
+                opts = _options_from_dict(data.get("options", {}), self.options)
+            except ValueError as e:
+                self._send_json(400, {"ok": False, "error": str(e)})
+                return
             if data.get("async"):
                 # Long-running batch → background task; agent polls /tasks/<id>.
                 task_id = start_task(paths, opts,
@@ -465,11 +482,13 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
                 cols = int(data.get("cols", 4))
             except (TypeError, ValueError):
                 cols = 4
+            cols = max(1, cols)  # 0/negative would crash the grid math
             try:
                 tw = int(data.get("thumb_width", 240))
                 th = int(data.get("thumb_height", 240))
             except (TypeError, ValueError):
                 tw = th = 240
+            tw, th = max(1, tw), max(1, th)
             try:
                 bg = hex_to_rgb(data.get("bg", "#000000"))
             except ValueError:

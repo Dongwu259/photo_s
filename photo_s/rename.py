@@ -75,6 +75,13 @@ def rename_files(
             continue
 
         src = Path(path)
+        if not new_stem.strip():
+            # A pure-EXIF template ({date}, {year}{month}{day}, ...) on a
+            # file without EXIF renders an empty stem — that would produce
+            # hidden ".png"/".png_1" files reported as ok. Fall back to the
+            # original name (same fallback semantics as engine rename mode).
+            new_stem = src.stem
+
         if output_dir:
             target = str(Path(output_dir) / f"{new_stem}{src.suffix}")
         else:
@@ -96,7 +103,10 @@ def rename_files(
                 os.makedirs(output_dir, exist_ok=True)
                 shutil.copy2(path, target)  # copy2 preserves mtime
             else:
-                os.rename(path, target)
+                # os.replace: same-FS atomic, and overwrites an existing
+                # target on every platform (os.rename raises FileExistsError
+                # on Windows, silently breaking --overwrite there).
+                os.replace(path, target)
             results.append({"input": path, "output": target,
                             "status": "ok", "error": ""})
         except Exception as e:

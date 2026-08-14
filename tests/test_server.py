@@ -543,3 +543,67 @@ class TestProcessStreamSSE:
             assert "error" in json.loads(raw)
         finally:
             s.close()
+
+
+class TestDoPostResilience:
+    """Regression: do_POST must never die with an empty reply — validation
+    errors → 400, unexpected errors → 500 JSON."""
+
+    def test_process_unknown_output_format_400(self, server):
+        s, img = server
+        status, payload = s.request(
+            "POST", "/process",
+            {"paths": [img], "options": {"output_format": "BOGUS"}})
+        assert status == 400
+        assert payload["ok"] is False
+        assert "unsupported output format" in payload["error"]
+
+    def test_process_internal_error_500(self, server, monkeypatch):
+        """Blanket guard: an unexpected engine failure → 500 JSON {"ok": False}
+        instead of a dropped connection (the old crash path)."""
+        import photo_s.server as srv
+
+        def boom(paths, options, **kw):
+            raise RuntimeError("engine exploded")
+
+        monkeypatch.setattr(srv, "batch_process", boom)
+        s, img = server
+        status, payload = s.request("POST", "/process", {"paths": [img]})
+        assert status == 500
+        assert payload["ok"] is False
+        assert "engine exploded" in payload["error"]
+
+    def test_contact_sheet_zero_cols_and_thumb_clamped(self, server):
+        """cols=0 used to crash the grid math with ZeroDivisionError."""
+        s, img = server
+        out = os.path.join(os.path.dirname(img), "sheet0.png")
+        status, payload = s.request(
+            "POST", "/contact-sheet",
+            {"paths": [img], "output": out, "cols": 0, "thumb_width": 0})
+        assert status == 200
+        assert os.path.exists(payload["output"])
+
+    def test_output_sizes_scalar_entry_ignored(self, server):
+        """[42] used to raise TypeError inside _options_from_dict."""
+        s, img = server
+        status, payload = s.request(
+            "POST", "/process",
+            {"paths": [img],
+             "options": {"output_sizes": [42, ["thumb", 16, None]]}})
+        assert status == 200
+        assert payload["results"][0]["status"] == "ok"
+        from pathlib import Path
+        main = Path(payload["results"][0]["output"])
+        assert main.with_name(main.stem + "_thumb" + main.suffix).exists()
+
+
+def test_options_from_dict_rejects_unknown_format():
+    from photo_s.server import _options_from_dict
+    with pytest.raises(ValueError, match="unsupported output format"):
+        _options_from_dict({"output_format": "BOGUS"})
+
+
+def test_options_from_dict_output_sizes_skips_scalars():
+    from photo_s.server import _options_from_dict
+    opts = _options_from_dict({"output_sizes": [42, ["thumb", 16, None]]})
+    assert opts.output_sizes == [("thumb", 16, None)]

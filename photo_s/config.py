@@ -232,6 +232,68 @@ def default_config_text() -> str:
 """
 
 
+_SIMPLE_TYPES = (int, float, bool, str)
+
+
+def _annotation_target(field: str):
+    """Resolve a ProcessOptions field annotation to a plain type.
+
+    Unwraps Optional[...]; returns None for anything outside int/float/bool/str
+    (those values are passed through without coercion).
+    """
+    anno = ProcessOptions.__dataclass_fields__[field].type
+    if getattr(anno, "__origin__", None) is None:
+        return anno if anno in _SIMPLE_TYPES else None
+    args = [a for a in getattr(anno, "__args__", ()) if a is not type(None)]
+    if len(args) == 1 and args[0] in _SIMPLE_TYPES:
+        return args[0]
+    return None
+
+
+def _coerce_value(key: str, field: str, value):
+    """Coerce a config value to the ProcessOptions field's annotated type.
+
+    Quoted TOML scalars (jobs = "4") are converted; values that cannot
+    convert raise a ValueError naming the config key, instead of crashing
+    deep in the processing pipeline.
+    """
+    target = _annotation_target(field)
+    if target is None:
+        return value
+    try:
+        if target is bool:
+            if isinstance(value, bool):
+                return value
+            v = str(value).strip().lower()
+            if v in ("true", "yes", "on", "1"):
+                return True
+            if v in ("false", "no", "off", "0"):
+                return False
+            raise ValueError
+        if target is int:
+            if isinstance(value, bool):
+                raise ValueError
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float):
+                if value.is_integer():
+                    return int(value)
+                raise ValueError
+            return int(str(value).strip())
+        if target is float:
+            if isinstance(value, bool):
+                raise ValueError
+            if isinstance(value, (int, float)):
+                return float(value)
+            return float(str(value).strip())
+        return value if isinstance(value, str) else str(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"配置项 '{key}' 的值 {value!r} 无效 (应为 {target.__name__}) — "
+            f"invalid value for config key '{key}' (expected {target.__name__})"
+        ) from None
+
+
 def apply_config(cfg, options: ProcessOptions) -> ProcessOptions:
     """Apply the [options] section of a config dict onto a ProcessOptions.
 
@@ -242,10 +304,15 @@ def apply_config(cfg, options: ProcessOptions) -> ProcessOptions:
 
     for key, field in _SIMPLE_FIELDS.items():
         if key in opts and opts[key] is not None:
-            setattr(options, field, opts[key])
+            setattr(options, field, _coerce_value(key, field, opts[key]))
 
     if "preserve_exif" in opts and opts["preserve_exif"] is not None:
-        options.preserve_exif = bool(opts["preserve_exif"])
+        options.preserve_exif = _coerce_value(
+            "preserve_exif", "preserve_exif", opts["preserve_exif"])
+
+    if "raw_auto_bright" in opts and opts["raw_auto_bright"] is not None:
+        options.raw_auto_bright = _coerce_value(
+            "raw_auto_bright", "raw_auto_bright", opts["raw_auto_bright"])
 
     if "target_size" in opts:
         size = _parse_size(opts["target_size"])

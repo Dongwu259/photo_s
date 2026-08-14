@@ -394,3 +394,161 @@ class TestBench:
         monkeypatch.setattr(cli_mod, "batch_process", lambda *a, **k: None)
         _make_image(tmp_path / "in.jpg")
         assert run_cli(["bench", "--dir", str(tmp_path), "-j", "abc", "--json"]) != 0
+
+
+class TestCliDedupConfirmWording:
+    def test_keep_sharpest_prompt_says_delete(self, tmp_path, monkeypatch):
+        # regression: keep-sharpest permanently deletes via os.unlink — the
+        # confirm prompt must say 删除, not 移动
+        import shutil
+        a = _pattern_image(tmp_path / "a.jpg", "a")
+        b = shutil.copyfile(a, tmp_path / "b.jpg")
+        prompts = []
+        monkeypatch.setattr("builtins.input",
+                            lambda p="": (prompts.append(p), "n")[1])
+        rc = run_cli(["dedup", a, str(b), "--action", "keep-sharpest"])
+        assert rc == 0
+        assert prompts and "删除" in prompts[0] and "移动" not in prompts[0]
+        assert os.path.exists(a) and os.path.exists(b)  # declined → untouched
+
+
+class TestCliExifPerFileErrors:
+    """One bad file must not abort the whole exif write batch."""
+
+    def test_write_loop_continues_after_bad_file(self, tmp_path, capsys):
+        # regression: PNG (no EXIF support in piexif) used to crash the loop
+        img = _make_image(tmp_path / "good.jpg")
+        png = _make_image(tmp_path / "bad.png")
+        rc = run_cli(["exif", img, png, "--artist", "me"])
+        assert rc == 1  # partial failure reported via exit code
+        import piexif
+        d = piexif.load(img)
+        assert d["0th"][piexif.ImageIFD.Artist] == b"me"  # good file written
+        cap = capsys.readouterr()
+        assert "bad.png" in cap.out
+        assert "1 个文件写入失败" in cap.err
+
+    def test_from_csv_partial_failure_continues(self, tmp_path, capsys):
+        # regression: a missing file mid-CSV aborted the import, leaving a
+        # silently half-written batch with a traceback
+        img = _make_image(tmp_path / "row1.jpg")
+        csv_path = tmp_path / "meta.csv"
+        csv_path.write_text("path,artist\n"
+                            f"{img},alice\n"
+                            f"{tmp_path / 'gone.jpg'},bob\n",
+                            encoding="utf-8")
+        rc = run_cli(["exif", "--from-csv", str(csv_path)])
+        assert rc == 1
+        import piexif
+        d = piexif.load(img)
+        assert d["0th"][piexif.ImageIFD.Artist] == b"alice"
+        assert "1 个文件写入失败" in capsys.readouterr().err
+
+    def test_from_json_partial_failure_continues(self, tmp_path, capsys):
+        img = _make_image(tmp_path / "row1.jpg")
+        json_path = tmp_path / "meta.json"
+        json_path.write_text(json.dumps(
+            [{"path": img, "artist": "alice"},
+             {"path": str(tmp_path / "gone.jpg"), "artist": "bob"}]),
+            encoding="utf-8")
+        rc = run_cli(["exif", "--from-json", str(json_path)])
+        assert rc == 1
+        import piexif
+        d = piexif.load(img)
+        assert d["0th"][piexif.ImageIFD.Artist] == b"alice"
+
+    def test_date_from_mtime_per_file_errors(self, tmp_path, capsys):
+        img = _make_image(tmp_path / "ok.jpg")
+        png = _make_image(tmp_path / "bad.png")
+        rc = run_cli(["exif", img, png, "--date-from-mtime"])
+        assert rc == 1
+        assert "1 个文件写入失败" in capsys.readouterr().err
+        import piexif
+        d = piexif.load(img)
+        assert d["Exif"][piexif.ExifIFD.DateTimeOriginal]  # good file written
+
+
+class TestCliProfilesRuntimeFields:
+    def test_preset_does_not_clobber_cli_runtime_fields(
+            self, tmp_path, monkeypatch, capsys):
+        # regression: serialized preset defaults (jobs=1, None fields) used to
+        # override explicit CLI -j/--target-size/--resize under --profiles
+        from pathlib import Path
+        from photo_s.presets import save_preset
+        from photo_s.engine import ProcessOptions, BatchResult
+        import photo_s.cli as cli_mod
+        monkeypatch.setattr("photo_s.presets.PRESETS_DIR",
+                            Path(tmp_path / "presets"))
+        save_preset("web", ProcessOptions(quality=70), "")
+        captured = []
+
+        def _fake(paths, opts, **kw):
+            captured.append(opts)
+            return BatchResult(results=[], total_input_size=0,
+                               total_output_size=0, success_count=0,
+                               fail_count=0)
+        monkeypatch.setattr(cli_mod, "batch_process", _fake)
+        img = _make_image(tmp_path / "in.jpg")
+        rc = run_cli(["batch", img, "-o", str(tmp_path / "out"),
+                      "--profiles", "web", "--resize", "800x600",
+                      "-j", "3", "--target-size", "500KB", "--json"])
+        assert rc == 0
+        assert len(captured) == 1
+        po = captured[0]
+        assert po.quality == 70              # preset value applies
+        assert po.jobs == 3                  # CLI runtime field survives
+        assert po.target_size_bytes == 512000
+        assert po.max_width == 800           # preset None must not clobber CLI
+
+
+class TestRemoveOriginalConfirm:
+    def test_eoferror_treated_as_refusal(self, tmp_path, monkeypatch, capsys):
+        # regression: closed stdin (pipe/agent) crashed with an EOFError traceback
+        img = _make_image(tmp_path / "in.jpg")
+
+        def _closed(*a, **k):
+            raise EOFError
+        monkeypatch.setattr("builtins.input", _closed)
+        rc = run_cli(["compress", img, "--remove-original",
+                      "-o", str(tmp_path / "out")])
+        assert rc == 1
+        assert os.path.exists(img)  # refused → original kept
+        assert "Cancelled" in capsys.readouterr().err
+
+    def test_compress_yes_skips_prompt(self, tmp_path, monkeypatch):
+        img = _make_image(tmp_path / "in.jpg")
+
+        def _boom(*a, **k):
+            raise AssertionError("prompt must not appear with -y")
+        monkeypatch.setattr("builtins.input", _boom)
+        rc = run_cli(["compress", img, "--remove-original", "-y",
+                      "-o", str(tmp_path / "out")])
+        assert rc == 0
+        assert not os.path.exists(img)
+
+    def test_convert_yes_skips_prompt(self, tmp_path, monkeypatch):
+        img = _make_image(tmp_path / "in.png", color=(1, 2, 3))
+
+        def _boom(*a, **k):
+            raise AssertionError("prompt must not appear with --yes")
+        monkeypatch.setattr("builtins.input", _boom)
+        rc = run_cli(["convert", img, "-f", "JPEG", "--remove-original",
+                      "--yes", "-o", str(tmp_path / "out")])
+        assert rc == 0
+        assert not os.path.exists(img)
+
+
+class TestConfigLoadErrors:
+    """Bad --config paths must produce a clean error, not a traceback."""
+
+    def test_config_show_bad_toml(self, tmp_path, capsys):
+        bad = tmp_path / "bad.toml"
+        bad.write_text("[options\nquality = ")
+        rc = run_cli(["config", "show", "--path", str(bad)])
+        assert rc == 1
+        assert "Config load error" in capsys.readouterr().out
+
+    def test_serve_missing_config(self, tmp_path, capsys):
+        rc = run_cli(["serve", "--config", str(tmp_path / "nope.toml")])
+        assert rc == 1
+        assert "Config load error" in capsys.readouterr().out

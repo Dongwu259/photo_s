@@ -373,7 +373,7 @@ def _apply_config_defaults(options: ProcessOptions, parsed, cfg: dict) -> Proces
     attributes mean "not passed" (an equals-the-default value like ``-q 85``
     is still a real value and wins over the config file).
     """
-    from .config import _SIMPLE_FIELDS
+    from .config import _SIMPLE_FIELDS, _coerce_value
     opts = cfg.get("options", {}) if isinstance(cfg, dict) else {}
 
     # Generic mapping: config key → ProcessOptions field (config._SIMPLE_FIELDS
@@ -387,7 +387,8 @@ def _apply_config_defaults(options: ProcessOptions, parsed, cfg: dict) -> Proces
             continue
         cli_dest = _CONFIG_CLI_DESTS.get(config_key, config_key)
         if not hasattr(parsed, cli_dest):
-            setattr(options, field, opts[config_key])
+            setattr(options, field, _coerce_value(config_key, field,
+                                                  opts[config_key]))
 
     # inverse boolean flags (CLI uses --no-*, config uses positive form)
     if "preserve_exif" in opts and not getattr(parsed, "no_exif", False):
@@ -565,6 +566,10 @@ def run_cli(args: List[str] = None) -> int:
         help="处理后删除原文件 Delete original after processing",
     )
     compress_parser.add_argument(
+        "-y", "--yes", action="store_true",
+        help="跳过所有确认提示 Skip all confirmation prompts",
+    )
+    compress_parser.add_argument(
         "--rename", type=str, default=argparse.SUPPRESS, metavar="PATTERN",
         help="智能重命名 Smart rename, 变量 vars: {year} {month} {day} {date} {time} "
              "{camera} {make} {original} {iso} {focal} {seq}",
@@ -669,6 +674,10 @@ def run_cli(args: List[str] = None) -> int:
     convert_parser.add_argument(
         "--remove-original", action="store_true", default=argparse.SUPPRESS,
         help="处理后删除原文件 Delete original after processing",
+    )
+    convert_parser.add_argument(
+        "-y", "--yes", action="store_true",
+        help="跳过所有确认提示 Skip all confirmation prompts",
     )
     _add_advanced_args(convert_parser)
     _add_transform_args(convert_parser)
@@ -1411,7 +1420,7 @@ def run_cli(args: List[str] = None) -> int:
             elif not dedup_json:
                 # JSON callers have no stdin; requesting the action explicitly
                 # IS the confirmation (same rule as --remove-original --json).
-                verb = ("保留最清晰并移动其余" if parsed.action == "keep-sharpest"
+                verb = ("保留最清晰并删除其余" if parsed.action == "keep-sharpest"
                         else ("移动" if parsed.action == "move" else "删除"))
                 confirm = input(f"\n⚠️  即将{verb} {total_dupes} 个文件. 确认? [y/N]: "
                                 ).strip().lower()
@@ -1511,6 +1520,7 @@ def run_cli(args: List[str] = None) -> int:
             """Write metadata for a list of {path, tag...} dicts."""
             tags_cols = [n for _, n in _TAG_FLAGS]
             done = 0
+            failed = 0
             for row in rows:
                 p = (row.get("path") or "").strip()
                 if not p:
@@ -1521,26 +1531,35 @@ def run_cli(args: List[str] = None) -> int:
                         if row.get(k) not in (None, "")}
                 if not tags:
                     continue
-                apply_exif_tags(p, tags)
+                try:
+                    apply_exif_tags(p, tags)
+                except Exception as e:  # per-file: keep going, report at end
+                    failed += 1
+                    print(f"  ❌ {os.path.basename(p)}: {e}", file=sys.stderr)
+                    continue
                 done += 1
-            return done
+            return done, failed
 
         # ── Batch import from CSV / JSON (paths come from the file) ──
         if getattr(parsed, 'from_csv', None):
             import csv
             with open(parsed.from_csv, newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
-            done = _apply_batch_meta(rows, parsed.from_csv)
+            done, failed = _apply_batch_meta(rows, parsed.from_csv)
             print(f"✅ 已从CSV写入元数据 Written from CSV: {done} 个文件 files")
-            return 0
+            if failed:
+                print(f"⚠️  {failed} 个文件写入失败 failed to write", file=sys.stderr)
+            return 0 if failed == 0 else 1
         if getattr(parsed, 'from_json', None):
             import json
             rows = json.loads(Path(parsed.from_json).read_text(encoding="utf-8"))
             if not isinstance(rows, list):
                 rows = [rows]
-            done = _apply_batch_meta(rows, parsed.from_json)
+            done, failed = _apply_batch_meta(rows, parsed.from_json)
             print(f"✅ 已从JSON写入元数据 Written from JSON: {done} 个文件 files")
-            return 0
+            if failed:
+                print(f"⚠️  {failed} 个文件写入失败 failed to write", file=sys.stderr)
+            return 0 if failed == 0 else 1
 
         # ── Read / filter mode ──
         if getattr(parsed, 'show', False):
@@ -1602,6 +1621,7 @@ def run_cli(args: List[str] = None) -> int:
 
         if getattr(parsed, 'date_from_mtime', False):
             # reverse sync: DateTimeOriginal ← file mtime (per file)
+            failed = 0
             for f in _collect_files(parsed.files,
                                     recursive=getattr(parsed, 'recursive', False)):
                 try:
@@ -1609,9 +1629,16 @@ def run_cli(args: List[str] = None) -> int:
                 except OSError:
                     continue
                 dt = datetime.fromtimestamp(ts)
-                apply_exif_tags(f, {"date": dt.strftime("%Y:%m:%d %H:%M:%S")})
+                try:
+                    apply_exif_tags(f, {"date": dt.strftime("%Y:%m:%d %H:%M:%S")})
+                except Exception as e:  # per-file: keep going, report at end
+                    failed += 1
+                    print(f"  ❌ {os.path.basename(f)}: {e}", file=sys.stderr)
+                    continue
             print("✅ 已用文件修改时间写入拍摄日期 DateTimeOriginal ← mtime")
-            return 0
+            if failed:
+                print(f"⚠️  {failed} 个文件写入失败 failed to write", file=sys.stderr)
+            return 0 if failed == 0 else 1
 
         if not tags:
             print("❌ 请指定至少一个EXIF标签，或 --show 读取。"
@@ -1629,12 +1656,20 @@ def run_cli(args: List[str] = None) -> int:
             print(f"   {tag}: {val}")
         print()
 
+        failed = 0
         for f in files:
-            msg = apply_exif_tags(f, tags)
+            try:
+                msg = apply_exif_tags(f, tags)
+            except Exception as e:  # per-file: keep going, report at end
+                failed += 1
+                print(f"  ❌ {os.path.basename(f)}: {e}")
+                continue
             print(f"  {os.path.basename(f)}: {msg}")
 
         print("\n✅ EXIF编辑完成 EXIF editing done.")
-        return 0
+        if failed:
+            print(f"⚠️  {failed} 个文件写入失败 failed to write", file=sys.stderr)
+        return 0 if failed == 0 else 1
 
     # ── Handle 'info' command ────────────────────────────────────────────────
     if parsed.command == "info":
@@ -1703,8 +1738,12 @@ def run_cli(args: List[str] = None) -> int:
                 print("⚠️  未找到配置文件。No config file found.")
                 print("   用 `photo-s config init` 创建 Create with `photo-s config init`")
                 return 0
-            cfg = load_config(path)
-            apply_config(cfg, ProcessOptions())
+            try:
+                cfg = load_config(path)
+                apply_config(cfg, ProcessOptions())
+            except Exception as e:
+                print(f"❌ 配置文件加载失败 Config load error: {e}")
+                return 1
             print(f"📋 配置文件 Config file: {path}")
             opts_dict = cfg.get("options", {})
             if not opts_dict:
@@ -1722,8 +1761,12 @@ def run_cli(args: List[str] = None) -> int:
         base_options = ProcessOptions()
         if parsed.config:
             from .config import load_config, apply_config
-            cfg = load_config(parsed.config)
-            base_options = apply_config(cfg, base_options)
+            try:
+                cfg = load_config(parsed.config)
+                base_options = apply_config(cfg, base_options)
+            except Exception as e:
+                print(f"❌ 配置文件加载失败 Config load error: {e}")
+                return 1
         token = parsed.token
         if token == "auto":
             token = generate_token()
@@ -2198,7 +2241,13 @@ def run_cli(args: List[str] = None) -> int:
             and not is_json):
         print(f"⚠️  警告: 将删除 {len(files)} 个原始文件！")
         print(f"   Warning: {len(files)} original file(s) will be deleted!")
-        confirm = input("   确认继续? Confirm? [y/N]: ").strip().lower()
+        try:
+            confirm = input("   确认继续? Confirm? [y/N]: ").strip().lower()
+        except EOFError:
+            # stdin closed (pipe/agent): treat as refusal, not a traceback
+            print("   已取消（无法读取确认输入）"
+                  "Cancelled (no stdin for confirmation).", file=sys.stderr)
+            return 1
         if confirm not in ("y", "yes"):
             print("   已取消 Cancelled.")
             return 0
@@ -2225,10 +2274,14 @@ def run_cli(args: List[str] = None) -> int:
                 print(f"❌ 预设不存在 Preset not found: {name}")
                 return 1
             # Preset values win over CLI/config EXCEPT output_dir/suffix
-            # (presets serialize stale directories — those come from CLI/config)
+            # (presets serialize stale directories — those come from CLI/config),
+            # runtime fields (jobs/target_size_bytes), and serialized None
+            # defaults (must not clobber explicit CLI/config values)
             fields = {k: v for k, v in asdict(base).items()
                       if k in ProcessOptions.__dataclass_fields__
-                      and k not in ("output_dir", "suffix")}
+                      and k not in ("output_dir", "suffix", "jobs",
+                                    "target_size_bytes")
+                      and v is not None}
             prof_opts = replace(options, **fields)
             prof_result = batch_process(files, prof_opts,
                                         progress_callback=progress_callback)

@@ -26,7 +26,10 @@ def discover_plugins() -> List[PhotoSPlugin]:
     if _PLUGINS is not None:
         return _PLUGINS
 
-    _PLUGINS = []
+    # Build into a local list and publish only once complete — assigning
+    # _PLUGINS up front would let concurrent first callers (parallel batch
+    # workers) observe the empty half-built list.
+    plugins: List[PhotoSPlugin] = []
 
     if sys.version_info >= (3, 10):
         from importlib.metadata import entry_points
@@ -37,18 +40,19 @@ def discover_plugins() -> List[PhotoSPlugin]:
             from importlib.metadata import entry_points
             eps = entry_points().get("photo_s.plugins", [])
         except Exception:
-            return _PLUGINS
+            eps = []
 
     for ep in eps:
         try:
             plugin_cls = ep.load()
             plugin = plugin_cls()
             plugin.name = ep.name
-            _PLUGINS.append(plugin)
+            plugins.append(plugin)
         except Exception:
             # Silently skip broken plugins
             pass
 
+    _PLUGINS = plugins
     return _PLUGINS
 
 

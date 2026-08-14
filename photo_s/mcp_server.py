@@ -331,6 +331,11 @@ def plugin_tool(
             available.append(entry)
         return {"installed": installed, "available": available}
 
+    if action not in ("install", "uninstall"):
+        return {"ok": False, "name": name,
+                "error": f"unknown action: {action}",
+                "actions": ["list", "install", "uninstall"]}
+
     official = get_official(name) if name else None
     if official is None:
         return {"ok": False, "name": name,
@@ -428,6 +433,13 @@ def watermark_tool(
     Returns a BatchResult JSON with per-file status, plus ``ok``.
     """
     from .server import _options_from_dict
+    from .cli import _collect_files
+
+    files = _collect_files(list(paths))
+    if not files:
+        return {"ok": False,
+                "error": "no supported image files found",
+                "paths": list(paths)}
 
     data = {
         "watermark_text": text, "watermark_image": image,
@@ -437,7 +449,7 @@ def watermark_tool(
     }
     data = {k: v for k, v in data.items() if v is not None}
     opts = _options_from_dict(data, base=_base_options)
-    result = batch_process(list(paths), opts)
+    result = batch_process(files, opts)
     payload = result.to_dict()
     payload["ok"] = result.fail_count == 0
     return payload

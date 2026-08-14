@@ -418,7 +418,6 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 ```bash
 pip install pyinstaller piexif pillow-heif   # 可选特性一起打包
 python packaging/build.py                    # → dist/photo-s/photo-s.exe
-python packaging/build.py --onefile          # 或单个 exe（启动稍慢）
 ```
 
 宿主用**绝对路径**拉起，不依赖任何环境变量（见上面的 spawn 模式）。

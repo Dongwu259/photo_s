@@ -61,3 +61,25 @@ class TestBuildContactSheet:
         out = str(tmp_path / "mixed.png")
         build_contact_sheet(paths + [str(bad)], out, cols=2)
         assert os.path.isfile(out)
+
+
+class TestGridValidation:
+    """Regression: cols=0 crashed with ZeroDivisionError (idx % cols),
+    cols<0 with a bare Image.new ValueError, and a 0-sized thumb box
+    crashed thumbnail((0, 0)) the same way."""
+
+    def test_cols_zero_raises_clear_valueerror(self, tmp_path):
+        import pytest
+        with pytest.raises(ValueError, match="cols"):
+            build_contact_sheet([], str(tmp_path / "s.png"), cols=0)
+
+    def test_cols_negative_raises_clear_valueerror(self, tmp_path):
+        import pytest
+        with pytest.raises(ValueError, match="cols"):
+            build_contact_sheet([], str(tmp_path / "s.png"), cols=-2)
+
+    def test_zero_thumb_size_clamped(self, tmp_path):
+        paths = _make_images(tmp_path, count=1)
+        out = str(tmp_path / "s.png")
+        build_contact_sheet(paths, out, cols=1, thumb_size=(0, 0))
+        assert os.path.isfile(out)
