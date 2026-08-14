@@ -959,9 +959,11 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
     # over explicitly (same dynamic-attribute hand-off as _gpx_pos below).
     seq_counter = getattr(options, '_seq_counter', None)
     preassigned_output = getattr(options, '_preassigned_output', None)
+    preassigned_sized = getattr(options, '_preassigned_sized_outputs', None)
     options = replace(options, output_format=fmt)
     options._seq_counter = seq_counter
     options._preassigned_output = preassigned_output
+    options._preassigned_sized_outputs = preassigned_sized
 
     input_fmt = _format_from_path(input_path)
     input_size = 0
@@ -1184,7 +1186,9 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
 
         if options.output_sizes:
             # Multi-size mode: generate one file per size
-            for label, mw, mh in options.output_sizes:
+            preassigned_sized = (options._preassigned_sized_outputs
+                                 if options._preassigned_sized_outputs else [])
+            for size_idx, (label, mw, mh) in enumerate(options.output_sizes):
                 sized_img = img.copy()
                 orig_w, orig_h = sized_img.size
                 ratio = 1.0
@@ -1202,6 +1206,11 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
                     options.prefix, size_suffix, options.overwrite,
                     folder_pattern=options.folder_pattern,
                     exif_meta=exif_meta,
+                    # batch_process reserved one path per size up front —
+                    # same parallel-collision protection as the main output.
+                    preassigned=(preassigned_sized[size_idx]
+                                 if size_idx < len(preassigned_sized)
+                                 else None),
                 )
                 _do_save(sized_img, size_path, options.output_format,
                          save_options_base)
@@ -1363,6 +1372,17 @@ def batch_process(
                 path, options.output_format, options.output_dir,
                 options.prefix, options.suffix, overwrite=False,
                 reserved=reserved_paths)
+            # Multi-size derivatives collide the same way (two same-stem
+            # inputs both derive "photo_small.jpg" before either writes),
+            # so reserve one path per labeled size up front too.
+            if options.output_sizes:
+                opts_copy._preassigned_sized_outputs = [
+                    _get_output_path(
+                        path, options.output_format, options.output_dir,
+                        options.prefix, f"{options.suffix}_{label}",
+                        overwrite=False, reserved=reserved_paths)
+                    for label, _mw, _mh in options.output_sizes
+                ]
         per_image_options.append(opts_copy)
 
     # ── Process images ─────────────────────────────────────────────────────

@@ -25,9 +25,11 @@
 | `serve` | REST API（AI agent 集成，含 `/process/stream` SSE 进度） |
 | `mcp` | MCP server（stdio，11 工具，py3.10+） |
 | `plugin` | 插件管理 install/list/info/fetch/**scaffold** |
-| `bench` | 批量基准：`--dir -j 1,2,4,8 --denoise` 实测各并发耗时/加速比 |
+| `bench` | 批量基准：`--dir -j 1,2,4,8 --denoise` 实测各并发耗时/加速比；每阶段计时（load/process/save）；`--evaluate` 输出质量（PSNR/SSIM 对比源图）；输出写临时目录跑完自动清理，不污染源目录 |
 
 全局：`--json`（agent 友好输出）、`--version`。`-j/--jobs` 默认 **auto**（min(CPU核数,8)）。
+
+**并发调优（v1.4.0 实测定案）**：真实交付集（29 张 24MP）`-j 1,2,4,8` 实测 2.62s→0.45s，8 线程 **5.83x**，线程远未饱和——重活（解码/缩放/编码/降噪推理）都在 Pillow/numpy/onnxruntime 里释放 GIL，纯 Python 段占比小，**多进程是负优化**（降噪场景内存翻倍）。调优旋钮：`-j` 提并发；SCUNet 降噪时可用 `OMP_NUM_THREADS` / onnxruntime intra-op 控制单算子线程数，避免与外层 `-j` 超额订阅。机器不同结论可能不同，用 `bench` 实测。
 
 ## 2. 引擎处理能力（ProcessOptions 61 字段）
 

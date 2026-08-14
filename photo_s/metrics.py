@@ -1,10 +1,12 @@
 """
 PhotoS - Image Quality Metrics
 
-Pure-Python SSIM (Structural Similarity Index) with zero third-party
-dependencies. Both images are downscaled to a small grayscale sample before
-comparison, so the score stays fast even for very large photos.
+Pure-Python SSIM (Structural Similarity Index) and PSNR with zero third-party
+dependencies. Both images are downscaled to a small sample before comparison,
+so the scores stay fast even for very large photos.
 """
+
+import math
 
 from PIL import Image
 
@@ -57,7 +59,10 @@ def compute_ssim(path_a: str, path_b: str, sample_size: int = 64,
         path_a: Path to the first image.
         path_b: Path to the second image.
         sample_size: Max dimension of the grayscale sample (default 64).
-        win_size: Sliding window size, must be odd (default 7).
+        win_size: Sliding window size (default 7). Even values are bumped to
+            the next odd size — an even window cannot be centered on a pixel
+            and would mix win_size+1 rows with win_size columns, skewing the
+            statistics.
 
     Returns:
         Mean SSIM over all windows, a float in [0, 1].
@@ -72,6 +77,8 @@ def compute_ssim(path_a: str, path_b: str, sample_size: int = 64,
     pixels_b = list(_flattened(b))
     width, height = a.size
 
+    if win_size % 2 == 0:
+        win_size += 1
     if win_size < 3 or win_size > min(width, height):
         win_size = 3 if min(width, height) >= 3 else 1
 
@@ -101,6 +108,54 @@ def compute_ssim(path_a: str, path_b: str, sample_size: int = 64,
         return _window_ssim(pixels_a, pixels_b, n, c1, c2)
 
     return total_ssim / count
+
+
+def _load_sample_rgb(path: str, sample_size: int) -> Image.Image:
+    """Open an image, downscale to ≤sample_size on the longest side, convert to RGB."""
+    with Image.open(path) as img:
+        if img.size[0] > sample_size or img.size[1] > sample_size:
+            img = img.copy()
+            img.thumbnail((sample_size, sample_size), Image.LANCZOS)
+        return img.convert("RGB")
+
+
+def compute_psnr(path_a: str, path_b: str, sample_size: int = 256) -> float:
+    """Peak Signal-to-Noise Ratio between two image files, in dB.
+
+    Higher means closer to the reference; identical images return
+    ``float("inf")``. Computed over all three RGB channels of a downscaled
+    sample (peak = 255), so it stays fast even for very large photos.
+
+    Args:
+        path_a: Path to the reference image.
+        path_b: Path to the image to score against the reference.
+        sample_size: Max dimension of the RGB sample (default 256).
+
+    Returns:
+        PSNR in dB (negative values are possible for very different
+        images), or ``float("inf")`` when the samples are identical.
+    """
+    a = _load_sample_rgb(path_a, sample_size)
+    b = _load_sample_rgb(path_b, sample_size)
+
+    if a.size != b.size:
+        b = b.resize(a.size, Image.LANCZOS)
+
+    pixels_a = list(_flattened(a))
+    pixels_b = list(_flattened(b))
+    n = len(pixels_a) * 3
+    if n == 0:
+        return float("inf")
+
+    sq = 0
+    for pa, pb in zip(pixels_a, pixels_b):
+        sq += ((pa[0] - pb[0]) ** 2 + (pa[1] - pb[1]) ** 2
+               + (pa[2] - pb[2]) ** 2)
+    if sq == 0:
+        return float("inf")
+
+    mse = sq / n
+    return 10 * math.log10((255 * 255) / mse)
 
 
 def compute_blur_score(path: str, sample_size: int = 128) -> float:

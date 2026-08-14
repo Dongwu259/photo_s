@@ -47,6 +47,13 @@ class TestDefaultConfigText:
         assert "[options]" in text
         assert "quality" in text
 
+    def test_enhance_extra_uses_pypi_name(self):
+        # Regression: 模板注释写的是旧包名 photo-s[enhance]，
+        # PyPI 发行名是 photo-s-tools（photo-s 被 PyPI 拦截）
+        text = default_config_text()
+        assert "photo-s-tools[enhance]" in text
+        assert "photo-s[" not in text
+
 
 class TestSaveLoad:
     def test_save_then_load(self, tmp_path):

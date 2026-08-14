@@ -374,3 +374,65 @@ class TestResumeCanonicalFormat:
             output_dir=str(tmp_path / "out"), output_format="jpeg",
             resume=True))
         assert res.success_count == 1
+
+
+class TestSizedOutputReservation:
+    """Regression: multi-size (output_sizes) derivatives were NOT part of
+    batch_process's reserved-path pre-allocation, so they could collide with
+    another input's output (parallel same-stem race, or a sized name matching
+    a later input's main output name) and silently overwrite each other."""
+
+    def _img(self, path, color, size=(64, 64)):
+        from PIL import Image
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", size, color).save(path)
+        return str(path)
+
+    def _colors_of(self, paths):
+        from PIL import Image
+        return {Image.open(p).convert("RGB").getpixel((0, 0)) for p in paths}
+
+    def test_sized_name_matching_other_main_not_overwritten(self, tmp_path):
+        # Deterministic (jobs=1): a/photo.png derives sized "photo_thumb.png";
+        # b/photo_thumb.png's main output derives the very same name. Without
+        # reservation the second save overwrites the sized derivative.
+        from photo_s.engine import ProcessOptions, batch_process
+        red = (200, 30, 30)
+        blue = (30, 30, 200)
+        src_a = self._img(tmp_path / "a" / "photo.png", red)
+        src_b = self._img(tmp_path / "b" / "photo_thumb.png", blue)
+        out = tmp_path / "out"
+        res = batch_process([src_a, src_b], ProcessOptions(
+            output_dir=str(out), output_format="PNG", suffix="",
+            output_sizes=[("thumb", 8, 8)]))
+        assert res.success_count == 2
+        outputs = sorted(p.name for p in out.iterdir())
+        assert outputs == ["photo.png", "photo_thumb.png",
+                           "photo_thumb_1.png", "photo_thumb_thumb.png"]
+        # sized derivative keeps source a's color, renamed main keeps b's
+        assert self._colors_of([out / "photo_thumb.png"]) == {red}
+        assert self._colors_of([out / "photo_thumb_1.png"]) == {blue}
+
+    def test_parallel_same_stem_sized_outputs_all_exist(self, tmp_path):
+        # Parallel: four same-stem inputs from different dirs; every sized
+        # derivative must land on its own reserved path.
+        from photo_s.engine import ProcessOptions, batch_process
+        colors = [(200, 30, 30), (30, 200, 30), (30, 30, 200),
+                  (200, 200, 30)]
+        srcs = [self._img(tmp_path / f"d{i}" / "photo.png", c)
+                for i, c in enumerate(colors)]
+        out = tmp_path / "out"
+        res = batch_process(srcs, ProcessOptions(
+            output_dir=str(out), output_format="PNG", suffix="", jobs=4,
+            output_sizes=[("thumb", 8, 8), ("screen", 16, 16)]))
+        assert res.success_count == 4
+        files = list(out.iterdir())
+        # 4 mains + 4 thumbs + 4 screens, all distinct paths
+        assert len(files) == 12
+        assert len({p.name for p in files}) == 12
+        for label in ("thumb", "screen"):
+            # colliding derivatives are de-suffixed as photo_thumb_1.png etc.
+            sized = [p for p in files if f"_{label}" in p.stem]
+            assert len(sized) == 4
+            # no derivative was overwritten by another same-label output
+            assert self._colors_of(sized) == set(colors)

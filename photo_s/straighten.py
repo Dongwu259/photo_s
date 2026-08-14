@@ -22,7 +22,7 @@ def _cv2():
     except ImportError:
         raise RuntimeError(
             "auto-straighten requires the optional dependency: "
-            "pip install 'photo-s[enhance]' (opencv-python-headless)")
+            "pip install 'photo-s-tools[enhance]' (opencv-python-headless)")
 
 
 def detect_horizon_angle(img: Image.Image, max_angle: float = 10.0):

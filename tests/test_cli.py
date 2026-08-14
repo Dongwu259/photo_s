@@ -421,15 +421,20 @@ class TestBench:
     """bench: structure present, jobs list honored, no timing assertions."""
 
     def test_structure_and_dedupe(self, tmp_path, monkeypatch, capsys):
-        import photo_s.cli as cli_mod
+        from types import SimpleNamespace
+        import photo_s.bench as bench_mod
         seen = []
-        monkeypatch.setattr(cli_mod, "batch_process",
-                            lambda p, o, **kw: seen.append(o.jobs))
+
+        def fake_batch(p, o, **kw):
+            seen.append(o.jobs)
+            return SimpleNamespace(results=[])
+
+        monkeypatch.setattr(bench_mod.engine, "batch_process", fake_batch)
         _make_image(tmp_path / "in.jpg")
         rc = run_cli(["bench", "--dir", str(tmp_path), "-j", "1,2,2", "--json"])
         assert rc == 0
         d = json.loads(capsys.readouterr().out)
-        assert set(d) == {"dir", "files", "runs"}
+        assert set(d) == {"dir", "files", "runs", "evaluate"}
         assert [r["jobs"] for r in d["runs"]] == [1, 2]  # dedup, keep order
         assert all(r["speedup"] > 0 for r in d["runs"])
         assert seen == [1, 2]

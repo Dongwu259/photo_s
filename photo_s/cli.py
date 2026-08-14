@@ -1297,6 +1297,11 @@ def run_cli(args: List[str] = None) -> int:
         help="附加降噪强度（模拟高负载管线）Add denoise to the workload",
     )
     bench_parser.add_argument(
+        "--evaluate", action="store_true",
+        help="评估输出质量（PSNR/SSIM 对比源图）Score output quality "
+             "(PSNR/SSIM vs sources)",
+    )
+    bench_parser.add_argument(
         "--json", action="store_true",
         help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
     )
@@ -2012,8 +2017,7 @@ def run_cli(args: List[str] = None) -> int:
     # ── Handle 'bench' command ───────────────────────────────────────────────
     if parsed.command == "bench":
         import json as _json
-        import time as _time
-        from dataclasses import replace
+        from .bench import run_benchmark
         files = _collect_files([parsed.dir], recursive=True)
         if not files:
             print("❌ 目录里没有找到支持的图片文件。No images found.",
@@ -2038,29 +2042,29 @@ def run_cli(args: List[str] = None) -> int:
             output_format=getattr(parsed, 'format', 'JPEG'),
             denoise=parsed.denoise,
         )
-        runs = []
-        baseline = None
-        for j in job_list:
-            opts = replace(base, jobs=j)
-            t0 = _time.monotonic()
-            batch_process(files, opts)  # progress via no-op default
-            dt = _time.monotonic() - t0
-            if baseline is None:
-                baseline = dt
-            runs.append({
-                "jobs": j,
-                "files": len(files),
-                "seconds": round(dt, 3),
-                "speedup": round(baseline / dt, 3) if dt > 0 else 1.0,
-            })
-        out = {"dir": parsed.dir, "files": len(files), "runs": runs}
+        # Outputs go to a temp dir cleaned up by run_benchmark — the
+        # source directory is never polluted.
+        report = run_benchmark(files, job_list, base, evaluate=parsed.evaluate)
+        out = {"dir": parsed.dir, "files": len(files), **report}
         if getattr(parsed, 'json', False):
             print(_json.dumps(out, indent=2, ensure_ascii=False))
         else:
             print(f"bench: {len(files)} files in {parsed.dir}")
-            for r in runs:
+            for r in report["runs"]:
+                st = r["stages"]
                 print(f"  jobs={r['jobs']:<3} {r['seconds']:>6.2f}s  "
-                      f"speedup={r['speedup']:>4.2f}x")
+                      f"speedup={r['speedup']:>4.2f}x  errors={r['errors']}  "
+                      f"load={st['load']:.2f}s process={st['process']:.2f}s "
+                      f"save={st['save']:.2f}s")
+            ev = report.get("evaluate")
+            if ev is not None:
+                if ev["files"]:
+                    psnr = (f"{ev['psnr_db']:.2f}dB"
+                            if ev["psnr_db"] is not None else "inf")
+                    print(f"  evaluate: {ev['files']} files  "
+                          f"PSNR={psnr}  SSIM={ev['ssim']:.4f}")
+                else:
+                    print("  evaluate: 无可比对输出 no comparable outputs")
             print("提示 Tip: 在真实照片集上跑，用结果决定并发数；"
                   "多进程一般不必要（重活释放 GIL）")
         return 0
@@ -2256,7 +2260,7 @@ def run_cli(args: List[str] = None) -> int:
     def progress_callback(current, total, path):
         if path:
             name = os.path.basename(path)
-            print(f"  [{current+1}/{total}] 处理中 {name}...", end="\r", file=jout)
+            print(f"  [{current}/{total}] 处理中 {name}...", end="\r", file=jout)
         else:
             print(f"  [{total}/{total}] 完成 Done!" + " " * 20, file=jout)
 

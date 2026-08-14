@@ -339,6 +339,17 @@ def _cmd_scaffold(parsed) -> int:
     base = Path(parsed.dir) if getattr(parsed, "dir", None) else \
         Path("plugins") / name
     pkg_dir = base / f"photo_s_plugin_{name.replace('-', '_')}"
+    # Never silently clobber an existing scaffold — a re-run against a
+    # package the user has since edited would wipe their work.
+    targets = [base / "pyproject.toml", pkg_dir / "__init__.py"]
+    existing = [t for t in targets if t.exists()]
+    if existing:
+        msg = (f"目标文件已存在，拒绝覆盖 Target file exists, "
+               f"refusing to overwrite: {existing[0]}")
+        print(msg, file=sys.stderr)
+        if is_json:
+            print(json.dumps({"ok": False, "error": msg}, ensure_ascii=False))
+        return 1
     try:
         pkg_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -349,7 +360,12 @@ def _cmd_scaffold(parsed) -> int:
         return 1
 
     entry_cls = "".join(part.capitalize() for part in name.split("_"))
-    entry_cls = entry_cls.replace("-", "").capitalize() or "MyPlugin"
+    entry_cls = entry_cls.replace("-", "").capitalize()
+    # Names may start with a digit ("123demo" passes _NAME_RE) but a Python
+    # class identifier can't — prefix a letter to keep it legal.
+    if entry_cls[:1].isdigit():
+        entry_cls = "P" + entry_cls
+    entry_cls = entry_cls or "MyPlugin"
     pkg_module = f"photo_s_plugin_{name.replace('-', '_')}"
     pyproject = f"""[build-system]
 requires = ["setuptools>=68"]

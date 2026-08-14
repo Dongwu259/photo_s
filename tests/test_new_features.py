@@ -655,6 +655,24 @@ class TestAutoStraighten:
         assert ok is True
         assert out.mode == "L"
 
+    def test_missing_cv2_error_names_pypi_package(self, monkeypatch):
+        # Regression: 错误提示曾写旧包名 photo-s[enhance]，
+        # PyPI 发行名是 photo-s-tools
+        import builtins
+        from photo_s.straighten import apply_auto_straighten
+        real = builtins.__import__
+
+        def fake(name, *a, **k):
+            if name == "cv2":
+                raise ImportError("No module named 'cv2'")
+            return real(name, *a, **k)
+
+        monkeypatch.setattr(builtins, "__import__", fake)
+        with pytest.raises(RuntimeError) as exc:
+            apply_auto_straighten(Image.new("RGB", (8, 8)))
+        assert "photo-s-tools[enhance]" in str(exc.value)
+        assert "'photo-s[" not in str(exc.value)
+
 
 class TestLogCurveLibraryPath:
     """Regression: apply_log_recovery was case-sensitive / bare KeyError."""

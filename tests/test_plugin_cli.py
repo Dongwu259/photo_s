@@ -232,3 +232,36 @@ class TestScaffold:
         d = json.loads(_out(capsys))
         assert d["ok"] is False
         assert not (tmp_path / "pd").exists()
+
+    def test_refuses_to_overwrite_existing(self, tmp_path, capsys):
+        # Regression: re-running scaffold silently clobbered existing files
+        out_dir = str(tmp_path / "pd")
+        rc = run_cli(["plugin", "scaffold", "demo", "--dir", out_dir])
+        assert rc == 0
+        capsys.readouterr()  # drain the first run's human output
+        pyproject = tmp_path / "pd" / "pyproject.toml"
+        pyproject.write_text("# user edits\n", encoding="utf-8")
+        rc = run_cli(["plugin", "scaffold", "demo", "--dir", out_dir,
+                      "--json"])
+        assert rc == 1
+        d = json.loads(_out(capsys))
+        assert d["ok"] is False
+        assert "overwrite" in d["error"]
+        # the existing file was left untouched
+        assert pyproject.read_text(encoding="utf-8") == "# user edits\n"
+
+    def test_digit_name_yields_legal_class_identifier(self, tmp_path, capsys):
+        # Regression: "123demo" passed _NAME_RE but generated an illegal
+        # class name "123demoPlugin"
+        import ast
+        out_dir = str(tmp_path / "pd")
+        rc = run_cli(["plugin", "scaffold", "123demo", "--dir", out_dir])
+        assert rc == 0
+        init = tmp_path / "pd" / "photo_s_plugin_123demo" / "__init__.py"
+        tree = ast.parse(init.read_text(encoding="utf-8"))
+        cls = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.ClassDef))
+        assert cls.name.isidentifier()
+        assert cls.name == "P123demoPlugin"
+        pyproject = (tmp_path / "pd" / "pyproject.toml").read_text()
+        assert '123demo = "photo_s_plugin_123demo:P123demoPlugin"' in pyproject

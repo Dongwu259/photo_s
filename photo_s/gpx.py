@@ -5,6 +5,7 @@ Parses GPX track files (stdlib xml.etree) and interpolates a position for an
 arbitrary timestamp, so photos can be geo-tagged from a recorded track.
 """
 
+import math
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from functools import lru_cache
@@ -51,9 +52,12 @@ def parse_gpx(path: str) -> List[Point]:
         if lat is None or lon is None or ts is None:
             continue
         try:
-            points.append((ts, float(lat), float(lon)))
+            flat, flon = float(lat), float(lon)
         except ValueError:
             continue
+        if not (math.isfinite(flat) and math.isfinite(flon)):
+            continue  # "nan"/"inf" parse as float but aren't coordinates
+        points.append((ts, flat, flon))
     return sorted(points, key=lambda p: p[0])
 
 
@@ -92,9 +96,10 @@ def position_at(path: str, ts: datetime) -> Optional[Tuple[float, float]]:
 
 def to_dms_rational(deg: float) -> Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]]:
     """Convert decimal degrees to piexif DMS rationals: ((d,1),(m,1),(s,100))."""
-    deg = abs(deg)
-    d = int(deg)
-    m_float = (deg - d) * 60
-    m = int(m_float)
-    s = round((m_float - m) * 60, 2)
-    return ((d, 1), (m, 1), (int(s * 100), 100))
+    # Work in integer centiseconds: a fractional second rounding up to 60.00
+    # then carries into minutes (and minutes into degrees) automatically,
+    # instead of emitting an invalid DMS like 12° 34' 60.00".
+    total_cs = int(round(abs(deg) * 360000))  # 1° = 3600 s = 360000 cs
+    d, rem = divmod(total_cs, 360000)
+    m, s_cs = divmod(rem, 6000)
+    return ((d, 1), (m, 1), (s_cs, 100))

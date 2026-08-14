@@ -209,9 +209,9 @@ def default_config_text() -> str:
 #auto_exposure = 0.45
 # LOG/平面文件还原曲线 (SLOG3 CLOG3 LOGC3 DLOG VLOG HLG)
 #log_curve = "SLOG3"
-# NLM 降噪强度 3-20 (需安装 photo-s[enhance])
+# NLM 降噪强度 3-20 (需安装 photo-s-tools[enhance])
 #denoise = 10
-# 自动扶正地平线 (需安装 photo-s[enhance])
+# 自动扶正地平线 (需安装 photo-s-tools[enhance])
 #auto_straighten = false
 #max_straighten_angle = 10
 # 打印尺寸 (中心裁剪 + 精确像素)

@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PIL import Image, ImageFilter
 
-from photo_s.metrics import compute_ssim, compute_blur_score
+from photo_s.metrics import compute_ssim, compute_psnr, compute_blur_score
 
 
 def _solid(path, size=(64, 64), color=(100, 150, 200), fmt="PNG"):
@@ -50,6 +50,81 @@ class TestComputeSsim:
         a = _solid(tmp_path / "tiny_a.png", size=(2, 2), color=(5, 5, 5))
         b = _solid(tmp_path / "tiny_b.png", size=(2, 2), color=(5, 5, 5))
         assert compute_ssim(a, b) == 1.0
+
+    def test_even_window_size_bumped_to_odd(self, tmp_path):
+        # An even window cannot be centered on a pixel and mixed win_size+1
+        # rows with win_size columns (wrong statistics) — it is bumped up.
+        a = _solid(tmp_path / "a.png", color=(100, 150, 200))
+        b = _solid(tmp_path / "b.png", color=(10, 200, 90))
+        assert compute_ssim(a, b, win_size=8) == compute_ssim(a, b, win_size=9)
+        assert 0.0 <= compute_ssim(a, b, win_size=8) <= 1.0
+
+    def test_even_sized_images(self, tmp_path):
+        # Even pixel dimensions are fine with the (odd) sliding window.
+        a = _solid(tmp_path / "ea.png", size=(50, 40), color=(77, 88, 99))
+        b = _solid(tmp_path / "eb.png", size=(50, 40), color=(77, 88, 99))
+        c = _solid(tmp_path / "ec.png", size=(50, 40), color=(200, 30, 60))
+        assert compute_ssim(a, b) == 1.0
+        assert 0.0 <= compute_ssim(a, c) <= 1.0
+
+    def test_image_smaller_than_window(self, tmp_path):
+        # 6x6 < default 7x7 window but >= 3 → window shrinks to 3, no crash.
+        a = _solid(tmp_path / "sa.png", size=(6, 6), color=(5, 5, 5))
+        b = _solid(tmp_path / "sb.png", size=(6, 6), color=(5, 5, 5))
+        assert compute_ssim(a, b) == 1.0
+
+
+class TestComputePsnr:
+    def _noisy(self, path, size=(64, 64)):
+        import random
+        random.seed(42)
+        img = Image.new("RGB", size)
+        px = img.load()
+        for y in range(size[1]):
+            for x in range(size[0]):
+                px[x, y] = (random.randint(0, 255), random.randint(0, 255),
+                            random.randint(0, 255))
+        img.save(path, format="PNG")
+        return str(path)
+
+    def test_identical_is_inf(self, tmp_path):
+        a = _solid(tmp_path / "a.png", color=(100, 150, 200))
+        b = _solid(tmp_path / "b.png", color=(100, 150, 200))
+        assert compute_psnr(a, b) == float("inf")
+
+    def test_tiny_change_scores_higher_than_big_change(self, tmp_path):
+        orig = self._noisy(tmp_path / "orig.png")
+        img = Image.open(orig)
+        tiny = str(tmp_path / "tiny.png")
+        big = str(tmp_path / "big.png")
+        img.point(lambda v: min(255, v + 1)).save(tiny, format="PNG")
+        img.point(lambda v: 255 - v).save(big, format="PNG")
+        small_change = compute_psnr(orig, tiny)
+        big_change = compute_psnr(orig, big)
+        assert 0 < big_change < small_change < float("inf")
+
+    def test_symmetric(self, tmp_path):
+        a = _solid(tmp_path / "a.png", color=(100, 150, 200))
+        b = _solid(tmp_path / "b.png", color=(10, 200, 90))
+        assert compute_psnr(a, b) == compute_psnr(b, a)
+
+    def test_different_sizes_handled(self, tmp_path):
+        a = _solid(tmp_path / "big.png", size=(128, 128), color=(120, 90, 40))
+        b = _solid(tmp_path / "small.png", size=(32, 32), color=(120, 90, 40))
+        # b resized to a's sample size internally; identical color → inf
+        assert compute_psnr(a, b) == float("inf")
+
+    def test_tiny_images(self, tmp_path):
+        a = _solid(tmp_path / "ta.png", size=(2, 2), color=(5, 5, 5))
+        b = _solid(tmp_path / "tb.png", size=(2, 2), color=(5, 5, 5))
+        c = _solid(tmp_path / "tc.png", size=(2, 2), color=(250, 250, 250))
+        assert compute_psnr(a, b) == float("inf")
+        assert compute_psnr(a, c) < 10
+
+    def test_even_sized_images(self, tmp_path):
+        a = _solid(tmp_path / "ea.png", size=(50, 40), color=(77, 88, 99))
+        b = _solid(tmp_path / "eb.png", size=(50, 40), color=(77, 88, 99))
+        assert compute_psnr(a, b) == float("inf")
 
 
 class TestComputeBlurScore:

@@ -49,6 +49,22 @@ class TestParseGpx:
         points = parse_gpx(str(p))
         assert len(points) == 2
 
+    def test_nan_coordinate_skipped(self, tmp_path):
+        # Regression: float("nan") parses fine, so NaN track points leaked
+        # into interpolation and got written into the GPS EXIF
+        p = tmp_path / "nan.gpx"
+        p.write_text(GPX.replace('lat="10.1"', 'lat="nan"'))
+        points = parse_gpx(str(p))
+        assert len(points) == 1
+        assert points[0][1] == 10.0
+
+    def test_inf_coordinate_skipped(self, tmp_path):
+        p = tmp_path / "inf.gpx"
+        p.write_text(GPX.replace('lon="20.0"', 'lon="inf"'))
+        points = parse_gpx(str(p))
+        assert len(points) == 1
+        assert points[0][2] == 20.1
+
 
 class TestPositionAt:
     def _gpx(self, tmp_path):
@@ -87,6 +103,21 @@ class TestToDmsRational:
     def test_negative_uses_abs(self):
         d, _, _ = to_dms_rational(-12.5)
         assert d == (12, 1)
+
+    def test_seconds_rounding_carries_into_minutes(self):
+        # Regression: 12° 34' 59.999" rounded seconds to 60.00 without
+        # carrying, emitting the invalid DMS 12° 34' 60.00"
+        d, m, s = to_dms_rational(12 + 34 / 60 + 59.999 / 3600)
+        assert d == (12, 1)
+        assert m == (35, 1)
+        assert s == (0, 100)
+
+    def test_seconds_rounding_carries_into_degrees(self):
+        # 12° 59' 59.999" must carry all the way: 13° 0' 0.00"
+        d, m, s = to_dms_rational(12 + 59 / 60 + 59.999 / 3600)
+        assert d == (13, 1)
+        assert m == (0, 1)
+        assert s == (0, 100)
 
 
 class TestGpxInjection:
