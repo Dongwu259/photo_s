@@ -873,6 +873,26 @@ def run_cli(args: List[str] = None) -> int:
         "--software", type=str, default=None, help="软件 Software tag",
     )
     exif_parser.add_argument(
+        "--lens", type=str, default=None,
+        help="镜头型号 Lens model, e.g. 'FE 24-70mm F2.8 GM'",
+    )
+    exif_parser.add_argument(
+        "--iso", type=int, default=None, metavar="N",
+        help="感光度 ISO speed, e.g. 400",
+    )
+    exif_parser.add_argument(
+        "--shutter", type=str, default=None, metavar="SEC",
+        help="快门速度 Shutter speed, e.g. '1/250' 或秒 or '2' (seconds)",
+    )
+    exif_parser.add_argument(
+        "--aperture", type=str, default=None, metavar="F",
+        help="光圈 Aperture f-number, e.g. '2.8' 或 or 'f/2.8'",
+    )
+    exif_parser.add_argument(
+        "--focal", type=str, default=None, metavar="MM",
+        help="焦距 Focal length in mm, e.g. '50'",
+    )
+    exif_parser.add_argument(
         "--date-from-mtime", action="store_true",
         help="用文件修改时间写拍摄日期（反向同步）Set DateTimeOriginal "
              "from the file's mtime (reverse sync)",
@@ -1514,7 +1534,9 @@ def run_cli(args: List[str] = None) -> int:
                       ("description", "description"), ("caption", "caption"),
                       ("title", "title"), ("date", "date"),
                       ("software", "software"), ("rating", "rating"),
-                      ("keywords", "keywords")]
+                      ("keywords", "keywords"), ("lens", "lens"),
+                      ("iso", "iso"), ("shutter", "shutter"),
+                      ("aperture", "aperture"), ("focal", "focal")]
 
         def _apply_batch_meta(rows, source):
             """Write metadata for a list of {path, tag...} dicts."""

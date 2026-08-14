@@ -11,11 +11,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
+import piexif
 from PIL import Image
 
 from photo_s.cli import run_cli
 from photo_s.engine import (read_exif_metadata, apply_exif_tags,
-                            _parse_print_size)
+                            _parse_print_size, _exif_bytes,
+                            _parse_rational_str, _fmt_fnumber, _fmt_shutter)
 from photo_s.adjust import (apply_auto_levels, apply_white_balance,
                             apply_exposure)
 from photo_s.dedup import handle_duplicates
@@ -149,6 +151,162 @@ class TestExifTagAndFilter:
         rc = run_cli(["exif", "--from-csv", str(csv_path)])
         assert rc == 0
         assert read_exif_metadata(img)["rating"] == 4
+
+
+class TestExifTypedFields:
+    """镜头/ISO/快门/光圈/焦距 typed EXIF 字段（lens/iso/shutter/fnumber/focal）。"""
+
+    def test_roundtrip_lens(self, tmp_path):
+        img = _img(tmp_path / "a.jpg")
+        msg = apply_exif_tags(img, {"lens": "FE 24-70mm F2.8 GM"})
+        assert "lens" in msg
+        assert read_exif_metadata(img)["lens"] == "FE 24-70mm F2.8 GM"
+        d = piexif.load(img)
+        raw = _exif_bytes(d["Exif"][piexif.ExifIFD.LensModel])
+        assert raw.decode("utf-8") == "FE 24-70mm F2.8 GM"
+
+    def test_roundtrip_iso(self, tmp_path):
+        img = _img(tmp_path / "a.jpg")
+        msg = apply_exif_tags(img, {"iso": 400})
+        assert "iso" in msg
+        d = piexif.load(img)
+        assert d["Exif"][piexif.ExifIFD.ISOSpeedRatings] == 400
+        assert read_exif_metadata(img)["iso"] == "400"
+
+    def test_roundtrip_fnumber(self, tmp_path):
+        img = _img(tmp_path / "a.jpg")
+        msg = apply_exif_tags(img, {"fnumber": "2.8"})
+        assert "fnumber" in msg
+        d = piexif.load(img)
+        num, den = d["Exif"][piexif.ExifIFD.FNumber]
+        assert num / den == pytest.approx(2.8)
+        assert read_exif_metadata(img)["fnumber"] == "2.8"
+
+    def test_aperture_alias_accepts_f_prefix(self, tmp_path):
+        img = _img(tmp_path / "a.jpg")
+        apply_exif_tags(img, {"aperture": "f/2.8"})
+        d = piexif.load(img)
+        num, den = d["Exif"][piexif.ExifIFD.FNumber]
+        assert num / den == pytest.approx(2.8)
+        assert read_exif_metadata(img)["fnumber"] == "2.8"
+
+    def test_roundtrip_shutter_fraction(self, tmp_path):
+        img = _img(tmp_path / "a.jpg")
+        msg = apply_exif_tags(img, {"shutter": "1/250"})
+        assert "shutter" in msg
+        d = piexif.load(img)
+        assert d["Exif"][piexif.ExifIFD.ExposureTime] == (1, 250)
+        assert read_exif_metadata(img)["shutter"] == "1/250"
+
+    def test_roundtrip_shutter_seconds(self, tmp_path):
+        img = _img(tmp_path / "a.jpg")
+        apply_exif_tags(img, {"shutter": "2"})
+        d = piexif.load(img)
+        assert d["Exif"][piexif.ExifIFD.ExposureTime] == (2, 1)
+        assert read_exif_metadata(img)["shutter"] == "2"
+
+    def test_roundtrip_focal(self, tmp_path):
+        img = _img(tmp_path / "a.jpg")
+        msg = apply_exif_tags(img, {"focal": "50"})
+        assert "focal" in msg
+        d = piexif.load(img)
+        assert d["Exif"][piexif.ExifIFD.FocalLength] == (50, 1)
+        assert read_exif_metadata(img)["focal"] == "50mm"
+
+    def test_focal_decimal_normalized(self, tmp_path):
+        img = _img(tmp_path / "a.jpg")
+        apply_exif_tags(img, {"focal": "50.0"})
+        d = piexif.load(img)
+        assert d["Exif"][piexif.ExifIFD.FocalLength] == (50, 1)
+
+    def test_fmt_fnumber_edges(self):
+        assert _fmt_fnumber((28, 10)) == "2.8"
+        assert _fmt_fnumber((5, 1)) == "5.0"
+        assert _fmt_fnumber((1, 0)) == ""   # 除零
+        assert _fmt_fnumber((0, 1)) == ""   # 零光圈无意义
+        assert _fmt_fnumber(None) == ""
+        assert _fmt_fnumber(("a", "b")) == ""
+
+    def test_fmt_shutter_edges(self):
+        assert _fmt_shutter((1, 250)) == "1/250"
+        assert _fmt_shutter((2, 1)) == "2"
+        assert _fmt_shutter((10, 2)) == "5"  # ≥1 秒取整
+        assert _fmt_shutter((1, 0)) == ""    # 除零
+        assert _fmt_shutter((0, 1)) == ""
+        assert _fmt_shutter(None) == ""
+        assert _fmt_shutter(("a", "b")) == ""
+
+    def test_parse_rational_str(self):
+        assert _parse_rational_str("2.8") == (14, 5)
+        assert _parse_rational_str("f/2.8") == (14, 5)
+        assert _parse_rational_str("1/250") == (1, 250)
+        assert _parse_rational_str("2") == (2, 1)
+        assert _parse_rational_str("50") == (50, 1)
+        assert _parse_rational_str("1/0") is None   # 除零
+        assert _parse_rational_str("abc") is None
+        assert _parse_rational_str("") is None
+        assert _parse_rational_str("-2.8") is None  # 负值无意义
+        assert _parse_rational_str("0") is None
+
+    def test_clear_typed_fields_with_empty_string(self, tmp_path):
+        """空字符串 = 从 EXIF 中移除该 tag（对齐 rating/keywords/title 语义）。"""
+        img = _img(tmp_path / "a.jpg")
+        apply_exif_tags(img, {"lens": "FE 35mm F1.8", "iso": 800,
+                              "fnumber": "1.8", "shutter": "1/125",
+                              "focal": "35"})
+        d = piexif.load(img)
+        for tag in (piexif.ExifIFD.LensModel, piexif.ExifIFD.ISOSpeedRatings,
+                    piexif.ExifIFD.FNumber, piexif.ExifIFD.ExposureTime,
+                    piexif.ExifIFD.FocalLength):
+            assert tag in d["Exif"]
+        apply_exif_tags(img, {"lens": "", "iso": "", "fnumber": "",
+                              "shutter": "", "focal": ""})
+        d = piexif.load(img)
+        for tag in (piexif.ExifIFD.LensModel, piexif.ExifIFD.ISOSpeedRatings,
+                    piexif.ExifIFD.FNumber, piexif.ExifIFD.ExposureTime,
+                    piexif.ExifIFD.FocalLength):
+            assert tag not in d["Exif"]
+        m = read_exif_metadata(img)
+        assert m["lens"] == "" and m["fnumber"] == "" and m["shutter"] == ""
+
+    def test_invalid_values_skipped(self, tmp_path):
+        """非法值静默跳过：不抛异常、不写 tag、不计入返回消息。"""
+        img = _img(tmp_path / "a.jpg")
+        msg = apply_exif_tags(img, {"iso": "abc", "fnumber": "f/xyz",
+                                    "shutter": "1/0"})
+        assert msg == ""
+        d = piexif.load(img)
+        assert piexif.ExifIFD.ISOSpeedRatings not in d["Exif"]
+        assert piexif.ExifIFD.FNumber not in d["Exif"]
+        assert piexif.ExifIFD.ExposureTime not in d["Exif"]
+        # SHORT 超范围同样跳过
+        assert apply_exif_tags(img, {"iso": 70000}) == ""
+        assert piexif.ExifIFD.ISOSpeedRatings not in piexif.load(img)["Exif"]
+
+    def test_mixed_with_ascii_fields(self, tmp_path):
+        """typed 字段与现有 ASCII/UserComment 字段同一次写入互不干扰。"""
+        img = _img(tmp_path / "a.jpg")
+        msg = apply_exif_tags(img, {"artist": "Duo", "lens": "FE 35mm F1.8",
+                                    "iso": 200, "rating": 3})
+        for name in ("artist", "lens", "iso", "rating"):
+            assert name in msg
+        m = read_exif_metadata(img)
+        assert m["lens"] == "FE 35mm F1.8"
+        assert m["iso"] == "200"
+        assert m["rating"] == 3
+
+    def test_cli_write_typed_fields(self, tmp_path, capsys):
+        img = _img(tmp_path / "a.jpg")
+        rc = run_cli(["exif", img, "--lens", "FE 35mm F1.8", "--iso", "800",
+                      "--shutter", "1/125", "--aperture", "f/1.8",
+                      "--focal", "35"])
+        assert rc == 0
+        m = read_exif_metadata(img)
+        assert m["lens"] == "FE 35mm F1.8"
+        assert m["iso"] == "800"
+        assert m["shutter"] == "1/125"
+        assert m["fnumber"] == "1.8"
+        assert m["focal"] == "35mm"
 
 
 class TestCull:

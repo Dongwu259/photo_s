@@ -13,6 +13,7 @@ import warnings
 import subprocess
 import tempfile
 from datetime import datetime, timedelta
+from fractions import Fraction
 from pathlib import Path
 from typing import Optional, Callable, List, Tuple
 from dataclasses import dataclass, replace
@@ -1623,6 +1624,18 @@ _EXIF_TAG_MAP = {} if not _HAS_PIEXIF else {
     "date":         ("Exif", piexif.ExifIFD.DateTimeOriginal),  # CLI alias for --date
 }
 
+# Non-ASCII EXIF fields: name → (kind, ifd_name, tag_id). kind is one of
+# "ascii" (bytes), "short" (int), "rational" ((num, den) parsed from text).
+# Handled by _apply_typed_exif_tag; '' / None clears the tag.
+_EXIF_TYPED_TAGS = {} if not _HAS_PIEXIF else {
+    "lens":     ("ascii",    "Exif", piexif.ExifIFD.LensModel),
+    "iso":      ("short",    "Exif", piexif.ExifIFD.ISOSpeedRatings),
+    "fnumber":  ("rational", "Exif", piexif.ExifIFD.FNumber),
+    "aperture": ("rational", "Exif", piexif.ExifIFD.FNumber),   # alias
+    "shutter":  ("rational", "Exif", piexif.ExifIFD.ExposureTime),
+    "focal":    ("rational", "Exif", piexif.ExifIFD.FocalLength),
+}
+
 
 def _get_exif_tag_map() -> dict:
     """Return the EXIF tag name → (ifd_name, tag_id) mapping."""
@@ -1636,6 +1649,53 @@ def _exif_bytes(value) -> bytes:
     if isinstance(value, bytes):
         return value
     return b""
+
+
+def _parse_rational_str(value):
+    """Parse '2.8', 'f/2.8', '1/250', '50' → (num, den) ints, or None.
+
+    Used for RATIONAL EXIF fields (FNumber / ExposureTime / FocalLength).
+    Zero, negative, non-numeric and out-of-uint32-range values are rejected
+    so a bad input silently skips the field instead of corrupting the file.
+    """
+    s = str(value).strip().lower()
+    if s.startswith("f/"):
+        s = s[2:].strip()
+    if not s:
+        return None
+    try:
+        frac = Fraction(s)
+    except (ValueError, ZeroDivisionError):
+        return None
+    if frac <= 0:
+        return None
+    if frac.numerator > 0xFFFFFFFF or frac.denominator > 0xFFFFFFFF:
+        return None
+    return (frac.numerator, frac.denominator)
+
+
+def _fmt_fnumber(value) -> str:
+    """RATIONAL (num, den) → one-decimal f-number ('2.8'); '' on bad data."""
+    try:
+        num, den = value
+        f = float(num) / float(den)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return ""
+    return f"{f:.1f}" if f > 0 else ""
+
+
+def _fmt_shutter(value) -> str:
+    """RATIONAL (num, den) → '2' (≥1 s) or '1/250' (<1 s); '' on bad data."""
+    try:
+        num, den = float(value[0]), float(value[1])
+        if num <= 0 or den <= 0:
+            return ""
+        secs = num / den
+    except (TypeError, ValueError, IndexError, ZeroDivisionError):
+        return ""
+    if secs >= 1:
+        return str(int(round(secs)))
+    return f"1/{int(round(den / num))}"
 
 
 def _parse_usercomment(text: str) -> dict:
@@ -1692,17 +1752,53 @@ def _write_usercomment(exif_dict: dict, rating=None, keywords=None,
         exif_dict["Exif"].pop(piexif.ExifIFD.UserComment, None)
 
 
+def _apply_typed_exif_tag(exif_dict: dict, spec, value) -> bool:
+    """Write one typed (non-ASCII-map) EXIF tag. Mutates exif_dict.
+
+    ``""`` / None pops the tag — same clear semantics as
+    rating/keywords/title. Unparseable values are skipped silently.
+    Returns True when the tag was written or cleared.
+    """
+    kind, ifd_name, tag_id = spec
+    if value is None or str(value).strip() == "":
+        exif_dict[ifd_name].pop(tag_id, None)
+        return True
+    if kind == "ascii":
+        exif_dict[ifd_name][tag_id] = str(value).encode("utf-8")
+        return True
+    if kind == "short":
+        try:
+            v = int(value)
+        except (TypeError, ValueError):
+            return False
+        if not 0 <= v <= 0xFFFF:
+            return False
+        exif_dict[ifd_name][tag_id] = v
+        return True
+    if kind == "rational":
+        parsed = _parse_rational_str(value)
+        if parsed is None:
+            return False
+        exif_dict[ifd_name][tag_id] = parsed
+        return True
+    return False
+
+
 def apply_exif_tags(image_path: str, tags: dict) -> str:
     """Write EXIF tags to an existing image file. Modifies the file in-place.
 
     Requires piexif. tags is a dict of {name: value} where name is one of:
     artist, copyright, description/caption, make, model, software,
-    datetime/date, title, keywords (comma list), rating (int 0-5).
+    datetime/date, title, keywords (comma list), rating (int 0-5),
+    lens (ASCII), iso (int), fnumber/aperture ('2.8' / 'f/2.8'),
+    shutter ('1/250' / '2'), focal ('50').
     rating/keywords/title are packed into EXIF UserComment (PhotoS: payload);
     the rest are standard EXIF fields. All tags are written in a single
     load/dump/insert pass. ``rating=None`` / ``keywords=""`` / ``title=""``
     explicitly CLEAR the corresponding field (the PhotoS: segment is
-    dropped entirely when all three end up empty).
+    dropped entirely when all three end up empty); ``""``/None on a typed
+    field (lens/iso/fnumber/shutter/focal) removes that EXIF tag. Typed
+    fields with unparseable values are skipped.
 
     Returns a message string describing what was written.
     """
@@ -1735,20 +1831,22 @@ def apply_exif_tags(image_path: str, tags: dict) -> str:
         _write_usercomment(exif_dict, meta["rating"], meta["keywords"],
                            meta["title"], existing_text=human)
 
-    # remaining tags → standard EXIF fields
+    # remaining tags → standard EXIF fields (ASCII map + typed fields)
+    written = [n for n in tags if n in ("rating", "keywords", "title")]
     tag_map = _get_exif_tag_map()
     for name, value in tags.items():
         if name in ("rating", "keywords", "title"):
             continue
-        if name not in tag_map:
-            continue
-        ifd_name, tag_id = tag_map[name]
-        exif_dict[ifd_name][tag_id] = str(value).encode("utf-8")
+        if name in tag_map:
+            ifd_name, tag_id = tag_map[name]
+            exif_dict[ifd_name][tag_id] = str(value).encode("utf-8")
+            written.append(name)
+        elif name in _EXIF_TYPED_TAGS:
+            if _apply_typed_exif_tag(exif_dict, _EXIF_TYPED_TAGS[name], value):
+                written.append(name)
 
     piexif.insert(piexif.dump(exif_dict), image_path)
 
-    written = [n for n in tags if n in ("rating", "keywords", "title")
-               or n in tag_map]
     return f"EXIF written: {', '.join(written)}" if written else ""
 
 
@@ -1771,12 +1869,13 @@ def read_exif_metadata(path: str) -> dict:
     """Read key metadata from an image file (best-effort, never raises).
 
     Returns dict with keys: date, time, year, month, day, camera, make, iso,
-    focal, original (stem), rating (int or None), keywords (list[str]),
-    title, caption. Missing values are '' / None / [].
+    focal, lens, fnumber, shutter, original (stem), rating (int or None),
+    keywords (list[str]), title, caption. Missing values are '' / None / [].
     """
     base = {
         "date": "", "time": "", "year": "", "month": "", "day": "",
         "camera": "", "make": "", "iso": "", "focal": "",
+        "lens": "", "fnumber": "", "shutter": "",
         "original": Path(path).stem,
         "rating": None, "keywords": [], "title": "", "caption": "",
     }
@@ -1794,6 +1893,17 @@ def read_exif_metadata(path: str) -> dict:
             if cap:
                 base["caption"] = _exif_bytes(cap).decode(
                     "utf-8", errors="ignore").strip("\x00")
+            exif_ifd = d.get("Exif", {})
+            lens = _exif_bytes(exif_ifd.get(piexif.ExifIFD.LensModel))
+            if lens:
+                base["lens"] = lens.decode(
+                    "utf-8", errors="ignore").strip("\x00 ")
+            fnumber = _fmt_fnumber(exif_ifd.get(piexif.ExifIFD.FNumber))
+            if fnumber:
+                base["fnumber"] = fnumber
+            shutter = _fmt_shutter(exif_ifd.get(piexif.ExifIFD.ExposureTime))
+            if shutter:
+                base["shutter"] = shutter
         except Exception:
             pass
 
