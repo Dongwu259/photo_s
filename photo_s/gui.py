@@ -385,6 +385,14 @@ STRINGS = {
         "review_prev": "◀ 上一张",
         "review_next": "下一张 ▶",
         "review_none": "请先添加图片",
+        "review_shooting": "拍摄信息",
+        "review_make": "品牌",
+        "review_model": "型号",
+        "review_lens": "镜头",
+        "review_iso": "ISO",
+        "review_shutter": "快门(如 1/250)",
+        "review_aperture": "光圈(如 2.8)",
+        "review_date": "日期(YYYY:MM:DD HH:MM:SS)",
         "analyze_title": "曝光统计",
         "analyze_none": "请先在文件列表中选择一张图片",
         "analyze_err": "无法读取该图片",
@@ -569,6 +577,24 @@ STRINGS = {
         "hash_all_ok": "全部一致",
         "hash_open": "打开",
         "hash_no_files": "没有要哈希的文件",
+        # ── Batch rename ──
+        "rename_btn": "重命名",
+        "rename_title": "批量重命名",
+        "rename_pattern_lbl": "命名模板",
+        "rename_mode_inplace": "就地重命名",
+        "rename_mode_copy": "复制到目录",
+        "rename_overwrite": "覆盖同名文件",
+        "rename_col_old": "原文件名",
+        "rename_col_new": "新文件名",
+        "rename_col_status": "状态",
+        "rename_status_conflict": "冲突·自动加后缀",
+        "rename_conflict_note": "批内重名，实际将保存为 {name}",
+        "rename_counts": "{n} 个文件 · {c} 个冲突 · {e} 个错误",
+        "rename_preview_updating": "预览更新中…",
+        "rename_need_dir": "请先选择输出目录",
+        "rename_execute": "执行重命名",
+        "rename_confirm": "将按预览重命名 {n} 个文件，此操作不可撤销。继续？",
+        "rename_done": "完成：{ok} 个成功（{c} 个自动加后缀）· {e} 个失败",
         # ── Presets ──
         "presets_title": "预设",
         "presets_list": "预设列表",
@@ -584,6 +610,13 @@ STRINGS = {
         "presets_load_failed": "加载失败: {name}",
         "presets_empty": "（空）",
         "presets_confirm_delete": "删除预设 {name}？",
+        # ── Multi-image compare ──
+        "compare_btn": "对比",
+        "compare_view_title": "多图对比",
+        "compare_need_two": "请勾选至少 2 张图片进行对比（最多显示前 4 张）",
+        "compare_hint": "滚轮缩放 · 左键拖拽平移（均仅当前图）· 双击全部复位",
+        "compare_sync_zoom": "同步缩放",
+        "compare_loading": "加载中…",
     },
     "en": {
         "window_title": "PhotoS — Batch Image Compression & Conversion",
@@ -791,6 +824,14 @@ STRINGS = {
         "review_prev": "◀ Prev",
         "review_next": "Next ▶",
         "review_none": "Add images first",
+        "review_shooting": "Shooting info",
+        "review_make": "Make",
+        "review_model": "Model",
+        "review_lens": "Lens",
+        "review_iso": "ISO",
+        "review_shutter": "Shutter (e.g. 1/250)",
+        "review_aperture": "Aperture (e.g. 2.8)",
+        "review_date": "Date (YYYY:MM:DD HH:MM:SS)",
         "analyze_title": "Exposure Stats",
         "analyze_none": "Select an image in the file list first",
         "analyze_err": "Cannot read that image",
@@ -975,6 +1016,24 @@ STRINGS = {
         "hash_all_ok": "All OK",
         "hash_open": "Open",
         "hash_no_files": "Nothing to hash",
+        # ── Batch rename ──
+        "rename_btn": "Rename",
+        "rename_title": "Batch Rename",
+        "rename_pattern_lbl": "Name template",
+        "rename_mode_inplace": "Rename in place",
+        "rename_mode_copy": "Copy to folder",
+        "rename_overwrite": "Overwrite existing files",
+        "rename_col_old": "Original",
+        "rename_col_new": "New name",
+        "rename_col_status": "Status",
+        "rename_status_conflict": "Conflict · auto-suffix",
+        "rename_conflict_note": "Duplicate name in batch; will be saved as {name}",
+        "rename_counts": "{n} files · {c} conflicts · {e} errors",
+        "rename_preview_updating": "Updating preview…",
+        "rename_need_dir": "Choose an output folder first",
+        "rename_execute": "Rename files",
+        "rename_confirm": "Rename {n} files as previewed? This cannot be undone.",
+        "rename_done": "Done: {ok} renamed ({c} auto-suffixed) · {e} failed",
         # ── Presets ──
         "presets_title": "Presets",
         "presets_list": "Presets",
@@ -990,6 +1049,13 @@ STRINGS = {
         "presets_load_failed": "Failed to load: {name}",
         "presets_empty": "(empty)",
         "presets_confirm_delete": "Delete preset {name}?",
+        # ── Multi-image compare ──
+        "compare_btn": "Compare",
+        "compare_view_title": "Compare Images",
+        "compare_need_two": "Check at least 2 images to compare (up to 4 shown)",
+        "compare_hint": "Wheel to zoom · drag to pan (both apply to the image under the cursor) · double-click resets all",
+        "compare_sync_zoom": "Sync zoom",
+        "compare_loading": "Loading…",
     },
 }
 
@@ -1121,6 +1187,15 @@ def _open_image_safe(path):
         return _get_image(path)
 
 
+def _exif_datetime_str(meta):
+    """Normalize meta['date']/['time'] ('YYYY-MM-DD' / 'HH-MM-SS' as read
+    by read_exif_metadata) into the EXIF DateTimeOriginal form
+    'YYYY:MM:DD HH:MM:SS' shown in the review editor's date field."""
+    d = (meta.get("date") or "").replace("-", ":")
+    t = (meta.get("time") or "").replace("-", ":")
+    return (d + " " + t).strip()
+
+
 def canvas_unbind_safe(widget):
     """Drop any leftover global mousewheel binding from a destroyed panel.
 
@@ -1132,6 +1207,55 @@ def canvas_unbind_safe(widget):
         widget.unbind_all("<MouseWheel>")
     except Exception:
         pass
+
+
+class _ZoomPanState:
+    """Tk-free zoom/pan state for the multi-image compare viewer.
+
+    zoom = 1.0 fits the whole image; the visible window is the 1/zoom
+    fraction of the source centered on (fx, fy) — image-fraction
+    coordinates in [0, 1]. Each compare panel owns one instance: wheel
+    zoom and drag pan target a single instance by default, or every
+    instance when the viewer's sync-zoom checkbox is on. Pure math:
+    no tkinter import, fully unit-testable.
+    """
+
+    MIN_ZOOM = 1.0
+    MAX_ZOOM = 16.0
+
+    def __init__(self):
+        self.zoom = self.MIN_ZOOM
+        self.fx = 0.5
+        self.fy = 0.5
+
+    def fit(self):
+        """Reset to the fit-the-whole-image view."""
+        self.zoom = self.MIN_ZOOM
+        self.fx = self.fy = 0.5
+
+    def zoom_at(self, factor):
+        """Scale zoom by ``factor``, clamped to [1, 16]. Landing back on
+        1.0 re-centers the view (a fit view has nothing to pan)."""
+        self.zoom = min(self.MAX_ZOOM,
+                        max(self.MIN_ZOOM, self.zoom * factor))
+        if self.zoom <= self.MIN_ZOOM:
+            self.fx = self.fy = 0.5
+        else:
+            self._clamp_center()
+
+    def pan(self, dfx, dfy):
+        """Move the center by (dfx, dfy) in image-fraction units."""
+        self.fx += dfx
+        self.fy += dfy
+        self._clamp_center()
+
+    def _clamp_center(self):
+        # The visible half-extent is 1/(2*zoom); keep the center at least
+        # that far from every edge so the window never leaves the image.
+        # At zoom == 1 the range degenerates to 0.5 — pan is a no-op.
+        m = 0.5 / self.zoom
+        self.fx = min(1.0 - m, max(m, self.fx))
+        self.fy = min(1.0 - m, max(m, self.fy))
 
 
 # ── Main Application ────────────────────────────────────────────────────────
@@ -1616,12 +1740,26 @@ class PhotoSApp:
         )
         self.dedup_btn.pack(side="left", padx=(8, 0))
 
+        self.rename_btn = FlatButton(
+            wf, text=self._t("rename_btn"), command=self._show_rename,
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+        )
+        self.rename_btn.pack(side="left", padx=(8, 0))
+
         self.gallery_btn = FlatButton(
             wf, text=self._t("gallery_btn"), command=self._show_gallery_export,
             bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
             border_color=COLORS["border"], font=FONT_SMALL,
         )
         self.gallery_btn.pack(side="left", padx=(8, 0))
+
+        self.compare_btn = FlatButton(
+            wf, text=self._t("compare_btn"), command=self._show_compare,
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+        )
+        self.compare_btn.pack(side="left", padx=(8, 0))
 
         self.undo_btn = FlatButton(
             wf, text=self._t("undo"), command=self._undo,
@@ -3658,18 +3796,26 @@ class PhotoSApp:
                 meta[p] = read_exif_metadata(p)
             except Exception:
                 meta[p] = {"rating": None, "keywords": [], "title": "",
-                           "caption": ""}
+                           "caption": "", "date": "", "time": "",
+                           "camera": "", "make": "", "iso": "",
+                           "focal": "", "lens": "", "fnumber": "",
+                           "shutter": ""}
             if progress_cb:
                 progress_cb(i + 1, total)
         return meta
 
-    def _review_save(self, path, rating=None, keywords=None, title=None):
-        """Sync: write rating/keywords/title diffs into ``path``'s EXIF
-        (PhotoS: UserComment segment; only changed fields are touched).
-        Returns (ok, message, revert, entry): revert undoes this exact
-        write (None when nothing changed); entry is the global undo
-        entry pushed (None likewise). Tk-free so tests can call it
-        directly."""
+    def _review_save(self, path, rating=None, keywords=None, title=None,
+                     make=None, model=None, lens=None, iso=None,
+                     shutter=None, aperture=None, date=None):
+        """Sync: write rating/keywords/title + camera/lens/shooting-field
+        diffs into ``path``'s EXIF (PhotoS: UserComment segment for the
+        first three; standard EXIF tags for the rest — ``aperture`` maps
+        to the engine's ``fnumber`` key, ``date`` to ``datetime``).
+        Only changed fields are touched: None leaves a field alone, a
+        string ("" included) writes/clears it. Returns (ok, message,
+        revert, entry): revert undoes this exact write (None when
+        nothing changed); entry is the global undo entry pushed (None
+        likewise). Tk-free so tests can call it directly."""
         from .engine import apply_exif_tags, read_exif_metadata
 
         m = read_exif_metadata(path)
@@ -3682,11 +3828,32 @@ class PhotoSApp:
         tl = (title or "").strip()
         if tl != (m.get("title") or ""):
             tags["title"] = tl
+        # (argument, meta key holding the current value, engine tag);
+        # meta key None → the current value is the normalized
+        # date+time pair (EXIF DateTimeOriginal form).
+        prev_extra = {}
+        for value, meta_key, tag in (
+                (make, "make", "make"),
+                (model, "camera", "model"),
+                (lens, "lens", "lens"),
+                (iso, "iso", "iso"),
+                (shutter, "shutter", "shutter"),
+                (aperture, "fnumber", "fnumber"),
+                (date, None, "datetime")):
+            if value is None:
+                continue
+            cur = (_exif_datetime_str(m) if meta_key is None
+                   else str(m.get(meta_key) or "").strip())
+            prev_extra[tag] = cur
+            v = str(value).strip()
+            if v != cur:
+                tags[tag] = v
         if not tags:
             return True, "", None, None
         prev = {"rating": m.get("rating"),
                 "keywords": ",".join(m.get("keywords") or []),
                 "title": m.get("title") or ""}
+        prev.update(prev_extra)
         try:
             msg = apply_exif_tags(path, tags)
         except Exception as e:
@@ -3700,6 +3867,8 @@ class PhotoSApp:
             t = {"rating": prev["rating"],
                  "keywords": prev["keywords"],
                  "title": prev["title"]}
+            for tag in prev_extra:
+                t[tag] = prev[tag]
             apply_exif_tags(path, t)
 
         entry = self._push_undo(
@@ -3839,6 +4008,36 @@ class PhotoSApp:
             border_color=COLORS["border"], font=FONT_SMALL, padx=10, pady=3
         ).pack(side="left", padx=(8, 0))
 
+        # Shooting-info editor: make / model / lens / ISO / shutter /
+        # aperture / date. Filled from the current image's metadata on
+        # every navigation; on save, unchanged fields go out as None so
+        # only real edits hit the file (_review_save diffs again anyway).
+        exif = tk.Frame(win, bg=COLORS["bg"])
+        exif.pack(fill="x", padx=20, pady=(0, 4))
+        tk.Label(exif, text=self._t("review_shooting"), font=FONT_BODY,
+                 fg=COLORS["text"], bg=COLORS["bg"]).grid(
+            row=0, column=0, rowspan=2, sticky="nw", pady=2)
+        exif_rows = (
+            (("make", "review_make", 12), ("model", "review_model", 14),
+             ("lens", "review_lens", 18), ("iso", "review_iso", 6)),
+            (("shutter", "review_shutter", 9),
+             ("aperture", "review_aperture", 7),
+             ("date", "review_date", 20)),
+        )
+        exif_vars = {}
+        for r, row_fields in enumerate(exif_rows):
+            col = 1
+            for name, lbl_key, width in row_fields:
+                tk.Label(exif, text=self._t(lbl_key), font=FONT_SMALL,
+                         fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+                    row=r, column=col, sticky="w", padx=(12, 4), pady=1)
+                var = tk.StringVar()
+                exif_vars[name] = var
+                ttk.Entry(exif, textvariable=var, font=FONT_SMALL,
+                          width=width).grid(
+                    row=r, column=col + 1, sticky="w", pady=1)
+                col += 2
+
         # Filter row
         filt = tk.Frame(win, bg=COLORS["bg"])
         filt.pack(fill="x", padx=20, pady=(0, 14))
@@ -3897,15 +4096,40 @@ class PhotoSApp:
             status_lbl.configure(text=text,
                                  fg=color or COLORS["text_secondary"])
 
+        def _fill_exif(m):
+            """Push a metadata dict into the shooting-info entries."""
+            exif_vars["make"].set(m.get("make") or "")
+            exif_vars["model"].set(m.get("camera") or "")
+            exif_vars["lens"].set(m.get("lens") or "")
+            exif_vars["iso"].set(str(m.get("iso") or ""))
+            exif_vars["shutter"].set(m.get("shutter") or "")
+            exif_vars["aperture"].set(m.get("fnumber") or "")
+            exif_vars["date"].set(_exif_datetime_str(m))
+
         def save_current():
-            """Write rating/keywords/title diffs for the current image."""
+            """Write rating/keywords/title + shooting-info diffs for the
+            current image (unchanged shooting fields go out as None)."""
             if not state["seq"]:
                 return True
             p = state["seq"][state["idx"]]
+            m0 = state["meta"].get(p, {})
+
+            def _arg(name, cur):
+                v = exif_vars[name].get().strip()
+                return v if v != cur else None
+
             ok, msg, revert, entry = self._review_save(
                 p, rating=state["rating"],
                 keywords=keywords_var.get(),
-                title=title_var.get())
+                title=title_var.get(),
+                make=_arg("make", (m0.get("make") or "").strip()),
+                model=_arg("model", (m0.get("camera") or "").strip()),
+                lens=_arg("lens", (m0.get("lens") or "").strip()),
+                iso=_arg("iso", str(m0.get("iso") or "").strip()),
+                shutter=_arg("shutter", (m0.get("shutter") or "").strip()),
+                aperture=_arg("aperture",
+                              (m0.get("fnumber") or "").strip()),
+                date=_arg("date", _exif_datetime_str(m0)))
             if not ok:
                 set_status(msg, COLORS["danger"])
                 return False
@@ -3915,6 +4139,15 @@ class PhotoSApp:
                              in keywords_var.get().strip().split(",")
                              if k.strip()]
             m["title"] = title_var.get().strip()
+            m["make"] = exif_vars["make"].get().strip()
+            m["camera"] = exif_vars["model"].get().strip()
+            m["lens"] = exif_vars["lens"].get().strip()
+            m["iso"] = exif_vars["iso"].get().strip()
+            m["shutter"] = exif_vars["shutter"].get().strip()
+            m["fnumber"] = exif_vars["aperture"].get().strip()
+            dt = exif_vars["date"].get().strip().replace(" ", ":").split(":")
+            m["date"] = "-".join(dt[:3]) if len(dt) >= 3 else ""
+            m["time"] = "-".join(dt[3:6]) if len(dt) >= 6 else ""
             if revert is not None:
                 # dialog-scoped undo for THIS image (⌘Z in the lightbox)
                 state["reverts"].setdefault(p, []).append((entry, revert))
@@ -3952,6 +4185,7 @@ class PhotoSApp:
             state["rating"] = m.get("rating")
             keywords_var.set(",".join(m.get("keywords") or []))
             title_var.set(m.get("title") or "")
+            _fill_exif(m)
             _restyle_rating()
             set_status(self._t("undo_done"), COLORS["accent"])
 
@@ -3985,6 +4219,7 @@ class PhotoSApp:
             state["rating"] = m.get("rating")
             keywords_var.set(",".join(m.get("keywords") or []))
             title_var.set(m.get("title") or "")
+            _fill_exif(m)
             pos_lbl.configure(text=self._t("review_pos", i=idx + 1,
                                            n=len(state["seq"])))
             parts = []
@@ -4514,6 +4749,336 @@ class PhotoSApp:
         self._after_file_dialog()
         if folder:
             self.output_dir.set(folder)
+
+    # ── Batch rename (live preview) ──────────────────────────────────────────
+
+    def _rename_preview(self, paths, pattern, output_dir=None,
+                        overwrite=False):
+        """Sync: dry-run the rename and flag in-batch name collisions.
+
+        rename_files(dry_run=True) only consults the filesystem, so two
+        inputs mapping to the same target are both reported "ok" against
+        the same path. Replay the real run here: earlier outputs occupy
+        their names, and a colliding row is pushed through the same
+        _unique_target loop the engine runs (quirks included — a target
+        whose ``_1`` variant is also taken becomes ``name_1_2``, exactly
+        like the real run) and marked "conflict". With overwrite=True no
+        suffixing happens at all, so the dry-run rows stand as-is.
+
+        Returns rows of {"input", "output", "status", "error"} with
+        status "ok" | "conflict" | "error". Tk-free so tests can call it
+        directly.
+        """
+        from .rename import rename_files
+        rows = rename_files(list(paths), pattern, output_dir=output_dir,
+                            overwrite=overwrite, dry_run=True)
+        if overwrite:
+            return rows
+        taken = set()
+        for row in rows:
+            if row["status"] != "ok" or not row["output"]:
+                continue
+            target = row["output"]
+            # The dry-run output is filesystem-free by construction; the
+            # exists() half only fires for case-insensitive-FS collisions
+            # the exact-match `taken` set cannot see.
+            if target not in taken and not os.path.exists(target):
+                taken.add(target)
+                continue
+            p = Path(target)
+            counter = 1
+            while str(p) in taken or p.exists():
+                p = p.with_name("{}_{}{}".format(p.stem, counter, p.suffix))
+                counter += 1
+            row["output"] = str(p)
+            row["status"] = "conflict"
+            row["error"] = self._t("rename_conflict_note", name=p.name)
+            taken.add(str(p))
+        return rows
+
+    def _show_rename(self):
+        """Batch rename with live preview: template + options on top, a
+        Treeview mapping old -> new names (in-batch conflicts and errors
+        flagged), refreshed by a debounced background dry-run on every
+        change. Execute confirms, runs the real rename in a worker, then
+        refreshes the main file list. Not wired into the undo stack."""
+        from .rename import rename_files
+
+        files = self._checked_files()
+        if not files:
+            messagebox.showinfo(self._t("rename_title"),
+                                self._t("check_none"))
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title(self._t("rename_title"))
+        win.geometry("880x560")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+        canvas_unbind_safe(win)
+
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="x", padx=20, pady=(16, 0))
+        body.columnconfigure(2, weight=1)
+
+        pattern_var = tk.StringVar(
+            value=self.rename_pattern.get().strip() or "{date}_{seq}")
+        mode_var = tk.StringVar(value="inplace")
+        dir_var = tk.StringVar(value="")
+        overwrite_var = tk.BooleanVar(value=False)
+
+        tk.Label(body, text=self._t("rename_pattern_lbl"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=0, column=0, sticky="w", padx=(0, 10), pady=(0, 4))
+        ttk.Entry(body, textvariable=pattern_var, font=FONT_BODY).grid(
+            row=0, column=1, columnspan=3, sticky="ew", pady=(0, 4))
+        tk.Label(body, text=self._t("rename_vars"), font=FONT_TINY,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=1, column=1, columnspan=3, sticky="w", pady=(0, 8))
+
+        ttk.Radiobutton(body, text=self._t("rename_mode_inplace"),
+                        variable=mode_var, value="inplace",
+                        command=lambda: _options_changed()).grid(
+            row=2, column=0, sticky="w", padx=(0, 10), pady=(0, 8))
+        ttk.Radiobutton(body, text=self._t("rename_mode_copy"),
+                        variable=mode_var, value="copy",
+                        command=lambda: _options_changed()).grid(
+            row=2, column=1, sticky="w", padx=(0, 10), pady=(0, 8))
+        dir_entry = ttk.Entry(body, textvariable=dir_var, font=FONT_BODY)
+        dir_entry.grid(row=2, column=2, sticky="ew", pady=(0, 8))
+
+        def _browse_dir():
+            if self._dlg_cooldown_active():
+                return
+            folder = filedialog.askdirectory(
+                title=self._t("rename_mode_copy"))
+            self._after_file_dialog()
+            if folder:
+                dir_var.set(folder)
+
+        browse_btn = FlatButton(body, text=self._t("browse"),
+                                command=_browse_dir,
+                                bg=COLORS["card"], fg=COLORS["text"],
+                                hover_bg=COLORS["bg"],
+                                border_color=COLORS["border"],
+                                font=FONT_SMALL)
+        browse_btn.grid(row=2, column=3, sticky="w", padx=(8, 0),
+                        pady=(0, 8))
+
+        ttk.Checkbutton(body, text=self._t("rename_overwrite"),
+                        variable=overwrite_var,
+                        command=lambda: _queue_preview()).grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(0, 4))
+
+        holder = tk.Frame(win, bg=COLORS["bg"])
+        holder.pack(fill="both", expand=True, padx=20, pady=8)
+        tree = ttk.Treeview(holder, columns=("old", "new", "status"),
+                            show="headings", height=14)
+        tree.heading("old", text=self._t("rename_col_old"))
+        tree.heading("new", text=self._t("rename_col_new"))
+        tree.heading("status", text=self._t("rename_col_status"))
+        tree.column("old", width=300, anchor="w")
+        tree.column("new", width=300, anchor="w")
+        tree.column("status", width=220, anchor="w")
+        tree.tag_configure("conflict", foreground=COLORS["warning"])
+        tree.tag_configure("error", foreground=COLORS["danger"])
+        sb = ttk.Scrollbar(holder, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+
+        footer = tk.Frame(win, bg=COLORS["bg"])
+        footer.pack(fill="x", padx=20, pady=(4, 16))
+
+        # Worker→UI marshalling queue (see dedup dialog for rationale)
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if win.winfo_exists():
+                win.after(80, drain)
+
+        win.after(80, drain)
+
+        state = {"after_id": None, "token": 0, "rows": []}
+
+        def _status_text(row):
+            if row["status"] == "conflict":
+                return self._t("rename_status_conflict")
+            if row["status"] == "error":
+                return row["error"]
+            return ""
+
+        def _render_rows(rows):
+            tree.delete(*tree.get_children())
+            for row in rows:
+                new = os.path.basename(row["output"]) \
+                    if row["output"] else "—"
+                tag = row["status"] \
+                    if row["status"] in ("conflict", "error") else ""
+                tree.insert("", "end", values=(
+                    os.path.basename(row["input"]), new,
+                    _status_text(row)), tags=(tag,) if tag else ())
+
+        def _current_options():
+            out = dir_var.get().strip() if mode_var.get() == "copy" else ""
+            return pattern_var.get(), out or None, overwrite_var.get()
+
+        def _queue_preview(*_):
+            if not win.winfo_exists():
+                return
+            if state["after_id"] is not None:
+                try:
+                    win.after_cancel(state["after_id"])
+                except tk.TclError:
+                    pass
+            state["after_id"] = win.after(300, _start_preview)
+
+        def _start_preview():
+            state["after_id"] = None
+            if not win.winfo_exists():
+                return
+            pattern, out, ow = _current_options()
+            if mode_var.get() == "copy" and not out:
+                state["rows"] = []
+                state["token"] += 1
+                _render_rows([])
+                status_lbl.configure(text=self._t("rename_need_dir"),
+                                     fg=COLORS["warning"])
+                execute_btn.configure(state="disabled")
+                return
+            execute_btn.configure(state="normal")
+            state["token"] += 1
+            token = state["token"]
+            status_lbl.configure(text=self._t("rename_preview_updating"),
+                                 fg=COLORS["text_secondary"])
+
+            def run():
+                try:
+                    rows = self._rename_preview(files, pattern,
+                                                output_dir=out,
+                                                overwrite=ow)
+                except Exception as e:
+                    schedule(lambda err=str(e): _preview_failed(token, err))
+                    return
+                schedule(lambda: _preview_done(token, rows))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        def _preview_failed(token, err):
+            if not win.winfo_exists() or token != state["token"]:
+                return
+            status_lbl.configure(text=self._t("op_failed", err=err),
+                                 fg=COLORS["danger"])
+
+        def _preview_done(token, rows):
+            if not win.winfo_exists() or token != state["token"]:
+                return
+            state["rows"] = rows
+            _render_rows(rows)
+            conflicts = sum(1 for r in rows if r["status"] == "conflict")
+            errors = sum(1 for r in rows if r["status"] == "error")
+            status_lbl.configure(
+                text=self._t("rename_counts", n=len(rows), c=conflicts,
+                             e=errors),
+                fg=COLORS["warning"] if (conflicts or errors)
+                else COLORS["text_secondary"])
+
+        def _options_changed():
+            copying = mode_var.get() == "copy"
+            dir_entry.configure(state="normal" if copying else "disabled")
+            browse_btn.configure(state="normal" if copying else "disabled")
+            _queue_preview()
+
+        def _execute():
+            pattern, out, ow = _current_options()
+            if mode_var.get() == "copy" and not out:
+                messagebox.showinfo(self._t("rename_title"),
+                                    self._t("rename_need_dir"))
+                return
+            if not messagebox.askyesno(
+                    self._t("rename_title"),
+                    self._t("rename_confirm", n=len(files))):
+                return
+            # conflict count from the last preview — the real run resolves
+            # them via _N suffixes, so its own rows only know ok/error
+            conflicts = sum(1 for r in state["rows"]
+                            if r["status"] == "conflict")
+            execute_btn.configure(state="disabled")
+
+            def run():
+                try:
+                    results = rename_files(list(files), pattern,
+                                           output_dir=out, overwrite=ow)
+                except Exception as e:
+                    schedule(lambda err=str(e): _execute_failed(err))
+                    return
+                schedule(lambda: _executed(results, conflicts))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        def _execute_failed(err):
+            if not win.winfo_exists():
+                return
+            execute_btn.configure(state="normal")
+            status_lbl.configure(text=self._t("op_failed", err=err),
+                                 fg=COLORS["danger"])
+
+        def _executed(results, conflicts):
+            if not win.winfo_exists():
+                return
+            execute_btn.configure(state="normal")
+            ok = sum(1 for r in results if r["status"] == "ok")
+            errors = sum(1 for r in results if r["status"] == "error")
+            if mode_var.get() == "inplace":
+                # keep the main list pointing at the renamed paths
+                renamed = {r["input"]: r["output"] for r in results
+                           if r["status"] == "ok" and r["output"]}
+                if renamed:
+                    self.files = [renamed.get(f, f) for f in self.files]
+                    self._checked = {renamed.get(f, f)
+                                     for f in self._checked}
+                    files[:] = [renamed.get(f, f) for f in files]
+            self._refresh_file_list()
+            state["rows"] = results
+            _render_rows(results)
+            msg = self._t("rename_done", ok=ok, c=conflicts, e=errors)
+            status_lbl.configure(text=msg, fg=COLORS["accent"])
+            messagebox.showinfo(self._t("rename_title"), msg)
+
+        def _on_close():
+            if state["after_id"] is not None:
+                try:
+                    win.after_cancel(state["after_id"])
+                except tk.TclError:
+                    pass
+                state["after_id"] = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+
+        execute_btn = FlatButton(
+            footer, text=self._t("rename_execute"), command=_execute,
+            bg=COLORS["accent"], hover_bg=COLORS["accent_hover"])
+        execute_btn.pack(side="left")
+        status_lbl = tk.Label(footer, text="", font=FONT_SMALL,
+                              fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status_lbl.pack(side="left", padx=(12, 0))
+        FlatButton(
+            footer, text=self._t("close"), command=_on_close,
+            bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
+            border_color=COLORS["border"]).pack(side="right")
+
+        pattern_var.trace_add("write", lambda *_: _queue_preview())
+        dir_var.trace_add("write", lambda *_: _queue_preview())
+        _options_changed()          # syncs dir-entry state + first preview
 
     # ── Processing ───────────────────────────────────────────────────────────
 
@@ -5952,6 +6517,203 @@ class PhotoSApp:
         messagebox.showinfo(self._t("cmp_no_result"),
                             self._t("cmp_no_result_body"))
 
+    def _show_compare(self):
+        """Multi-image compare viewer: 2-4 checked images side by side on
+        canvases. Wheel-zoom and drag-pan apply only to the panel under
+        the cursor; the "sync zoom" checkbox makes the wheel zoom every
+        panel together. Double-click resets all panels. Each redraw
+        renders only the visible region (PIL resize with a source box),
+        debounced to ~60ms; originals are decoded once in a worker
+        thread."""
+        from PIL import Image, ImageTk
+
+        files = self._checked_files()
+        if len(files) < 2:
+            messagebox.showinfo(self._t("compare_view_title"),
+                                self._t("compare_need_two"))
+            return
+        files = files[:4]
+
+        win = tk.Toplevel(self.root)
+        win.title(self._t("compare_view_title"))
+        win.geometry("1100x640")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+        canvas_unbind_safe(win)
+
+        panels = []
+        pending = [None]  # after() id of the debounced redraw
+
+        tk.Label(win, text=self._t("compare_hint"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
+            pady=(12, 0))
+
+        row = tk.Frame(win, bg=COLORS["bg"])
+        row.pack(fill="both", expand=True, padx=16, pady=12)
+
+        for i, path in enumerate(files):
+            col = tk.Frame(row, bg=COLORS["card"], bd=0, highlightthickness=0)
+            col.pack(side="left", fill="both", expand=True,
+                     padx=(0 if i == 0 else 4, 0))
+            tk.Label(col, text=os.path.basename(path), font=FONT_TINY,
+                     fg=COLORS["text_secondary"], bg=COLORS["card"]).pack(
+                fill="x", padx=6, pady=(4, 0))
+            canvas = tk.Canvas(col, bg=COLORS["card"], highlightthickness=0,
+                               bd=0)
+            canvas.pack(fill="both", expand=True, padx=4, pady=4)
+            panels.append({"path": path, "canvas": canvas, "img": None,
+                           "iw": 0, "ih": 0, "scale": None, "photo": None,
+                           "error": False, "state": _ZoomPanState()})
+
+        def _schedule_redraw():
+            # Debounce: wheel/drag/Configure storms merge into one redraw.
+            if pending[0] is None:
+                pending[0] = win.after(60, _redraw)
+
+        def _redraw():
+            pending[0] = None
+            if not win.winfo_exists():
+                return
+            for p in panels:
+                canvas = p["canvas"]
+                cw, ch = canvas.winfo_width(), canvas.winfo_height()
+                if cw < 2 or ch < 2:
+                    continue  # not mapped yet; <Configure> will retrigger
+                img = p["img"]
+                if img is None:
+                    canvas.delete("all")
+                    canvas.create_text(
+                        cw / 2, ch / 2, font=FONT_SMALL,
+                        text=self._t("cannot_load") if p["error"]
+                        else self._t("compare_loading"),
+                        fill=COLORS["danger"] if p["error"]
+                        else COLORS["text_secondary"])
+                    continue
+                iw, ih = p["iw"], p["ih"]
+                # Visible source window: the 1/zoom fraction centered on
+                # (fx, fy) — always on-image thanks to the state clamp.
+                st = p["state"]
+                vw, vh = iw / st.zoom, ih / st.zoom
+                left = min(max(st.fx * iw - vw / 2, 0.0), iw - vw)
+                top = min(max(st.fy * ih - vh / 2, 0.0), ih - vh)
+                # Fit the window into the canvas preserving aspect (the
+                # canvas background letterboxes the difference).
+                scale = min(cw / vw, ch / vh)
+                tw = max(1, int(vw * scale))
+                th = max(1, int(vh * scale))
+                p["scale"] = scale
+                view = img.resize((tw, th), Image.LANCZOS,
+                                  box=(left, top, left + vw, top + vh))
+                photo = ImageTk.PhotoImage(view)
+                p["photo"] = photo  # keep a reference or it is GC'd
+                canvas.delete("all")
+                canvas.create_image(cw / 2, ch / 2, image=photo)
+
+        sync_zoom = tk.BooleanVar(value=False)
+
+        def _zoom_step(factor, p=None):
+            # Default: zoom only the panel under the cursor. With the
+            # "sync zoom" checkbox on, every panel zooms together.
+            if sync_zoom.get() or p is None:
+                for q_ in panels:
+                    q_["state"].zoom_at(factor)
+            else:
+                p["state"].zoom_at(factor)
+            _schedule_redraw()
+
+        def _make_wheel(p):
+            def _on_wheel(event):
+                # macOS trackpads/wheels give ±1-ish deltas, Windows ±120;
+                # only the direction matters here.
+                _zoom_step(1.1 if event.delta > 0 else 1 / 1.1, p)
+            return _on_wheel
+
+        drag = {"x": 0, "y": 0, "panel": None}
+
+        def _make_press(p):
+            def _on_press(event):
+                drag["x"], drag["y"], drag["panel"] = event.x, event.y, p
+            return _on_press
+
+        def _on_drag(event):
+            p = drag["panel"]
+            if p is None or p["img"] is None or not p["scale"]:
+                return
+            dx, dy = event.x - drag["x"], event.y - drag["y"]
+            drag["x"], drag["y"] = event.x, event.y
+            # The image follows the cursor, so the view center moves the
+            # other way. Pan only the panel under the cursor.
+            p["state"].pan(-dx / (p["scale"] * p["iw"]),
+                           -dy / (p["scale"] * p["ih"]))
+            _schedule_redraw()
+
+        def _on_double(_event):
+            # Global reset: re-fit every panel (zoom + center).
+            for p in panels:
+                p["state"].fit()
+            _schedule_redraw()
+
+        for p in panels:
+            c = p["canvas"]
+            c.bind("<Configure>", lambda _e: _schedule_redraw())
+            c.bind("<MouseWheel>", _make_wheel(p))
+            if sys.platform.startswith("linux"):
+                # X11 reports wheel scrolling as buttons 4/5, not
+                # <MouseWheel>.
+                c.bind("<Button-4>", lambda _e, p=p: _zoom_step(1.1, p))
+                c.bind("<Button-5>", lambda _e, p=p: _zoom_step(1 / 1.1, p))
+            c.bind("<ButtonPress-1>", _make_press(p))
+            c.bind("<B1-Motion>", _on_drag)
+            c.bind("<Double-Button-1>", _on_double)
+
+        bottom = tk.Frame(win, bg=COLORS["bg"])
+        bottom.pack(fill="x", padx=16, pady=(0, 12))
+        ttk.Checkbutton(bottom, text=self._t("compare_sync_zoom"),
+                        variable=sync_zoom).pack(side="left")
+        FlatButton(bottom, text=self._t("close"), command=win.destroy,
+                   bg=COLORS["accent"], hover_bg=COLORS["accent_hover"],
+                   font=FONT_BUTTON, padx=24, pady=6).pack(side="right")
+
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def _load_done(p, img):
+            p["img"] = img
+            p["iw"], p["ih"] = img.size
+            _schedule_redraw()
+
+        def _load_failed(p):
+            p["error"] = True
+            _schedule_redraw()
+
+        def _load_all():
+            for p in panels:
+                try:
+                    # convert() forces the decode here in the worker —
+                    # Image.open alone is lazy and would decode on the UI
+                    # thread at first paint.
+                    img = _open_image_safe(p["path"]).convert("RGB")
+                except Exception:
+                    schedule(lambda p=p: _load_failed(p))
+                else:
+                    schedule(lambda p=p, img=img: _load_done(p, img))
+
+        def drain():
+            if not win.winfo_exists():
+                return
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            win.after(80, drain)
+
+        threading.Thread(target=_load_all, daemon=True).start()
+        win.after(80, drain)
+        _schedule_redraw()  # paint the loading placeholders right away
+
     def _update_stats(self, result: BatchResult = None):
         """Update stats label at the bottom."""
         if result:
@@ -5988,11 +6750,12 @@ class PhotoSApp:
         try:
             # Keep cancel/preview/start and the file-add buttons enabled:
             # files can be added to the queue while a batch is processing.
-            # Gallery export is read-only on the originals, so it stays up
-            # too; review/dedup mutate files and are locked out.
+            # Gallery export and the compare viewer are read-only on the
+            # originals, so they stay up too; review/dedup mutate files
+            # and are locked out.
             if widget in (self.cancel_btn, self.start_btn, self.preview_btn,
                           self.add_files_btn, self.add_folder_btn,
-                          self.gallery_btn):
+                          self.gallery_btn, self.compare_btn):
                 return
             if isinstance(widget, (FlatButton, ttk.Combobox, ttk.Scale,
                                    ttk.Entry, ttk.Checkbutton, ttk.Radiobutton)):

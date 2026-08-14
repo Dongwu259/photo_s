@@ -133,6 +133,179 @@ class TestReviewHelpers:
         root.destroy()
 
 
+class TestReviewExifEditor:
+    """Camera/lens/shooting-field editing via _review_save: diff-only
+    writes, aperture→fnumber / date→datetime mapping, undo restore."""
+
+    def _fixed_meta(self, **over):
+        m = {"rating": None, "keywords": [], "title": "", "caption": "",
+             "date": "", "time": "", "camera": "", "make": "", "iso": "",
+             "focal": "", "lens": "", "fnumber": "", "shutter": ""}
+        m.update(over)
+        return m
+
+    def _capture_engine(self, monkeypatch, meta):
+        """Monkeypatch the engine: fixed metadata read + tag-dict capture."""
+        import photo_s.engine as engine_mod
+        monkeypatch.setattr(engine_mod, "read_exif_metadata",
+                            lambda path: meta)
+        calls = []
+        monkeypatch.setattr(engine_mod, "apply_exif_tags",
+                            lambda path, tags: calls.append(tags) or "ok")
+        return calls
+
+    def test_new_fields_mapped_into_tags(self, tmp_path, monkeypatch):
+        root, app = _make_app()
+        p = _img(tmp_path / "a.jpg")
+        calls = self._capture_engine(monkeypatch, self._fixed_meta())
+        ok, msg, revert, entry = app._review_save(
+            p, make="Canon", model="EOS R5", lens="RF50mm F1.2L",
+            iso="400", shutter="1/250", aperture="2.8",
+            date="2024:01:02 03:04:05")
+        assert ok
+        assert calls == [{"make": "Canon", "model": "EOS R5",
+                          "lens": "RF50mm F1.2L", "iso": "400",
+                          "shutter": "1/250", "fnumber": "2.8",
+                          "datetime": "2024:01:02 03:04:05"}], \
+            "aperture→fnumber and date→datetime, nothing else"
+        assert revert is not None and entry is not None
+        root.destroy()
+
+    def test_none_and_unchanged_fields_not_written(self, tmp_path,
+                                                   monkeypatch):
+        root, app = _make_app()
+        p = _img(tmp_path / "a.jpg")
+        calls = self._capture_engine(
+            monkeypatch,
+            self._fixed_meta(make="Canon", iso="400",
+                             date="2024-01-02", time="03-04-05"))
+        # identical values (int iso included) and None args → no write
+        ok, msg, _, _ = app._review_save(
+            p, make="Canon", iso=400, date="2024:01:02 03:04:05",
+            lens=None, shutter=None, aperture=None, model=None)
+        assert ok and msg == "" and calls == [], \
+            "no diff → engine must not be called at all"
+        # clearing a field that has a value IS a write
+        ok2, _, _, _ = app._review_save(p, make="")
+        assert ok2 and calls == [{"make": ""}]
+        root.destroy()
+
+    def test_revert_restores_old_values(self, tmp_path, monkeypatch):
+        root, app = _make_app()
+        p = _img(tmp_path / "a.jpg")
+        calls = self._capture_engine(
+            monkeypatch,
+            self._fixed_meta(make="Nikon", camera="Z6", lens="24-70",
+                             iso="100", shutter="1/60", fnumber="4.0",
+                             date="2023-05-06", time="07-08-09"))
+        ok, _, revert, _ = app._review_save(
+            p, make="Sony", iso="800", aperture="1.8",
+            date="2025:11:12 13:14:15")
+        assert ok and revert is not None
+        assert calls[0] == {"make": "Sony", "iso": "800",
+                            "fnumber": "1.8",
+                            "datetime": "2025:11:12 13:14:15"}
+        revert()
+        assert calls[1] == {"rating": None, "keywords": "", "title": "",
+                            "make": "Nikon", "iso": "100",
+                            "fnumber": "4.0",
+                            "datetime": "2023:05:06 07:08:09"}, \
+            "revert writes the pre-save values back (plus the usual " \
+            "rating/keywords/title full restore); untouched fields " \
+            "(lens/shutter) stay out of both writes"
+        root.destroy()
+
+    def test_exif_fields_roundtrip_jpeg(self, tmp_path):
+        pytest.importorskip("piexif")
+        from photo_s.engine import read_exif_metadata
+        root, app = _make_app()
+        p = _img(tmp_path / "a.jpg")
+        ok, msg, _, _ = app._review_save(
+            p, make="Canon", model="EOS R5", lens="RF50mm F12L",
+            iso="400", shutter="1/250", aperture="2.8",
+            date="2024:01:02 03:04:05")
+        assert ok, msg
+        m = read_exif_metadata(p)
+        assert m["make"] == "Canon"
+        assert m["camera"] == "EOS R5"
+        assert m["lens"] == "RF50mm F12L"
+        assert m["iso"] == "400"
+        assert m["shutter"] == "1/250"
+        assert m["fnumber"] == "2.8"
+        assert m["date"] == "2024-01-02"
+        # undo restores the empty pre-edit state
+        app._undo()
+        m2 = read_exif_metadata(p)
+        assert m2["make"] == "" and m2["lens"] == "" \
+            and m2["iso"] == "" and m2["fnumber"] == "" \
+            and m2["shutter"] == "" and m2["date"] == ""
+        root.destroy()
+
+    def test_review_scan_fallback_meta_has_new_keys(self, tmp_path,
+                                                    monkeypatch):
+        import photo_s.engine as engine_mod
+        root, app = _make_app()
+
+        def boom(path):
+            raise RuntimeError("unreadable")
+        monkeypatch.setattr(engine_mod, "read_exif_metadata", boom)
+        meta = app._review_scan(["/nonexistent.jpg"])
+        m = meta["/nonexistent.jpg"]
+        for key in ("make", "camera", "lens", "iso", "shutter",
+                    "fnumber", "date", "time"):
+            assert key in m, "fallback meta must carry " + key
+        root.destroy()
+
+    def test_review_dialog_shooting_fields_smoke(self, tmp_path):
+        """Real-Tk smoke: the shooting-info editor renders and fills
+        from the scanned metadata."""
+        pytest.importorskip("piexif")
+        import tkinter as tk
+        from tkinter import ttk
+        from photo_s.engine import apply_exif_tags
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        apply_exif_tags(a, {"make": "Canon", "iso": "400"})
+        app.files = [a]
+        app._checked = {a}
+        app._refresh_file_list()
+        app._show_review()
+        win = [w for w in root.winfo_children()
+               if isinstance(w, tk.Toplevel)][0]
+        assert _poll(root, lambda: _find_text(win, "1 / 1")), \
+            "review dialog must finish the metadata scan"
+
+        values = []
+
+        def walk(w, depth=8):
+            if depth < 0:
+                return
+            for c in w.winfo_children():
+                if isinstance(c, ttk.Entry):
+                    try:
+                        values.append(c.get())
+                    except Exception:
+                        pass
+                walk(c, depth - 1)
+
+        walk(win)
+        assert "Canon" in values and "400" in values, \
+            "make/ISO entries must be filled from the image metadata"
+        assert _find_text(win, app._t("review_shooting")), \
+            "shooting-info section label must render"
+        root.destroy()
+
+
+def _poll(root, pred, seconds=5.0):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        root.update()
+        if pred():
+            return True
+        time.sleep(0.05)
+    return False
+
+
 class TestDedupHelpers:
     def test_dedup_scan_groups_and_scores(self, tmp_path):
         root, app = _make_app()
@@ -921,3 +1094,311 @@ def _walk_labels(widget):
     for c in widget.winfo_children():
         yield c
         yield from _walk_labels(c)
+
+
+class TestRenamePreview:
+    """Batch rename live-preview: the Tk-free _rename_preview helper
+    (dry-run mapping + in-batch collision replay) plus one dialog smoke."""
+
+    def test_preview_maps_without_touching_files(self, tmp_path):
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", seed=2)
+        rows = app._rename_preview([a, b], "photo_{seq}")
+        assert [r["status"] for r in rows] == ["ok", "ok"]
+        assert rows[0]["output"] == str(tmp_path / "photo_001.jpg")
+        assert rows[1]["output"] == str(tmp_path / "photo_002.jpg")
+        assert rows[0]["input"] == a and rows[1]["input"] == b
+        # dry-run: nothing on disk may change
+        assert os.path.exists(a) and os.path.exists(b)
+        assert not os.path.exists(tmp_path / "photo_001.jpg")
+        assert not os.path.exists(tmp_path / "photo_002.jpg")
+        root.destroy()
+
+    def test_preview_marks_in_batch_conflicts(self, tmp_path):
+        """EXIF-less files + a constant template all map to one target;
+        rows after the first get the suffix the real run would use —
+        the engine's _unique_target re-suffixes the suffixed name, so
+        the third row is photo_1_2.jpg, not photo_2.jpg."""
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", seed=2)
+        c = _img(tmp_path / "c.jpg", seed=3)
+        rows = app._rename_preview([a, b, c], "photo")
+        assert [r["status"] for r in rows] == ["ok", "conflict", "conflict"]
+        assert rows[0]["output"] == str(tmp_path / "photo.jpg")
+        assert rows[1]["output"] == str(tmp_path / "photo_1.jpg")
+        assert rows[2]["output"] == str(tmp_path / "photo_1_2.jpg")
+        assert rows[1]["error"] and rows[2]["error"], \
+            "conflict rows must explain the auto suffix"
+        root.destroy()
+
+    def test_preview_matches_real_run(self, tmp_path):
+        """The simulated conflict suffixes must be exactly what a real
+        rename produces (dry-run _unique_target can't see the batch)."""
+        from photo_s.rename import rename_files
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", seed=2)
+        c = _img(tmp_path / "c.jpg", seed=3)
+        preview = app._rename_preview([a, b, c], "photo")
+        real = rename_files([a, b, c], "photo")
+        assert [r["output"] for r in preview] == \
+               [r["output"] for r in real]
+        root.destroy()
+
+    def test_preview_empty_exif_falls_back_to_original(self, tmp_path):
+        """A pure-EXIF template on an EXIF-less file renders an empty
+        stem and must fall back to the original filename."""
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        out = tmp_path / "out"
+        rows = app._rename_preview([a], "{date}{year}{month}",
+                                   output_dir=str(out))
+        assert rows[0]["status"] == "ok"
+        assert rows[0]["output"] == str(out / "a.jpg")
+        root.destroy()
+
+    def test_preview_overwrite_clears_conflicts(self, tmp_path):
+        """With overwrite=True no _N suffixing happens — same target for
+        both rows, no conflict marks."""
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", seed=2)
+        rows = app._rename_preview([a, b], "photo", overwrite=True)
+        assert [r["status"] for r in rows] == ["ok", "ok"]
+        assert rows[0]["output"] == rows[1]["output"] == \
+            str(tmp_path / "photo.jpg")
+        root.destroy()
+
+    def test_rename_dialog_smoke(self, tmp_path):
+        """Real-Tk smoke: dialog opens, debounced preview fills the tree."""
+        import tkinter as tk
+        from tkinter import ttk
+        root, app = _make_app()
+        a = _img(tmp_path / "a.jpg")
+        app.files = [a]
+        app._checked = {a}
+        app._refresh_file_list()
+        app._show_rename()
+        win = [w for w in root.winfo_children()
+               if isinstance(w, tk.Toplevel)][-1]
+        assert app._t("rename_title") in win.title()
+
+        trees = []
+
+        def walk(w, depth=8):
+            if depth < 0:
+                return
+            for c in w.winfo_children():
+                if isinstance(c, ttk.Treeview):
+                    trees.append(c)
+                walk(c, depth - 1)
+
+        walk(win)
+        assert trees, "rename dialog must host a preview Treeview"
+        tree = trees[0]
+        assert _poll(root, lambda: len(tree.get_children()) == 1), \
+            "debounced preview must map the one checked file"
+        vals = tree.item(tree.get_children()[0], "values")
+        assert vals[0] == "a.jpg" and vals[1], \
+            "row shows original -> new name"
+        root.destroy()
+
+
+class TestZoomPanState:
+    """Pure-math zoom/pan state, one instance per compare-viewer panel
+    (no Tk needed — the class must stay headless-instantiable)."""
+
+    def test_initial_state_is_fit(self):
+        from photo_s.gui import _ZoomPanState
+        s = _ZoomPanState()
+        assert s.zoom == 1.0
+        assert (s.fx, s.fy) == (0.5, 0.5)
+
+    def test_zoom_at_clamps_to_max(self):
+        from photo_s.gui import _ZoomPanState
+        s = _ZoomPanState()
+        s.zoom_at(100.0)
+        assert s.zoom == 16.0
+
+    def test_zoom_at_clamps_to_min(self):
+        from photo_s.gui import _ZoomPanState
+        s = _ZoomPanState()
+        s.zoom_at(0.01)
+        assert s.zoom == 1.0
+        assert (s.fx, s.fy) == (0.5, 0.5)
+
+    def test_zoom_back_to_fit_resets_center(self):
+        from photo_s.gui import _ZoomPanState
+        s = _ZoomPanState()
+        s.zoom_at(2.0)
+        s.pan(0.2, -0.2)
+        assert (s.fx, s.fy) == (0.7, 0.3)
+        s.zoom_at(0.5)
+        assert s.zoom == 1.0
+        assert (s.fx, s.fy) == (0.5, 0.5)
+
+    def test_pan_is_noop_at_fit(self):
+        """At zoom 1 the whole image is visible — panning must not move
+        the center off (0.5, 0.5)."""
+        from photo_s.gui import _ZoomPanState
+        s = _ZoomPanState()
+        s.pan(0.4, -0.4)
+        assert (s.fx, s.fy) == (0.5, 0.5)
+
+    def test_pan_clamps_at_zoom2(self):
+        """At zoom 2 the visible half-extent is 0.25, so the center is
+        clamped to [0.25, 0.75] on both axes."""
+        from photo_s.gui import _ZoomPanState
+        s = _ZoomPanState()
+        s.zoom_at(2.0)
+        s.pan(1.0, -1.0)
+        assert s.fx == 0.75 and s.fy == 0.25
+        s.pan(-3.0, 3.0)
+        assert s.fx == 0.25 and s.fy == 0.75
+
+    def test_zoom_out_reclamps_center(self):
+        """Zooming out tightens the allowed center range; a center that
+        was valid at zoom 16 must be re-clamped at zoom 8."""
+        from photo_s.gui import _ZoomPanState
+        s = _ZoomPanState()
+        s.zoom_at(16.0)
+        s.pan(-1.0, 1.0)  # clamped into [1/32, 31/32]
+        assert s.fx == pytest.approx(1 / 32)
+        assert s.fy == pytest.approx(31 / 32)
+        s.zoom_at(0.5)  # zoom 8 → range tightens to [1/16, 15/16]
+        assert s.zoom == 8.0
+        assert s.fx == pytest.approx(1 / 16)
+        assert s.fy == pytest.approx(15 / 16)
+
+    def test_combined_sequence(self):
+        from photo_s.gui import _ZoomPanState
+        s = _ZoomPanState()
+        s.zoom_at(1.1)
+        s.zoom_at(1.1)
+        assert s.zoom == pytest.approx(1.21)
+        s.pan(0.1, 0.05)
+        m = 0.5 / s.zoom
+        assert m <= s.fx <= 1 - m and m <= s.fy <= 1 - m
+        s.fit()
+        assert s.zoom == 1.0
+        assert (s.fx, s.fy) == (0.5, 0.5)
+
+    def test_zoom_and_pan_are_per_panel_by_default(self):
+        """The compare viewer's interaction contract: each panel owns its
+        own state — wheel zoom and drag pan target only the panel under
+        the cursor; sync-zoom mode applies zoom to every instance;
+        double-click resets all."""
+        from photo_s.gui import _ZoomPanState
+        panels = [_ZoomPanState() for _ in range(3)]
+        # default wheel: zoom only the hovered panel
+        panels[1].zoom_at(2.0)
+        assert [s.zoom for s in panels] == [1.0, 2.0, 1.0]
+        # sync-zoom on: zoom applied to all
+        for s in panels:
+            s.zoom_at(2.0)
+        assert [s.zoom for s in panels] == [1.0 * 2, 2.0 * 2, 1.0 * 2]
+        # drag: pan only the hovered panel
+        panels[1].pan(0.1, 0.0)
+        assert (panels[0].fx, panels[2].fx) == (0.5, 0.5)
+        assert panels[1].fx == pytest.approx(0.5 + 0.1)
+        # double-click: global reset
+        for s in panels:
+            s.fit()
+        assert all((s.zoom, s.fx, s.fy) == (1.0, 0.5, 0.5) for s in panels)
+
+
+class TestCompareDialog:
+    """Real-Tk smokes for the multi-image compare viewer (headless skip)."""
+
+    @staticmethod
+    def _image_canvases(win):
+        """All canvases in the dialog except FlatButton pills (which are
+        canvases too)."""
+        import tkinter as tk
+        from photo_s.gui import FlatButton
+        found = []
+
+        def walk(w, depth=8):
+            if depth < 0:
+                return
+            for c in w.winfo_children():
+                if isinstance(c, tk.Canvas) and not isinstance(c, FlatButton):
+                    found.append(c)
+                walk(c, depth - 1)
+
+        walk(win)
+        return found
+
+    @staticmethod
+    def _painted(canvas):
+        return any(canvas.type(i) == "image" for i in canvas.find_all())
+
+    def _open_dialog(self, root, app, paths):
+        import tkinter as tk
+        app.files = list(paths)
+        app._checked = set(paths)
+        app._refresh_file_list()
+        app._show_compare()
+        wins = [w for w in root.winfo_children()
+                if isinstance(w, tk.Toplevel)]
+        assert wins, "compare dialog must open"
+        return wins[-1]
+
+    def test_smoke_three_panels(self, tmp_path):
+        root, app = _make_app()
+        paths = [_img(tmp_path / "{}.jpg".format(n), seed=i)
+                 for i, n in enumerate("abc")]
+        win = self._open_dialog(root, app, paths)
+        assert app._t("compare_view_title") in win.title()
+        canvases = self._image_canvases(win)
+        assert len(canvases) == 3, "one canvas per checked image"
+        assert _poll(root, lambda: all(self._painted(c) for c in canvases)), \
+            "worker-loaded images must paint on every canvas"
+        # sync-zoom checkbox must be present and off by default
+        import tkinter.ttk as ttk
+        boxes = []
+
+        def _walk(w, depth=8):
+            if depth < 0:
+                return
+            for c in w.winfo_children():
+                if isinstance(c, ttk.Checkbutton):
+                    boxes.append(c)
+                _walk(c, depth - 1)
+
+        _walk(win)
+        sync = [b for b in boxes
+                if b.cget("text") == app._t("compare_sync_zoom")]
+        assert sync, "sync-zoom checkbox must exist"
+        assert "selected" not in sync[0].state(), \
+            "sync zoom must be off by default"
+        root.destroy()
+
+    def test_caps_at_four_panels(self, tmp_path):
+        root, app = _make_app()
+        paths = [_img(tmp_path / "{}.jpg".format(i), seed=i)
+                 for i in range(5)]
+        win = self._open_dialog(root, app, paths)
+        assert len(self._image_canvases(win)) == 4, \
+            "five checked images must be capped at four panels"
+        root.destroy()
+
+    def test_fewer_than_two_warns(self, tmp_path, monkeypatch):
+        import tkinter as tk
+        root, app = _make_app()
+        p = _img(tmp_path / "a.jpg")
+        app.files = [p]
+        app._checked = {p}
+        app._refresh_file_list()
+        calls = []
+        import photo_s.gui as gui_mod
+        monkeypatch.setattr(gui_mod.messagebox, "showinfo",
+                            lambda *a, **k: calls.append(a))
+        app._show_compare()
+        assert calls, "must warn when fewer than 2 images are checked"
+        assert not [w for w in root.winfo_children()
+                    if isinstance(w, tk.Toplevel)], \
+            "no dialog may open below the 2-image minimum"
+        root.destroy()
