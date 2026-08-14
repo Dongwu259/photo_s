@@ -33,10 +33,15 @@ class TestBuildGallery:
         src = tmp_path / "a.jpg"
         _img(src)
 
+        # Capture BEFORE patching: on Windows os.path IS ntpath, so after
+        # monkeypatch.setattr below, ntpath.relpath would recurse into the
+        # fake forever.
+        real_relpath = ntpath.relpath
+
         def _cross_drive_relpath(path, start):
             # ntpath models the Windows failure: no relative path between
             # two different drive letters.
-            return ntpath.relpath(r"D:\photos\a.jpg", r"C:\gallery")
+            return real_relpath(r"D:\photos\a.jpg", r"C:\gallery")
 
         monkeypatch.setattr(os.path, "relpath", _cross_drive_relpath)
         out = tmp_path / "gallery"
