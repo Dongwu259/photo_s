@@ -112,6 +112,9 @@ jobs:
         run: python packaging/build.py --lite
       - name: Smoke test the lite exe
         run: |
+          # pwsh 7.4+ turns native non-zero exits into terminating errors;
+          # restore legacy semantics so the exit-1 assertion below can run.
+          $PSNativeCommandUseErrorActionPreference = $false
           .\dist\photo-s-lite\photo-s-lite.exe --help | Select-Object -First 3
           .\dist\photo-s-lite\photo-s-lite.exe --version
           # lite has no GUI: the gui command must fail gracefully (exit 1)
