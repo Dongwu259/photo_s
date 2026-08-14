@@ -325,3 +325,38 @@ class TestAutoJobs:
         from photo_s.engine import auto_jobs
         monkeypatch.setattr("os.cpu_count", lambda: 128)
         assert auto_jobs() == 8
+
+
+class TestOutputFormatCanonical:
+    """Library path: output_format is case-insensitive, bad formats raise."""
+
+    def _img(self, tmp_path):
+        from PIL import Image
+        p = tmp_path / "a.png"
+        Image.new("RGB", (8, 8), (100, 100, 100)).save(p)
+        return str(p)
+
+    def test_lowercase_format_ok(self, tmp_path):
+        from photo_s.engine import ProcessOptions, batch_process
+        src = self._img(tmp_path)
+        out = tmp_path / "out"
+        res = batch_process([src], ProcessOptions(
+            output_dir=str(out), output_format="jpeg"))
+        assert res.success_count == 1
+        assert res.results[0].output_path.endswith(".jpg")
+
+    def test_mixed_case_format_ok(self, tmp_path):
+        from photo_s.engine import ProcessOptions, batch_process
+        src = self._img(tmp_path)
+        out = tmp_path / "out"
+        res = batch_process([src], ProcessOptions(
+            output_dir=str(out), output_format="weBp"))
+        assert res.success_count == 1
+        assert res.results[0].output_path.endswith(".webp")
+
+    def test_unsupported_format_raises(self, tmp_path):
+        from photo_s.engine import ProcessOptions, batch_process
+        src = self._img(tmp_path)
+        with pytest.raises(ValueError, match="unsupported output format"):
+            batch_process([src], ProcessOptions(
+                output_dir=str(tmp_path / "out"), output_format="bogus"))

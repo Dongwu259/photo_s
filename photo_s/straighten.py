@@ -82,6 +82,9 @@ def apply_auto_straighten(img: Image.Image, max_angle: float = 10.0):
 
     Returns (image, straightened: bool). Unchanged + False when no confident
     horizon is found. Raises RuntimeError if OpenCV is missing.
+
+    IMPORTANT: callers must unpack the 2-tuple — ``img, ok = ...``. Do not
+    feed the return value straight into np.array()/further PIL calls.
     """
     angle = detect_horizon_angle(img, max_angle)
     if angle is None or abs(angle) < 0.05:

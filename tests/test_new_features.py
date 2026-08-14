@@ -263,6 +263,24 @@ class TestBatchTransforms:
 
 
 class TestAdjustUnits:
+    def test_auto_levels_rgb_no_crash(self):
+        # Regression: RGB mode must pass 768 lut entries (Pillow >= 10.4);
+        # a single 256-entry table raises ValueError: wrong number of lut entries.
+        im = Image.new("RGB", (20, 20))
+        px = im.load()
+        for y in range(20):
+            for x in range(20):
+                v = (x * 12) % 256
+                px[x, y] = (v, v, v)
+        out = apply_auto_levels(im)
+        assert out.mode == "RGB"
+        assert out.getpixel((0, 0))[0] <= 5  # dark end stretched to black
+
+    def test_auto_levels_rgba_preserves_alpha(self):
+        im = Image.new("RGBA", (8, 8), (100, 100, 100, 200))
+        out = apply_auto_levels(im)
+        assert out.getpixel((0, 0)) == (100, 100, 100, 200)  # alpha untouched
+
     def test_auto_levels_expands_range(self):
         im = Image.new("L", (64, 64), 20)
         px = im.load()

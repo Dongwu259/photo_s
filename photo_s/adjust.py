@@ -315,7 +315,9 @@ def apply_auto_levels(img: Image.Image, clip_percent: float = 2.0) -> Image.Imag
              for v in range(256)]
     if img.mode == "RGBA":
         return img.point(table * 3 + list(range(256)))  # alpha untouched
-    return img.point(table)  # same table applied to every band
+    if img.mode == "L":
+        return img.point(table)  # single band → 256 entries
+    return img.point(table * 3)  # RGB: 256 entries per band (Pillow >= 10.4)
 
 
 # ── Composition: crop ────────────────────────────────────────────────────────

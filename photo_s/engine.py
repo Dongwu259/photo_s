@@ -909,6 +909,19 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
     Returns:
         ProcessResult with before/after stats.
     """
+    # Canonicalize output format once, library-path-safe: CLI already
+    # normalizes ('jpeg' → 'JPEG') but direct `batch_process` callers pass
+    # whatever case they like. A fresh replace() copy avoids mutating the
+    # caller's object and keeps every downstream read canonical. Unsupported
+    # formats get a clear error instead of a bare KeyError leaking into the
+    # per-file error text.
+    fmt = _canonical_format(options.output_format)
+    if fmt not in SUPPORTED_FORMATS:
+        raise ValueError(
+            f"unsupported output format {options.output_format!r}; "
+            f"supported: {sorted(SUPPORTED_FORMATS)}")
+    options = replace(options, output_format=fmt)
+
     input_size = os.path.getsize(input_path)
     input_fmt = _format_from_path(input_path)
     src_stat = os.stat(input_path)  # for --keep-mtime
