@@ -225,3 +225,82 @@ class TestScunetInEngine:
 def _raise_no_ort():
     raise RuntimeError("scunet plugin requires the optional dependency: "
                        "pip install onnxruntime")
+
+
+class TestTiledInference:
+    """Tiled inference: ramp weights, fake-sess reconstruction, validation."""
+
+    def test_tile_starts_flush_with_edge(self):
+        """Stride tile-overlap; the last tile must align to the far edge."""
+        import photo_s_plugin_scunet.onnx as onnx_mod
+        # 128 with tile 64 / overlap 16: stride 48 → 0, 48, then flush 64
+        assert onnx_mod._tile_starts(128, 64, 16) == [0, 48, 64]
+        assert onnx_mod._tile_starts(64, 32, 8) == [0, 24, 32]
+        assert onnx_mod._tile_starts(64, 64, 16) == [0]   # single tile
+        assert onnx_mod._tile_starts(32, 64, 16) == [0]   # smaller than tile
+
+    def test_ramp_weights_sum_to_one(self):
+        """At every pixel the per-tile weights must sum to exactly 1."""
+        import numpy as np
+        import photo_s_plugin_scunet.onnx as onnx_mod
+        cases = [
+            (64, 64, 32, 8),      # 3x3 tiles, flush-aligned last tile
+            (128, 128, 64, 16),   # the end-to-end config below
+            (192, 96, 64, 16),    # rectangular, uneven overlaps
+            (64, 64, 64, 16),     # single tile → flat weights
+        ]
+        for h, w, tile, overlap in cases:
+            positions, weights = onnx_mod._ramp_weights(h, w, tile, overlap)
+            acc = np.zeros((h, w), dtype=np.float64)
+            for (y, x), wt in zip(positions, weights):
+                assert wt.shape == (tile, tile)
+                acc[y:y + tile, x:x + tile] += wt
+            assert np.allclose(acc, 1.0), (h, w, tile, overlap)
+
+    def test_tiled_identity_reconstructs(self):
+        """Fake sess returning its input: weighted blend must reproduce the
+        input exactly (64x64 tensor, tile 32 / overlap 8 → 9 tiles)."""
+        import numpy as np
+        import photo_s_plugin_scunet.onnx as onnx_mod
+
+        class _FakeSess:
+            def run(self, _outputs, feed):
+                return [feed["X"]]
+
+        rng = np.random.default_rng(0)
+        tensor = rng.random((1, 3, 64, 64), dtype=np.float32)
+        out = onnx_mod._tiled_inference(_FakeSess(), "X", tensor,
+                                        tile=32, overlap=8)
+        assert out.shape == tensor.shape
+        assert np.allclose(out, tensor, atol=1e-5)
+
+    def test_invalid_overlap_rejected(self):
+        """overlap must satisfy 0 <= overlap < tile."""
+        import photo_s_plugin_scunet.onnx as onnx_mod
+        img = Image.new("RGB", (64, 64))
+        with pytest.raises(ValueError):
+            onnx_mod.run_scunet(img, 10.0, "x.onnx", tile=64, overlap=64)
+        with pytest.raises(ValueError):
+            onnx_mod.run_scunet(img, 10.0, "x.onnx", tile=32, overlap=64)
+        with pytest.raises(ValueError):
+            onnx_mod.run_scunet(img, 10.0, "x.onnx", tile=64, overlap=-1)
+
+
+class TestTiledEndToEnd:
+    def test_tiled_run_matches_identity(self, tmp_path, monkeypatch):
+        """128x128 image through the fixed 64x64 tiny model, forced tiled:
+        tile=64 → 3x3 = 9 tiles (starts 0/48/64), identity conv ⇒ output
+        size and pixels ≈ input."""
+        model_path = _setup_env(tmp_path, monkeypatch)
+        import photo_s_plugin_scunet.onnx as onnx_mod
+        img = Image.new("RGB", (128, 128), (120, 100, 80))
+        out = onnx_mod.run_scunet(img, 15.0, str(model_path),
+                                  tile=64, overlap=16)
+        assert out.size == (128, 128)
+        assert out.mode == "RGB"
+        # (50, 50) sits in the 4-tile overlap corner (starts 0/48/64);
+        # (100, 100) is covered by the single flush-aligned tile only
+        for xy in [(50, 50), (100, 100), (0, 0), (127, 127)]:
+            px = out.getpixel(xy)
+            assert abs(px[0] - 120) <= 3 and abs(px[1] - 100) <= 3 \
+                and abs(px[2] - 80) <= 3, (xy, px)

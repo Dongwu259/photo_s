@@ -55,14 +55,108 @@ def _session(path):
     return _SESSIONS[path]
 
 
-def run_scunet(img: Image.Image, strength: float, model_path: str) -> Image.Image:
+def _tile_starts(size, tile, overlap):
+    """Top-left offsets of ``tile``-sized tiles covering ``[0, size)``.
+
+    Stride is ``tile - overlap``; the last tile is flush with the far edge
+    (``size - tile``) so coverage never runs out of bounds.
+    """
+    if size <= tile:
+        return [0]
+    stride = tile - overlap
+    starts = list(range(0, size - tile + 1, stride))
+    if starts[-1] != size - tile:
+        starts.append(size - tile)
+    return starts
+
+
+def _axis_weights(starts, tile):
+    """1D linear-ramp blend weights (len ``tile``) per tile along one axis.
+
+    A side touching the image edge stays flat at 1; a side overlapping a
+    neighbour ramps linearly over the actual overlap length L. Overlapping
+    ramps are midpoint-symmetric (w_up(j) = (j + .5) / L, w_down = 1 - w_up),
+    so two neighbouring tiles sum to 1 at every position of their overlap
+    (triple overlaps only occur when overlap >= tile / 2; the final
+    normalization in :func:`_tiled_inference` absorbs those).
+    """
+    weights = []
+    for k, s in enumerate(starts):
+        w1 = np.ones(tile, dtype=np.float32)
+        if k > 0:
+            left = starts[k - 1] + tile - s  # actual overlap with previous
+            if left > 0:
+                w1[:left] *= (np.arange(left, dtype=np.float32) + 0.5) / left
+        if k < len(starts) - 1:
+            right = s + tile - starts[k + 1]  # actual overlap with next
+            if right > 0:
+                w1[tile - right:] *= (
+                    np.arange(right, 0, -1, dtype=np.float32) - 0.5) / right
+        weights.append(w1)
+    return weights
+
+
+def _ramp_weights(h, w, tile, overlap):
+    """Tile positions and 2D blend weights for an HxW tensor.
+
+    Returns ``(positions, weights)``: ``positions`` is a list of ``(y, x)``
+    top-left offsets covering the image; ``weights`` is a float32 array of
+    shape ``[len(positions), tile, tile]`` — each entry the outer product of
+    the two per-axis ramps. Since tiles form the full cartesian product and
+    each axis sums to 1, the weights of all tiles sum to 1 at every pixel.
+    """
+    ys = _tile_starts(h, tile, overlap)
+    xs = _tile_starts(w, tile, overlap)
+    ramp_y = _axis_weights(ys, tile)
+    ramp_x = _axis_weights(xs, tile)
+    positions = [(y, x) for y in ys for x in xs]
+    weights = np.stack([ry[:, None] * rx[None, :]
+                        for ry in ramp_y for rx in ramp_x])
+    return positions, weights
+
+
+def _tiled_inference(sess, input_name, tensor, tile, overlap):
+    """Run ``sess`` on ``tensor`` [1,3,H,W] tile by tile and blend.
+
+    Tiles of ``tile``x``tile`` (stride ``tile - overlap``, last tile flush
+    with the far edge) are inferred independently and accumulated with
+    linear-ramp weights (see :func:`_ramp_weights`); the result is divided
+    by the summed weights, so the blend is a proper weighted average even
+    where ramps cannot be perfectly complementary. Peak activation memory
+    stays ~one tile regardless of H, W.
+    """
+    _, _, h, w = tensor.shape
+    positions, weights = _ramp_weights(h, w, tile, overlap)
+    acc = None
+    wsum = np.zeros((h, w), dtype=np.float32)
+    for (y, x), wt in zip(positions, weights):
+        out = sess.run(None, {input_name: tensor[:, :, y:y + tile,
+                                                    x:x + tile]})[0]
+        if acc is None:
+            acc = np.zeros((1, out.shape[1], h, w), dtype=np.float32)
+        acc[:, :, y:y + tile, x:x + tile] += out * wt
+        wsum[y:y + tile, x:x + tile] += wt
+    return acc / wsum
+
+
+def run_scunet(img: Image.Image, strength: float, model_path: str,
+               *, tile: int = 512, overlap: int = 64) -> Image.Image:
     """Denoise ``img`` through the SCUNet ONNX model at ``model_path``.
 
     ``strength`` scales the effect by linearly blending the model output
     with the original (see :func:`_blend`): 0 = untouched, >= 15 = full
     model output. Alpha is preserved; EXIF/ICC in ``img.info`` is copied
     onto the result.
+
+    When the padded tensor exceeds ``tile`` in either spatial dim, inference
+    runs in overlapping tiles (see :func:`_tiled_inference`) to cap peak
+    memory; otherwise the whole image goes through in one shot. ``overlap``
+    must satisfy ``0 <= overlap < tile`` (ValueError otherwise).
     """
+    if overlap < 0 or overlap >= tile:
+        raise ValueError(
+            f"overlap must satisfy 0 <= overlap < tile, "
+            f"got tile={tile}, overlap={overlap}")
     alpha = None
     if img.mode == "RGBA":
         alpha = img.split()[-1]
@@ -90,7 +184,11 @@ def run_scunet(img: Image.Image, strength: float, model_path: str) -> Image.Imag
 
     sess = _session(model_path)
     input_name = sess.get_inputs()[0].name
-    out = sess.run(None, {input_name: tensor})[0]
+    _, _, ph, pw = tensor.shape
+    if ph <= tile and pw <= tile:
+        out = sess.run(None, {input_name: tensor})[0]
+    else:
+        out = _tiled_inference(sess, input_name, tensor, tile, overlap)
 
     # [1,C,H,W] → [H,W,C], crop padding, mix by strength, clamp, → uint8
     denoised = np.transpose(out[0], (1, 2, 0))[:h, :w]
