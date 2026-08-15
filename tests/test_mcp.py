@@ -35,7 +35,7 @@ class TestTools:
     def test_registered_tools(self):
         names = {t.name for t in asyncio.run(create_server().list_tools())}
         assert names == {"process", "info", "exif", "dedup", "cull", "select",
-                         "hash", "plugin", "contact_sheet", "gallery",
+                         "hdr", "hash", "plugin", "contact_sheet", "gallery",
                          "watermark", "preset", "bench",
                          "watch", "watch_status", "watch_stop"}
 
@@ -314,6 +314,37 @@ class TestSelectTool:
         assert os.path.isfile(str(tmp_path / "sel" / "a.jpg"))
 
 
+class TestHdrTool:
+    def test_merge(self, tmp_path):
+        pytest.importorskip("cv2")
+        import numpy as np
+        evs = []
+        for i, v in enumerate((30, 128, 230)):
+            arr = np.full((24, 32, 3), v, dtype="uint8")
+            p = tmp_path / f"e{i}.jpg"
+            Image.fromarray(arr).save(str(p))
+            evs.append(str(p))
+        out = str(tmp_path / "hdr.jpg")
+        r = _call("hdr", {"paths": evs, "output": out})
+        assert r["ok"] is True
+        assert r["count"] == 3
+        assert r["dims"] == [32, 24]
+        assert os.path.isfile(out)
+
+    def test_missing_cv2_clear_error(self, tmp_path, monkeypatch):
+        import builtins
+        from photo_s import hdr as hdr_mod
+        monkeypatch.setattr(
+            hdr_mod, "_cv2",
+            lambda: (_ for _ in ()).throw(
+                RuntimeError("hdr requires the optional dependency: "
+                             "pip install 'photo-s-tools[enhance]'")))
+        r = _call("hdr", {"paths": [str(tmp_path / "a.jpg")],
+                          "output": str(tmp_path / "h.jpg")})
+        assert r["ok"] is False
+        assert "enhance" in r["error"]
+
+
 class TestHashTool:
     def test_generate_and_verify(self, tmp_path):
         f = tmp_path / "data.bin"
@@ -367,7 +398,7 @@ class TestCliListTools:
         out = capsys.readouterr().out
         assert rc == 0
         data = json.loads(out)
-        assert len(data["tools"]) == 16
+        assert len(data["tools"]) == 17
         for t in data["tools"]:
             assert "input_schema" in t
             assert "properties" in t["input_schema"]
@@ -396,7 +427,7 @@ class TestStdioEndToEnd:
                     tools = await session.list_tools()
                     names = {t.name for t in tools.tools}
                     assert names == {"process", "info", "exif", "dedup",
-                                     "cull", "select", "hash", "plugin",
+                                     "cull", "select", "hdr", "hash", "plugin",
                                      "contact_sheet", "gallery",
                                      "watermark", "preset", "bench",
                                      "watch", "watch_status", "watch_stop"}

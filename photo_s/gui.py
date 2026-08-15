@@ -522,6 +522,7 @@ STRINGS = {
         "more_contact": "联系表",
         "more_cull": "曝光筛选",
         "more_hash": "校验和",
+        "more_hdr": "HDR 合并",
         "more_presets": "预设",
         # ── Visual preview ──
         "preview_render": "正在渲染预览…",
@@ -555,6 +556,15 @@ STRINGS = {
         "contact_open": "打开",
         "contact_need_files": "请先添加并勾选图片",
         "contact_bad_bg": "背景色无效，已用黑色",
+        # ── HDR merge ──
+        "hdr_title": "HDR 合并",
+        "hdr_need_files": "请勾选至少 2 张包围曝光图片",
+        "hdr_count": "将合并 {n} 张曝光",
+        "hdr_output": "输出文件",
+        "hdr_align": "手持对齐（AlignMTB，消除鬼影）",
+        "hdr_merge": "合并 HDR",
+        "hdr_done": "已生成: {out}",
+        "hdr_failed": "合并失败: {err}（需 pip install photo-s-tools[enhance]）",
         # ── Cull ──
         "cull_title": "曝光筛选",
         "cull_overexposed": "过曝上限 %",
@@ -968,6 +978,7 @@ STRINGS = {
         "more_contact": "Contact Sheet",
         "more_cull": "Cull Filter",
         "more_hash": "Checksums",
+        "more_hdr": "HDR merge",
         "more_presets": "Presets",
         # ── Visual preview ──
         "preview_render": "Rendering preview…",
@@ -1001,6 +1012,15 @@ STRINGS = {
         "contact_open": "Open",
         "contact_need_files": "Add and check images first",
         "contact_bad_bg": "Invalid background color, using black",
+        # ── HDR merge ──
+        "hdr_title": "HDR Merge",
+        "hdr_need_files": "Check at least 2 bracketed exposures",
+        "hdr_count": "Merging {n} exposures",
+        "hdr_output": "Output file",
+        "hdr_align": "Align handheld (AlignMTB, kills ghosting)",
+        "hdr_merge": "Merge HDR",
+        "hdr_done": "Saved: {out}",
+        "hdr_failed": "Merge failed: {err} (needs pip install photo-s-tools[enhance])",
         # ── Cull ──
         "cull_title": "Cull Filter",
         "cull_overexposed": "Overexposed max %",
@@ -3288,6 +3308,17 @@ class PhotoSApp:
         from .check import verify_manifest
         return verify_manifest(path)
 
+    def _hdr_merge(self, paths, output, align=False):
+        """Sync: merge bracketed exposures into an HDR image.
+
+        Thin wrapper so tests can call it without touching Tk. Returns the
+        output path on success, raises (RuntimeError/ValueError) on failure.
+        """
+        from .hdr import merge_hdr
+        result = merge_hdr(list(paths), align=align)
+        result.save(output, quality=95)
+        return output
+
     def _apply_options_to_ui(self, opts):
         """Map a ProcessOptions back onto the GUI's tk.Variables (preset
         load). Forgiving: each field is wrapped in try/except so an
@@ -3934,6 +3965,8 @@ class PhotoSApp:
                          command=self._show_cull)
         menu.add_command(label=self._t("more_hash"),
                          command=self._show_hash)
+        menu.add_command(label=self._t("more_hdr"),
+                         command=self._show_hdr)
         menu.add_command(label=self._t("more_presets"),
                          command=self._show_presets)
         try:
@@ -5652,6 +5685,118 @@ class PhotoSApp:
             p = out_var.get().strip()
             if p and os.path.isfile(p):
                 webbrowser.open("file://" + os.path.abspath(p))
+
+        def drain():
+            try:
+                while True:
+                    q.get_nowait()()
+            except queue.Empty:
+                pass
+            if win.winfo_exists():
+                win.after(80, drain)
+
+        win.after(80, drain)
+
+    def _show_hdr(self):
+        """HDR merge: fuse the checked bracketed exposures into one image.
+
+        Uses opencv exposure fusion (Mertens); --align runs AlignMTB for
+        handheld brackets. Shows a clear hint when opencv isn't installed.
+        """
+        files = self._checked_files()
+        if len(files) < 2:
+            messagebox.showinfo(
+                self._t("hdr_title"),
+                self._t("hdr_need_files"))
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title(self._t("hdr_title"))
+        win.geometry("460x240")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=20, pady=16)
+        body.columnconfigure(1, weight=1)
+
+        tk.Label(body, text=self._t("hdr_count", n=len(files)),
+                 font=FONT_BODY, fg=COLORS["text_secondary"],
+                 bg=COLORS["bg"]).grid(row=0, column=0, columnspan=3,
+                                       sticky="w", pady=(0, 10))
+
+        out_var = tk.StringVar(value=os.path.join(os.getcwd(), "hdr.jpg"))
+        align_var = tk.BooleanVar(value=False)
+
+        tk.Label(body, text=self._t("hdr_output"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=1, column=0, sticky="w", pady=(0, 6), padx=(0, 10))
+        ttk.Entry(body, textvariable=out_var, font=FONT_BODY).grid(
+            row=1, column=1, sticky="ew", pady=(0, 6))
+
+        def _browse_out():
+            if self._dlg_cooldown_active():
+                return
+            p = filedialog.asksaveasfilename(
+                defaultextension=".jpg",
+                initialfile=os.path.basename(out_var.get()),
+                filetypes=[("JPEG", "*.jpg"), ("PNG", "*.png"),
+                           ("TIFF", "*.tif")])
+            self._after_file_dialog()
+            if p:
+                out_var.set(p)
+
+        FlatButton(body, text=self._t("browse"), command=_browse_out,
+                   bg=COLORS["card"], fg=COLORS["text"],
+                   hover_bg=COLORS["bg"], border_color=COLORS["border"],
+                   font=FONT_SMALL).grid(
+            row=1, column=2, sticky="w", padx=(8, 0), pady=(0, 6))
+
+        ttk.Checkbutton(body, text=self._t("hdr_align"),
+                        variable=align_var).grid(
+            row=2, column=0, columnspan=3, sticky="w", pady=(2, 2))
+
+        status = tk.Label(body, text="", font=FONT_SMALL,
+                          fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        status.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+        merge_btn = FlatButton(body, text=self._t("hdr_merge"),
+                               command=lambda: _merge(),
+                               bg=COLORS["accent"],
+                               hover_bg=COLORS["accent_hover"])
+        merge_btn.grid(row=4, column=0, sticky="w", pady=(10, 0))
+
+        q = queue.Queue()
+
+        def schedule(fn):
+            q.put(fn)
+
+        def _merge():
+            merge_btn.configure(state="disabled")
+            status.configure(text=self._t("preview_render"))
+            output = out_var.get().strip()
+            align = align_var.get()
+
+            def run():
+                try:
+                    self._hdr_merge(files, output, align=align)
+                    schedule(lambda: _done(output))
+                except Exception as e:
+                    schedule(lambda err=str(e): _done(None, err))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        def _done(out, err=None):
+            if not win.winfo_exists():
+                return
+            merge_btn.configure(state="normal")
+            if err or not out:
+                status.configure(
+                    text=self._t("hdr_failed", err=err or "?"),
+                    fg=COLORS["danger"])
+                return
+            status.configure(text=self._t("hdr_done", out=out),
+                             fg=COLORS["success"])
 
         def drain():
             try:

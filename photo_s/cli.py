@@ -1431,6 +1431,26 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___json'),
     )
 
+    # ── hdr subcommand (exposure fusion of bracketed shots) ────────────────
+    hdr_parser = subparsers.add_parser(
+        "hdr", help=_t('cmd_hdr'),
+    )
+    hdr_parser.add_argument(
+        "paths", nargs="+", help=_t('help___paths'),
+    )
+    hdr_parser.add_argument(
+        "-o", "--output", type=str, default=None, metavar="OUT.jpg",
+        help=_t('help___output'),
+    )
+    hdr_parser.add_argument(
+        "--align", action="store_true",
+        help=_t('help___hdr_align'),
+    )
+    hdr_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
     # ── hash subcommand ─────────────────────────────────────────────────────
     hash_parser = subparsers.add_parser(
         "hash", help=_t('cmd_hash'),
@@ -1579,8 +1599,9 @@ def run_cli(args: List[str] = None) -> int:
     for _sub in (compress_parser, convert_parser, batch_parser, exif_parser,
                  preset_parser, plugin_parser, watch_parser, dedup_parser,
                  info_parser, rename_parser, check_parser, sheet_parser,
-                 cull_parser, select_parser, hash_parser, gallery_parser,
-                 bench_parser, config_parser, serve_parser, mcp_parser,
+                 cull_parser, select_parser, hdr_parser, hash_parser,
+                 gallery_parser, bench_parser, config_parser, serve_parser,
+                 mcp_parser,
                  preset_save, preset_load, preset_delete,
                  plugin_install, plugin_uninstall, plugin_info, plugin_fetch,
                  config_init, config_show):
@@ -2236,6 +2257,33 @@ def run_cli(args: List[str] = None) -> int:
             summary = _t('msg_select_summary', kept=len(kept),
                          rejected=len(rejected), moved=len(moved))
             print(f"\n{summary}")
+        return 0
+
+    # ── Handle 'hdr' command (exposure fusion) ─────────────────────────────
+    if parsed.command == "hdr":
+        from .hdr import merge_hdr
+        out = getattr(parsed, 'output', None) or "hdr.jpg"
+        try:
+            result = merge_hdr(list(parsed.paths), align=parsed.align)
+            result.save(out, quality=95)
+        except RuntimeError as e:  # opencv missing — clear install hint
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+        except ValueError as e:    # <2 files / unreadable
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+        if getattr(parsed, 'json', False):
+            import json
+            print(json.dumps(versioned({
+                "ok": True,
+                "output": os.path.abspath(out),
+                "count": len(parsed.paths),
+                "align": parsed.align,
+                "dims": list(result.size),
+            }), indent=2, ensure_ascii=False))
+        else:
+            print(f"{_t('msg_hdr_done', n=len(parsed.paths), out=out)}"
+                  f"  ({result.size[0]}×{result.size[1]})")
         return 0
 
     # ── Handle 'hash' command ───────────────────────────────────────────────

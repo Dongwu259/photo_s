@@ -1,8 +1,8 @@
 """
 PhotoS - MCP (Model Context Protocol) server.
 
-Exposes PhotoS tools (process/info/exif/dedup/cull/select/hash/plugin) to
-MCP clients (Claude Desktop, AI agents) over stdio. Tools call photo_s module
+Exposes PhotoS tools (process/info/exif/dedup/cull/select/hdr/hash/plugin)
+to MCP clients (Claude Desktop, AI agents) over stdio. Tools call photo_s module
 functions directly (no CLI subprocess) and return JSON-serializable dicts
 whose shapes mirror the `--json` CLI contract.
 
@@ -407,6 +407,28 @@ def select_tool(
 
 
 @_versioned
+def hdr_tool(
+    paths: list,
+    output: str,
+    align: bool = False,
+) -> dict:
+    """Merge bracketed exposures into one HDR image (exposure fusion).
+
+    Requires the optional opencv extra (``pip install photo-s-tools[enhance]``
+    when missing). ``align=True`` runs AlignMTB so handheld brackets merge
+    without ghosting.
+    """
+    from .hdr import merge_hdr
+    try:
+        result = merge_hdr(list(paths), align=align)
+        result.save(output, quality=95)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "output": os.path.abspath(output),
+            "count": len(paths), "align": align, "dims": list(result.size)}
+
+
+@_versioned
 def hash_tool(
     paths: Optional[list] = None,
     recursive: bool = False,
@@ -803,6 +825,10 @@ def create_server(config_path: Optional[str] = None):
                              "(rating >= keep_min → selects_dir, <= reject_max "
                              "→ rejects_dir, else in place). dry_run reports "
                              "would-moves without writing.")
+    mcp.add_tool(hdr_tool, name="hdr",
+                 description="Merge bracketed exposures into one HDR image "
+                             "(exposure fusion). align=True runs AlignMTB for "
+                             "handheld brackets.")
     mcp.add_tool(hash_tool, name="hash",
                  description="Generate or verify a SHA-256 checksum manifest "
                              "(any file type).")

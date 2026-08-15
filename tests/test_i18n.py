@@ -241,8 +241,8 @@ class TestCliRendering:
     def test_all_subcommands_en_help_no_cjk(self, capsys):
         for cmd in ("compress", "convert", "batch", "exif", "preset", "plugin",
                     "watch", "dedup", "info", "rename", "check", "contact-sheet",
-                    "cull", "select", "hash", "gallery", "bench", "config",
-                    "serve", "mcp"):
+                    "cull", "select", "hdr", "hash", "gallery", "bench",
+                    "config", "serve", "mcp"):
             capsys.readouterr()  # drain
             with pytest.raises(SystemExit):
                 run_cli([cmd, "--language", "en", "--help"])
