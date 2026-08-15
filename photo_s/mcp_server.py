@@ -221,17 +221,28 @@ def exif_tool(
     keywords: Optional[str] = None,
     camera: Optional[str] = None,
     tags: Optional[dict] = None,
+    gps: Optional[str] = None,
 ) -> dict:
     """Read/filter or write EXIF metadata.
 
     ``action="show"`` scans ``paths`` and returns per-file metadata, filtered
     by rating/keywords/camera. ``action="write"`` takes ``tags`` as a
-    {"<path>": {"rating": 4, "keywords": "keep", ...}} map.
+    {"<path>": {"rating": 4, "keywords": "keep", ...}} map. ``gps="lat,lon"``
+    writes the same coordinates to every file in ``paths`` (batch geotag).
     """
     from .cli import _collect_files
 
     if action == "write":
         written, errors = 0, []
+        # batch GPS: same coordinates applied to every path
+        if gps:
+            for path in _collect_files(list(paths or []), recursive=recursive):
+                try:
+                    apply_exif_tags(path, {"gps": gps})
+                    written += 1
+                except Exception as e:  # per-file errors, don't abort the batch
+                    errors.append({"path": path, "error": str(e)})
+            return {"action": "write", "written": written, "errors": errors}
         for path, tagdict in (tags or {}).items():
             try:
                 apply_exif_tags(path, tagdict)

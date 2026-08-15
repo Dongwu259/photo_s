@@ -309,6 +309,61 @@ class TestExifTypedFields:
         assert m["focal"] == "35mm"
 
 
+class TestExifGpsAndMakeModel:
+    """Batch GPS geotagging + make/model write (feature: EXIF copyright/author/GPS)."""
+
+    def _gps(self, img):
+        return piexif.load(img).get("GPS", {})
+
+    def test_gps_write_read_back(self, tmp_path):
+        img = _img(tmp_path / "a.jpg")
+        msg = apply_exif_tags(img, {"gps": "31.23,121.47"})
+        assert "gps" in msg
+        gps = self._gps(img)
+        # 31.23° → 31°13'48.00" (to_dms_rational keeps seconds as (cs,100))
+        assert gps[piexif.GPSIFD.GPSLatitude] == ((31, 1), (13, 1), (4800, 100))
+        assert gps[piexif.GPSIFD.GPSLatitudeRef] == b"N"
+        assert gps[piexif.GPSIFD.GPSLongitude] == ((121, 1), (28, 1), (1200, 100))
+        assert gps[piexif.GPSIFD.GPSLongitudeRef] == b"E"
+
+    def test_gps_southern_western_refs(self, tmp_path):
+        img = _img(tmp_path / "a.jpg")
+        apply_exif_tags(img, {"gps": "-33.86,151.21"})  # Sydney
+        gps = self._gps(img)
+        assert gps[piexif.GPSIFD.GPSLatitudeRef] == b"S"
+        assert gps[piexif.GPSIFD.GPSLongitudeRef] == b"E"
+
+    def test_gps_invalid_skipped(self, tmp_path):
+        # bad/out-of-range values must not crash the write (and not pollute)
+        img = _img(tmp_path / "a.jpg")
+        assert apply_exif_tags(img, {"gps": "91,200"}) == ""
+        assert self._gps(img) == {}
+        assert apply_exif_tags(img, {"gps": "not-a-float"}) == ""
+        assert self._gps(img) == {}
+
+    def test_make_model_cli_roundtrip(self, tmp_path, capsys):
+        img = _img(tmp_path / "a.jpg")
+        rc = run_cli(["exif", img, "--make", "SONY", "--model", "ILCE-7M4",
+                      "--copyright", "© 2026 Duo"])
+        assert rc == 0
+        m = read_exif_metadata(img)
+        assert m["camera"] == "ILCE-7M4"
+        assert m["make"] == "SONY"
+        # copyright lives in the 0th IFD (read_exif_metadata doesn't expose it)
+        d = piexif.load(img)
+        assert d["0th"][piexif.ImageIFD.Copyright] == "© 2026 Duo".encode("utf-8")
+
+    def test_cli_gps_batch_write(self, tmp_path, capsys):
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", color=(2, 3, 4))
+        rc = run_cli(["exif", "--gps", "30,120", str(tmp_path)])
+        assert rc == 0
+        for p in (a, b):
+            gps = self._gps(p)
+            assert gps[piexif.GPSIFD.GPSLatitude] == ((30, 1), (0, 1), (0, 100))
+            assert gps[piexif.GPSIFD.GPSLongitude] == ((120, 1), (0, 1), (0, 100))
+
+
 class TestCull:
     def test_exposure_stats(self, tmp_path, capsys):
         _img(tmp_path / "bright.jpg", color=(255, 255, 255))

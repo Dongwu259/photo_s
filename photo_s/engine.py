@@ -1804,6 +1804,31 @@ def _apply_typed_exif_tag(exif_dict: dict, spec, value) -> bool:
     return False
 
 
+def _apply_gps_tag(exif_dict: dict, spec) -> bool:
+    """Write GPS coordinates ("lat,lon") into the GPS IFD. Mutates exif_dict.
+
+    Mirrors the GPX branch in ``_save_image`` (same N/S/E/W refs + DMS
+    rationals). Returns True when written; False when the spec is unparseable
+    or out of range — silently skipped, matching the typed-tag bad-value
+    convention so one bad value can't crash a whole batch.
+    """
+    if not _HAS_PIEXIF:
+        return False
+    try:
+        lat, lon = (float(x.strip()) for x in str(spec).split(",", 1))
+    except (TypeError, ValueError):
+        return False
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return False
+    from .gpx import to_dms_rational
+    gps = exif_dict.setdefault("GPS", {})
+    gps[piexif.GPSIFD.GPSLatitude] = to_dms_rational(lat)
+    gps[piexif.GPSIFD.GPSLatitudeRef] = b"N" if lat >= 0 else b"S"
+    gps[piexif.GPSIFD.GPSLongitude] = to_dms_rational(lon)
+    gps[piexif.GPSIFD.GPSLongitudeRef] = b"E" if lon >= 0 else b"W"
+    return True
+
+
 def apply_exif_tags(image_path: str, tags: dict) -> str:
     """Write EXIF tags to an existing image file. Modifies the file in-place.
 
@@ -1811,7 +1836,8 @@ def apply_exif_tags(image_path: str, tags: dict) -> str:
     artist, copyright, description/caption, make, model, software,
     datetime/date, title, keywords (comma list), rating (int 0-5),
     lens (ASCII), iso (int), fnumber/aperture ('2.8' / 'f/2.8'),
-    shutter ('1/250' / '2'), focal ('50').
+    shutter ('1/250' / '2'), focal ('50'), gps ('lat,lon' — both files get
+    the same coordinates; out-of-range/unparseable values are skipped).
     rating/keywords/title are packed into EXIF UserComment (PhotoS: payload);
     the rest are standard EXIF fields. All tags are written in a single
     load/dump/insert pass. ``rating=None`` / ``keywords=""`` / ``title=""``
@@ -1864,6 +1890,10 @@ def apply_exif_tags(image_path: str, tags: dict) -> str:
         elif name in _EXIF_TYPED_TAGS:
             if _apply_typed_exif_tag(exif_dict, _EXIF_TYPED_TAGS[name], value):
                 written.append(name)
+
+    # GPS coordinates ("lat,lon") → GPS IFD (same refs/rationals as gpx path)
+    if "gps" in tags and _apply_gps_tag(exif_dict, tags["gps"]):
+        written.append("gps")
 
     piexif.insert(piexif.dump(exif_dict), image_path)
 

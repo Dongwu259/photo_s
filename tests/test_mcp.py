@@ -218,6 +218,18 @@ class TestExifTool:
         assert s["count"] == 1
         assert s["results"][0]["path"] == a
 
+    def test_batch_gps_write(self, tmp_path):
+        pytest.importorskip("piexif")
+        import piexif
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg")
+        r = _call("exif", {"action": "write", "paths": [a, b],
+                           "gps": "30,120"})
+        assert r["written"] == 2
+        for p in (a, b):
+            gps = piexif.load(p).get("GPS", {})
+            assert gps.get(piexif.GPSIFD.GPSLatitude) == ((30, 1), (0, 1), (0, 100))
+
 
 class TestDedupTool:
     def test_report(self, tmp_path):

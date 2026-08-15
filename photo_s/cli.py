@@ -1060,6 +1060,16 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___focal'),
     )
     exif_parser.add_argument(
+        "--make", type=str, default=None, help=_t('help___make'),
+    )
+    exif_parser.add_argument(
+        "--model", type=str, default=None, help=_t('help___model'),
+    )
+    exif_parser.add_argument(
+        "--gps", type=str, default=None, metavar="LAT,LON",
+        help=_t('help___gps'),
+    )
+    exif_parser.add_argument(
         "--date-from-mtime", action="store_true",
         help=_t('help___date_from_mtime'),
     )
@@ -1714,7 +1724,8 @@ def run_cli(args: List[str] = None) -> int:
                       ("software", "software"), ("rating", "rating"),
                       ("keywords", "keywords"), ("lens", "lens"),
                       ("iso", "iso"), ("shutter", "shutter"),
-                      ("aperture", "aperture"), ("focal", "focal")]
+                      ("aperture", "aperture"), ("focal", "focal"),
+                      ("make", "make"), ("model", "model"), ("gps", "gps")]
 
         def _apply_batch_meta(rows, source):
             """Write metadata for a list of {path, tag...} dicts."""
