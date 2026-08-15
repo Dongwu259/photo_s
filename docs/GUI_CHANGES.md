@@ -17,6 +17,7 @@
 | 第五轮 | 界面现代化 | FlatButton 改 Canvas 药丸、卡片化布局、clam 主题（主题切换全量重染 ttk）、滚动抖动修复（卡片级绑定 + 边界吸附 + 去抖）、设置/MCP 对话框、插件管理器 |
 | 第六轮 | 工作流补全 | 审查打分灯箱、去重查看器、画廊导出、摘要对话框可滚动（v1.2.0，见 §8） |
 | 第七轮 | v1.4.0 深化 | EXIF 编辑器扩拍摄信息 7 字段、批量重命名实时预览、多图并排对比（首个 Canvas 缩放视口，见 §9） |
+| 第八轮 | v1.6.0 工作流 | 评审灯箱加「移动精选/淘汰」（`_select_move` seam）、HDR 合并对话框（「更多工具」）、设置面板人脸模糊选项（见 §11） |
 
 ---
 
@@ -447,3 +448,27 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 - **GUI 自己的 STRINGS 留在 gui.py 不动**，只 import i18n 的 resolve/save；
   CLI 字符串表在 `i18n.STRINGS`（zh/en parity 测试分开强制）。
 - 测试：test_i18n.py（`TestPersistence` 磁盘回环、`resolve_language` 优先级链）。
+
+## 11. 第九轮：选片归档 / HDR / 人脸模糊（v1.6.0）
+
+- **评审灯箱「移动精选/淘汰」**：`_show_review` 过滤行下方新增 select 行
+  （精选/淘汰目录 entry + 📁 浏览 + 主按钮）。作用对象 = 当前过滤集
+  `state["seq"]`；先 `save_current()` 落盘待定评分再 `_select_move`（读 EXIF
+  rating 判双阈值：≥4 精选、≤2 淘汰、3/未评分原地）。移动后从 seq 摘除已移
+  文件并 `show()`（空 seq 回退全量）。Tk-free seam：`_select_move(paths,
+  selects_dir, rejects_dir, keep_min, reject_max, mode)` → (results, ok,
+  err, errmsg)，复刻 CLI `select` 语义（copy2→os.replace→删源原子 move）。
+- **HDR 合并**：「更多工具」新增 `_show_hdr`：取勾选文件（需 ≥2），输出路径 +
+  「手持对齐」勾选，worker 线程跑 Tk-free seam `_hdr_merge(paths, output,
+  align)`（opencv MergeMertens 曝光融合；opencv 缺失/AlignMTB 坏 build 的
+  错误经 status 显示，不静默）。
+- **设置面板人脸模糊**：元数据区（`sec_metadata`，meta_frame row 6-7）新增
+  blur_faces 下拉（关闭/模糊/马赛克，本地化标签）+ 外扩 % entry。⚠️
+  `_build_options` 把**本地化标签反向映射**回 "blur"/"pixelate"（combobox
+  values 是显示文本不是选项值）；`_apply_options_to_ui` 正向映射（预设加载
+  时）。tk.Variable（`self.blur_faces`/`self.blur_faces_margin`）按约定放
+  `__init__`。
+- 新增 GUI STRINGS（zh/en 各 7+）：`review_select_lbl/rejects_lbl/go/browse/
+  need_dir/done/done_warn`、`more_hdr`、`hdr_*`（title/need_files/count/output/
+  align/merge/done/failed）、`blur_faces/blur_faces_off/blur_faces_blur/
+  blur_faces_pixelate/blur_faces_margin_lbl/blur_faces_hint`。

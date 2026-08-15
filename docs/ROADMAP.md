@@ -31,11 +31,19 @@
 **D. 发布状态**：已 push（2026-08-15，`e1d2395..d2eaa21`）；787 测试全绿
 - [ ] **未 tag / 未发**：CI 全绿确认 → tag v1.5.0 → PyPI → Release（发布流程见 RELEASE.md / 交接文档 §2）
 
+### v1.6.0（摄影师批处理工作流，**开发完成待发布**）
+- [x] **选片工作流 `select`**：按 EXIF 评分双阈值分拣——rating ≥ keep_min(4) 移精选目录、≤ reject_max(2) 移淘汰目录、3 星/未评分原地；move/copy、dry_run 零写入、basename 平铺防穿越、原子 move（copy2→os.replace→删源）；CLI + MCP `select_tool` + GUI 评审灯箱「移动精选/淘汰」按钮
+- [x] **批量 EXIF GPS + make/model**：`apply_exif_tags` 支持 `gps "lat,lon"`（GPS IFD + N/S/E/W refs，非法值静默跳过）；CLI `exif --gps/--make/--model` 批量写；MCP `exif_tool` `gps` 参数
+- [x] **统一比例裁剪验证**：`--crop-ratio`（16:9/1:1 等）已端到端存在（engine→adjust→CLI→GUI），补方形 + 与 `--crop` 组合回归测试锁定
+- [x] **风格预设一键套用**：CLI `preset save` 改经共享 builder 捕获全选项集（原只 4 字段）；`preset load` 真正可用；batch/compress/convert 新增 `--preset NAME`（优先级：显式 CLI > --preset > config > 默认；jobs/output_dir 不套用）
+- [x] **包围曝光 HDR 合并**：新 `photo_s/hdr.py`（opencv MergeMertens 曝光融合，无需 EV；`--align` AlignMTB 手持对齐，坏 build 抛清晰错误不静默回退）；CLI `hdr` + MCP `hdr_tool` + GUI「更多工具」入口
+- [x] **批量人脸模糊 `blurfaces`**：新 `photo_s/faceblur.py`（opencv Haar cascade 检测 + 高斯模糊/马赛克；cascade 缺失抛清晰 RuntimeError 不静默返原图）；`ProcessOptions.blur_faces/blur_faces_margin` 入管线（watermark 后 EXIF 前，只改像素 .info 保留）；CLI `--blur-faces`（batch）+ 独立 `blurfaces` 子命令 + MCP `blurfaces_tool` + GUI 设置面板
+- [x] 净效果：MCP 工具 15→18、CLI 子命令 19→22、**834 测试全绿**（2026-08-16）
+- [ ] **未 tag / 未发**：与 v1.5.0 一起走发布流程（v1.5.0 tag → PyPI → v1.6.0 或合并发布，用户定）
+
 ### v1.5.1+（patch 轨道，随时发）
 - [ ] 依赖升级与平台坑修复（rawpy / Pillow 小版本、Windows/Linux 真机问题）
 - [ ] 文档/示例补全
-
-### v1.6.0（下一主题，候选见「候选（未排期）」）
 
 ### v1.4.0 实施记录（2026-08-14，已全部落地）
 **A. 性能实测收尾** —— 真实照片集（29 张交付图）`bench -j 1,2,4,8`：2.62s → 0.45s，

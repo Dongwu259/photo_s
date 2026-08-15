@@ -13,7 +13,7 @@
 | Python 直调 | 宿主是 Python | `from photo_s.engine import ProcessOptions, batch_process` |
 | `photo-s ... --json` | 一次性脚本 / CI | 每次调用有 ~200-300ms 解释器启动开销 |
 | `photo-s serve` | 跨进程 / 长任务 / 需进度与取消 | stdlib HTTP，同步 + 异步任务两种模式 |
-| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，15 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
+| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，18 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
 
 ---
 
@@ -240,7 +240,7 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 }
 ```
 
-`photo-s mcp --list-tools` 返回 15 个工具及 inputSchema（JSON，不启动服务器）。
+`photo-s mcp --list-tools` 返回 18 个工具及 inputSchema（JSON，不启动服务器）。
 
 零安装变体（uvx 自动解析 PyPI 依赖，与官方 MCP Registry
 `io.github.Dongwu259/photo-s` 发布的调用一致）：
@@ -257,11 +257,14 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 
 | 工具 | 关键参数 | 输出 |
 |---|---|---|
-| `process` | `paths[]`, `recursive`, `quality`, `output_format`, `output_dir`, `resize` "WxH", `scale`, `suffix`, `target_size` "500KB", `strip_gps`, `denoise`, `ev`, `log_curve`, `wb_temp`, `auto_straighten`, `jobs`, `dry_run`, `evaluate` | `BatchResult` JSON + `ok`；`dry_run` → `{"dry_run", "count", "files", "settings"}`；`evaluate=true` 时每文件带 `ssim`（同 `--evaluate`） |
+| `process` | `paths[]`, `recursive`, `quality`, `output_format`, `output_dir`, `resize` "WxH", `scale`, `suffix`, `target_size` "500KB", `strip_gps`, `denoise`, `ev`, `log_curve`, `wb_temp`, `auto_straighten`, `crop_ratio` "16:9", `blur_faces` "blur"\|"pixelate", `blur_faces_margin`, `jobs`, `dry_run`, `evaluate` | `BatchResult` JSON + `ok`；`dry_run` → `{"dry_run", "count", "files", "settings"}`；`evaluate=true` 时每文件带 `ssim`（同 `--evaluate`）。`blur_faces` 需 `photo-s-tools[enhance]`（opencv），缺失时 per-file 报错 |
 | `info` | — | 同 `photo-s info --json`（含 `optional_features`/`plugins`） |
-| `exif` | `action` "show"\|"write", `paths[]`, `recursive`, `rating_min`, `rating`, `keywords`, `camera`, `tags` {"path": {…}} | show → `{"count", "results": [{path, rating, keywords, …}]}`；write → `{"written", "errors"}` |
+| `exif` | `action` "show"\|"write", `paths[]`, `recursive`, `rating_min`, `rating`, `keywords`, `camera`, `tags` {"path": {…}}, `gps` "lat,lon" | show → `{"count", "results": [{path, rating, keywords, …}]}`；write → `{"written", "errors"}`。`gps` 把同一坐标批量写入 `paths` 全部文件 |
 | `dedup` | `paths[]`, `recursive`, `threshold` (默认 5), `action` "report"\|"keep-sharpest", `dry_run` (默认 **True**) | report → `{"count", "duplicate_count", "savings_bytes", "groups"}`；keep-sharpest → `{"kept", "removed", "dry_run"}` |
 | `cull` | `paths[]`, `recursive`, `overexposed_max`, `underexposed_max`, `luminance_min/max`, `sharpness_min` | `{"count", "kept", "results": [{path, luminance, …, kept}]}` |
+| `select` | `paths[]`, `recursive`, `keep_min` (默认 4), `reject_max` (默认 2), `selects_dir`, `rejects_dir`, `mode` "move"\|"copy", `dry_run` | 读 EXIF rating 分拣：≥keep_min → 精选目录、≤reject_max → 淘汰目录、其余原地。`{"ok", "count", "kept", "rejected", "moved", "dry_run", "results": [{path, rating, status, action, dest}]}`；`dry_run` 报 would-move 且零写入（同 `photo-s select --json`） |
+| `hdr` | `paths[]` (≥2), `output`, `align` | 包围曝光曝光融合 → `{"ok", "output", "count", "align", "dims"}`。需 `photo-s-tools[enhance]`；`align=true` 用 AlignMTB 消手持鬼影（个别 opencv 构建缺 AlignMTB 时返回清晰报错） |
+| `blurfaces` | `paths[]`, `recursive`, `mode` "blur"\|"pixelate", `margin` (默认 20), `output_dir` | 人脸检测 + 高斯模糊/马赛克（隐私保护）→ `{"ok", "count", "success", "results": [ProcessResult…]}`。需 `photo-s-tools[enhance]`；缺失时 per-file 报错不致命 |
 | `hash` | `paths[]`, `recursive`, `output`, `verify` (清单路径) | 生成 → `{"output", "count", "entries"}`；verify → `{"ok", "missing", "mismatched"}` |
 | `plugin` | `action` "list"\|"install"\|"uninstall", `name`, `dry_run` | list → `{"installed", "available"}`；install/uninstall → `{"ok", "name", "distribution", "version"?}` |
 | `contact_sheet` | `paths[]`, `output`, `recursive`, `cols` (默认 4), `thumb` (默认 240), `captions`, `bg` | `{"ok", "output", "count"}`（网格拼图输出路径） |

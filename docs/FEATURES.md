@@ -3,15 +3,18 @@
 > 以代码实际为准（v1.5.0），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
-## 1. CLI 命令（19 个）
+## 1. CLI 命令（22 个）
 
 | 命令 | 作用 |
 |---|---|
 | `compress` | 压缩体积：`-q` 质量、`--target-size` 自动调优、RAW→JPEG、`--raw-half-size` |
 | `convert` | 格式转换（`-f`），8 种输出格式 |
 | `batch` | 批量处理：压缩+转换+缩放+全部引擎能力，`-r` 递归、`--organize` 子文件夹 |
-| `exif` | 批量读写元数据（make/model/lens/iso/shutter/aperture/focal/date）/ 打标（rating/keywords/title）/ 按评分筛选 |
+| `exif` | 批量读写元数据（make/model/lens/iso/shutter/aperture/focal/date）/ 打标（rating/keywords/title）/ **`--gps` 批量写 GPS** / 按评分筛选 |
 | `rename` | 智能模板重命名 `{date}/{make}/{camera}/{seq}/…`，`-o` 复制改名 |
+| `select` | **选片工作流**：按 EXIF 评分把精选（≥`--keep-min`）移入 `--selects-dir`、淘汰（≤`--reject-max`）移入 `--rejects-dir`，3 星/未评分原地；`--copy` 保留原件、`--dry-run` 零写入 |
+| `hdr` | **包围曝光 HDR 合并**（opencv 曝光融合）；`--align` AlignMTB 手持对齐消鬼影；需 `photo-s-tools[enhance]` |
+| `blurfaces` | **人脸检测 + 模糊/马赛克**（隐私保护，`--mode blur\|pixelate`、`--margin`）；需 `photo-s-tools[enhance]` |
 | `dedup` | 查重 + `keep-sharpest`（保留最锐） |
 | `cull` | 曝光/清晰度筛选（过曝/欠曝/亮暗范围/模糊分） |
 | `check` | 图片完整性检查 |
@@ -19,11 +22,11 @@
 | `contact-sheet` | 联系表（网格拼图） |
 | `gallery` | HTML 画廊 |
 | `watch` | 目录监视自动处理 |
-| `preset` | 预设配置管理 |
+| `preset` | 预设配置管理（save 捕获全选项；batch/compress/convert 支持 `--preset NAME` 一键套用，显式 CLI 参数优先） |
 | `config` | TOML 配置文件管理 |
 | `info` | 格式/环境探测（`--json`） |
 | `serve` | REST API（AI agent 集成，含 `/process/stream` SSE 进度） |
-| `mcp` | MCP server（stdio，11 工具，py3.10+） |
+| `mcp` | MCP server（stdio，18 工具，py3.10+） |
 | `plugin` | 插件管理 install/list/info/fetch/**scaffold** |
 | `bench` | 批量基准：`--dir -j 1,2,4,8 --denoise` 实测各并发耗时/加速比；每阶段计时（load/process/save）；`--evaluate` 输出质量（PSNR/SSIM 对比源图）；输出写临时目录跑完自动清理，不污染源目录 |
 
@@ -83,9 +86,9 @@
 - 无 token 时 CSRF Origin 防护（拒绝跨域浏览器请求）
 - **`POST /process/stream`**：text/event-stream 实时进度（每文件一条 `data:` 帧 + 结束 `done` 帧），agent 免轮询
 
-## 5. MCP server（11 工具）
+## 5. MCP server（18 工具）
 
-`process` `info` `exif` `dedup` `cull` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` — dedup 默认 dry_run 安全；模块级零 mcp import
+`process` `info` `exif` `dedup` `cull` `select` `hdr` `blurfaces` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` `bench` `watch` `watch_status` `watch_stop` — dedup 默认 dry_run 安全；`select` 双阈值分拣、`hdr` 曝光融合、`blurfaces` 人脸模糊均需对应 extra；模块级零 mcp import
 
 ## 6. 插件系统
 
@@ -100,7 +103,7 @@
 
 ## 8. 可选依赖（extras）
 
-`raw`(no-op，rawpy 已核心) · `exif`(piexif) · `watch`(watchdog) · `gui`(tkinterdnd2) · `heic` · `avif` · `enhance`(opencv: NLM 降噪+扶正) · `mcp`
+`raw`(no-op，rawpy 已核心) · `exif`(piexif) · `watch`(watchdog) · `gui`(tkinterdnd2) · `heic` · `avif` · `enhance`(opencv: NLM 降噪+扶正+HDR 合并+人脸模糊) · `mcp`
 
 ## 9. 平台 / 验证
 

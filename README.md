@@ -36,7 +36,9 @@
 | LUT grading | ✅ | ✅ | `--lut film.cube` or preset names (built-in trilinear; `photo-s-plugin-lut` adds tetrahedral + 5 film presets) |
 | Denoise | ✅ | ✅¹ | `--denoise 10` NLM (`[enhance]` extra) |
 | Auto-straighten | ✅ | ✅¹ | `--auto-straighten` level the horizon, confidence-gated (`[enhance]` extra) |
-| Crop / Rotate / Flip / Pad | ✅ | ✅ | `--crop 800x600+0+0`, `--rotate 90`, `--flip h`, `--pad 16:9` |
+| HDR merge | ✅ | ✅¹ | `photo-s hdr e0.jpg e1.jpg e2.jpg -o hdr.jpg` exposure fusion, `--align` for handheld (`[enhance]` extra) |
+| Face blur | ✅ | ✅¹ | `--blur-faces blur|pixelate` privacy masking, Haar cascade (`[enhance]` extra) |
+| Crop / Rotate / Flip / Pad | ✅ | ✅ | `--crop 800x600+0+0`, `--rotate 90`, `--flip h`, `--pad 16:9`, `--crop-ratio 16:9` unified aspect crop |
 | Print size | ✅ | ✅ | `--print-size 8x10@300dpi` center-crop + exact print pixels |
 | Smart rename | ✅ | ✅ | `{date}_{camera}_{seq}` templates |
 | Auto folder organize | ✅ | ✅ | `--organize date-camera` subfolder creation |
@@ -46,6 +48,7 @@
 | Metadata filter | ✅ | ✅ | `exif --show --rating-min 3 --keywords beach` find tagged photos |
 | Metadata import | — | ✅ | `exif --from-csv meta.csv` batch write from spreadsheet |
 | Culling | ✅ | ✅ | `photo-s cull` exposure/sharpness filter (GUI keeps only matches, undoable) |
+| Select (keeper) | ✅ | ✅ | `photo-s select --selects-dir picks --rejects-dir bin` sort by rating (≥4 keep, ≤2 reject, 3/unrated in place) |
 | Burst keep-sharpest | ✅ | ✅ | `dedup --action keep-sharpest` pick the sharpest of a burst |
 | Checksum manifest | ✅ | ✅ | `photo-s hash` SHA-256 archive integrity + `--verify` |
 | HTML gallery | ✅ | ✅ | `photo-s gallery` self-contained index.html + thumbs |
@@ -54,7 +57,8 @@
 | Parallel processing | ✅ | ✅ | `-j 8` multi-threaded |
 | JSON output | — | ✅ | `--json` for AI agent consumption |
 | Config file | — | ✅ | `photo-s.toml` defaults (`config init/show`) |
-| EXIF edit | — | ✅ | `photo-s exif *.jpg --artist "Me"` |
+| EXIF edit | — | ✅ | `photo-s exif *.jpg --artist "Me" --gps "31.23,121.47"` batch copyright/author/GPS |
+| Preset apply | — | ✅ | `photo-s batch *.jpg --preset web` one-click apply a saved style |
 | EXIF date shift | — | ✅ | `--date-shift "-5h30m"` timezone/camera clock fixes |
 | Privacy scrub | — | ✅ | `--scrub` strips EXIF+ICC+GPS |
 | Sync date | — | ✅ | `--sync-date` output mtime ← EXIF datetime |
@@ -179,6 +183,18 @@ photo-s dedup ~/burst/ --action keep-sharpest --dry-run
 photo-s gallery ~/shoot/ -o gallery/ --title "2026 Sichuan"
 photo-s batch ~/shoot/ --print-size 8x10@300dpi
 photo-s batch ~/shoot/ --wb 5600 --auto-levels
+
+# Select (keeper): move 4-5★ to picks, 1-2★ to bin, preview first
+photo-s select ~/shoot/ -r --selects-dir ~/picks --rejects-dir ~/bin --dry-run
+photo-s select ~/shoot/ -r --selects-dir ~/picks --rejects-dir ~/bin
+
+# HDR: merge a bracket, align handheld shots
+photo-s hdr e0.jpg e1.jpg e2.jpg -o hdr.jpg
+photo-s hdr e0.jpg e1.jpg e2.jpg --align -o hdr.jpg
+
+# Privacy: blur or mosaic every face in a batch
+photo-s blurfaces ~/street/ -r --mode blur -o ~/share/
+photo-s batch ~/street/ --blur-faces pixelate --resize 1920x
 
 # Global correction: exposure / LOG recovery / denoise / straighten
 photo-s batch ~/shoot/ --ev +0.5 --auto-exposure 0.45

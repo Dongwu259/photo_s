@@ -35,7 +35,9 @@
 | LUT 调色 | ✅ | ✅ | `--lut film.cube` 或预设名（内置三线性；`photo-s-plugin-lut` 加四面体 + 5 电影预设） |
 | 降噪 | ✅ | ✅¹ | `--denoise 10` NLM（`[enhance]` 可选依赖） |
 | 自动扶正 | ✅ | ✅¹ | `--auto-straighten` 校正地平线，置信度门控（`[enhance]` 可选依赖） |
-| 裁剪 / 旋转 / 翻转 / 留边 | ✅ | ✅ | `--crop 800x600+0+0`、`--rotate 90`、`--flip h`、`--pad 16:9` |
+| HDR 合并 | ✅ | ✅¹ | `photo-s hdr e0.jpg e1.jpg e2.jpg -o hdr.jpg` 曝光融合，`--align` 手持对齐（`[enhance]` 可选依赖） |
+| 人脸模糊 | ✅ | ✅¹ | `--blur-faces blur\|pixelate` 隐私打码，Haar cascade（`[enhance]` 可选依赖） |
+| 裁剪 / 旋转 / 翻转 / 留边 | ✅ | ✅ | `--crop 800x600+0+0`、`--rotate 90`、`--flip h`、`--pad 16:9`、`--crop-ratio 16:9` 统一比例裁剪 |
 | 打印尺寸 | ✅ | ✅ | `--print-size 8x10@300dpi` 中心裁剪 + 精确打印像素 |
 | 智能重命名 | ✅ | ✅ | `{date}_{camera}_{seq}` 模板 |
 | 自动整理归档 | ✅ | ✅ | `--organize date-camera` 子文件夹归类 |
@@ -45,6 +47,7 @@
 | 元数据筛选 | ✅ | ✅ | `exif --show --rating-min 3 --keywords beach` 筛出已打标照片 |
 | 元数据导入 | — | ✅ | `exif --from-csv meta.csv` 从表格批量写入 |
 | 选片 | ✅ | ✅ | `photo-s cull` 曝光/清晰度筛选（GUI 仅保留符合项，可撤销） |
+| 选片归档（评分） | ✅ | ✅ | `photo-s select --selects-dir 精选 --rejects-dir 淘汰` 按评分分拣（≥4 精选、≤2 淘汰、3 星/未评分原地） |
 | 连拍选图 | ✅ | ✅ | `dedup --action keep-sharpest` 每组保留最清晰 |
 | 校验和清单 | ✅ | ✅ | `photo-s hash` SHA-256 归档完整性 + `--verify` |
 | HTML 画廊 | ✅ | ✅ | `photo-s gallery` 自包含 index.html + 缩略图 |
@@ -53,7 +56,8 @@
 | 并行处理 | ✅ | ✅ | `-j 8` 多线程 |
 | JSON 输出 | — | ✅ | `--json` 供 AI agent 消费 |
 | 配置文件 | — | ✅ | `photo-s.toml` 默认值（`config init/show`） |
-| EXIF 编辑 | — | ✅ | `photo-s exif *.jpg --artist "Me"` |
+| EXIF 编辑 | — | ✅ | `photo-s exif *.jpg --artist "Me" --gps "31.23,121.47"` 批量版权/作者/GPS |
+| 预设一键套用 | — | ✅ | `photo-s batch *.jpg --preset web` 套用已存风格 |
 | EXIF 日期偏移 | — | ✅ | `--date-shift "-5h30m"` 时区/相机时钟修正 |
 | 隐私清理 | — | ✅ | `--scrub` 移除 EXIF+ICC+GPS |
 | 同步日期 | — | ✅ | `--sync-date` 输出 mtime ← EXIF 拍摄时间 |
@@ -175,6 +179,18 @@ photo-s dedup ~/burst/ --action keep-sharpest --dry-run
 photo-s gallery ~/shoot/ -o gallery/ --title "2026 川西"
 photo-s batch ~/shoot/ --print-size 8x10@300dpi
 photo-s batch ~/shoot/ --wb 5600 --auto-levels
+
+# 选片归档：4-5 星移精选、1-2 星移淘汰（先 --dry-run 预览）
+photo-s select ~/shoot/ -r --selects-dir ~/精选 --rejects-dir ~/淘汰 --dry-run
+photo-s select ~/shoot/ -r --selects-dir ~/精选 --rejects-dir ~/淘汰
+
+# HDR：合并包围曝光，手持加 --align
+photo-s hdr e0.jpg e1.jpg e2.jpg -o hdr.jpg
+photo-s hdr e0.jpg e1.jpg e2.jpg --align -o hdr.jpg
+
+# 隐私保护：批量模糊/打码人脸
+photo-s blurfaces ~/街拍/ -r --mode blur -o ~/分享/
+photo-s batch ~/街拍/ --blur-faces pixelate --resize 1920x
 
 # 全局校正：曝光 / LOG 还原 / 降噪 / 扶正
 photo-s batch ~/shoot/ --ev +0.5 --auto-exposure 0.45
