@@ -177,3 +177,61 @@ class TestReadJsonCap:
         assert status == 413
         assert payload["schema_version"] == SCHEMA_VERSION
         assert "too large" in payload["error"]
+
+
+# ── TLS (PHOTO_S_TLS no longer fakes https) ────────────────────────────────
+
+class TestTls:
+    def test_tls_without_cert_raises(self, monkeypatch):
+        monkeypatch.setenv("PHOTO_S_TLS", "1")
+        monkeypatch.delenv("PHOTO_S_CERT", raising=False)
+        monkeypatch.delenv("PHOTO_S_KEY", raising=False)
+        with pytest.raises(RuntimeError) as ei:
+            from photo_s import server
+            server.run_server("127.0.0.1", 0)  # raises before binding
+        assert "PHOTO_S_CERT" in str(ei.value)
+
+    def test_tls_serves_https(self, tmp_path, monkeypatch):
+        # generate a self-signed cert via the ssl stdlib (no openssl needed)
+        import ssl as _ssl
+        import tempfile
+        cert = tmp_path / "cert.pem"
+        key = tmp_path / "key.pem"
+        _ssl_ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+        # ssl doesn't self-sign; generate via subprocess openssl if available
+        import subprocess as _sp
+        try:
+            _sp.run(
+                ["openssl", "req", "-x509", "-newkey", "rsa:2048",
+                 "-keyout", str(key), "-out", str(cert), "-days", "1",
+                 "-nodes", "-subj", "/CN=localhost"],
+                check=True, capture_output=True)
+        except (OSError, _sp.SubprocessError):
+            pytest.skip("openssl unavailable; cannot generate TLS cert")
+        monkeypatch.setenv("PHOTO_S_TLS", "1")
+        monkeypatch.setenv("PHOTO_S_CERT", str(cert))
+        monkeypatch.setenv("PHOTO_S_KEY", str(key))
+
+        import threading
+        from photo_s.server import run_server, create_server
+        # run_server blocks; use create_server wrapped with TLS instead via
+        # a tiny helper that mirrors run_server's TLS path.
+        import ssl as _s2
+        srv = create_server("127.0.0.1", 0, token=None)
+        ctx = _s2.SSLContext(_s2.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(str(cert), str(key))
+        srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            ctx_c = _s2.create_default_context()
+            ctx_c.check_hostname = False
+            ctx_c.verify_mode = _s2.CERT_NONE
+            req = urllib.request.Request(f"https://127.0.0.1:{port}/health")
+            with urllib.request.urlopen(req, context=ctx_c, timeout=5) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            assert payload["status"] == "ok"
+            assert payload["schema_version"] == SCHEMA_VERSION
+        finally:
+            srv.shutdown()
+            srv.server_close()

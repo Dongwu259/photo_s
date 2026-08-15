@@ -690,10 +690,29 @@ def run_server(host: str = "127.0.0.1", port: int = 8787,
         ready_file: If set, write {"port", "token", "pid"} to this path once
                     the server is listening — the automation handshake for
                     host agents (paired with --token auto).
+
+    TLS: set ``PHOTO_S_TLS=1`` plus ``PHOTO_S_CERT`` (PEM cert) and
+    ``PHOTO_S_KEY`` (PEM key; defaults to the cert file if omitted) to serve
+    over HTTPS. Requesting TLS without a cert is an error — the server never
+    claims https unless the socket is actually wrapped.
     """
+    tls_enabled = bool(os.environ.get("PHOTO_S_TLS"))
+    tls_cert = os.environ.get("PHOTO_S_CERT") or None
+    tls_key = os.environ.get("PHOTO_S_KEY") or tls_cert
+    if tls_enabled and not tls_cert:
+        raise RuntimeError(
+            "PHOTO_S_TLS set but no certificate: provide PHOTO_S_CERT "
+            "(and PHOTO_S_KEY if separate) as PEM paths")
+
     server = create_server(host, port, options=options, token=token)
+    scheme = "http"
+    if tls_enabled:
+        import ssl
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(tls_cert, tls_key)
+        server.socket = ctx.wrap_socket(server.socket, server_side=True)
+        scheme = "https"
     actual_port = server.server_address[1]
-    scheme = "https" if os.environ.get("PHOTO_S_TLS") else "http"
     print(f"🚀 PhotoS API 服务已启动 Server started: {scheme}://{host}:{actual_port}")
     print(f"   端点 Endpoints: GET /health, GET /info, "
           f"POST /process /dedup /rename /contact-sheet /check")

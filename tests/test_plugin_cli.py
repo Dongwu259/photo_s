@@ -59,6 +59,16 @@ class TestPluginList:
         run_cli(["plugin", "list", "--json"])
         json.loads(_out(capsys))  # must parse as JSON with no trailing junk
 
+    def test_list_exposes_compatibility_flag(self, capsys):
+        # available entries carry an additive "compatible" bool so agents can
+        # tell whether the running core satisfies min_photo_s_version.
+        rc = run_cli(["plugin", "list", "--json"])
+        assert rc == 0
+        data = json.loads(_out(capsys))
+        for a in data["available"]:
+            assert "compatible" in a
+            assert isinstance(a["compatible"], bool)
+
     def test_list_human_mode(self, capsys):
         rc = run_cli(["plugin", "list"])
         assert rc == 0
@@ -115,6 +125,34 @@ class TestPluginInstall:
         assert rc == 0
         data = json.loads(_out(capsys))
         assert data["already_installed"] is True
+
+    def test_install_rejects_core_too_old(self, capsys, monkeypatch):
+        # lut requires core >= 1.3.0; force version_ok → False and assert
+        # install is refused BEFORE any pip runs.
+        monkeypatch.setattr(plugincmd, "version_ok", lambda o: False)
+        monkeypatch.setattr(plugincmd, "_pip_run",
+                            lambda argv: (_ for _ in ()).throw(
+                                AssertionError("pip must not run")))
+        rc = run_cli(["plugin", "install", "lut", "--json"])
+        assert rc == 1
+        data = json.loads(_out(capsys))
+        assert data["ok"] is False
+        assert data["error"] == "photo-s version too old for this plugin"
+        assert data["requires"] == "photo-s>=1.3.0"
+        assert data["running"]
+
+    def test_install_allows_current_core(self, capsys, monkeypatch):
+        # version_ok(True) → install proceeds (mocked pip success)
+        monkeypatch.setattr(plugincmd, "version_ok", lambda o: True)
+
+        class _Proc:
+            returncode = 0
+            stdout = stderr = ""
+        monkeypatch.setattr(plugincmd, "_pip_run", lambda argv: _Proc())
+        rc = run_cli(["plugin", "install", "scunet", "--json"])
+        assert rc == 0
+        data = json.loads(_out(capsys))
+        assert data["ok"] is True
 
 
 class TestPluginUninstall:

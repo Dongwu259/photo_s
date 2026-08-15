@@ -6053,7 +6053,8 @@ class PhotoSApp:
         win.transient(self.root)
 
         state = {"files": files, "idx": 0, "sig": None, "stable": 0,
-                 "inflight": False, "render_sig": None, "tempdir": tempdir}
+                 "inflight": False, "render_sig": None, "rendered": None,
+                 "tempdir": tempdir}
 
         body = tk.Frame(win, bg=COLORS["bg"])
         body.pack(fill="both", expand=True, padx=16, pady=12)
@@ -6125,6 +6126,11 @@ class PhotoSApp:
                 return
             if sig != state["render_sig"]:
                 return  # stale render; a newer one is pending
+            # Record what was actually rendered so drain never relaunches the
+            # same (options, path) — the debounce counter alone isn't enough:
+            # after inflight drops, stable re-accumulates and would relaunch
+            # unchanged options forever.
+            state["rendered"] = sig
             if result.success and result.output_path:
                 _render_image(proc_lbl, result.output_path)
                 status.configure(text=self._t(
@@ -6185,9 +6191,10 @@ class PhotoSApp:
                 state["stable"] = 0
             else:
                 state["stable"] += 1
-            if state["stable"] >= 5 and not state["inflight"]:
-                launch(cur, state["files"][state["idx"]],
-                       self._preview_options(tempdir))
+            cur_path = state["files"][state["idx"]]
+            if (state["stable"] >= 5 and not state["inflight"]
+                    and (cur, cur_path) != state["rendered"]):
+                launch(cur, cur_path, self._preview_options(tempdir))
             self.root.after(80, drain)
 
         nav_lbl.configure(text=f"1/{len(state['files'])} · "

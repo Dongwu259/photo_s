@@ -18,11 +18,11 @@
 - [x] 新 `photo_s/i18n.py`：CLI `STRINGS` 集中表（279 key × 2，parity 测试强制）、`_t(key, lang, **kwargs)`、三平台检测（macOS AppleLanguages / Windows LCID / Linux env）、`resolve_language` 优先级链（flag > env > config > persisted > 系统 > en）、GUI `~/.photos/language` 持久化、不用 `locale.setlocale`
 - [x] CLI `--language {en,zh,auto}` 全局 flag + 两段式解析、257 条 help + ~190 条运行时消息单一语言、`--json` 键保持英文、config `language` key
 - [x] GUI 启动自动检测 + 用户选择持久化；766 测试全绿
+- [x] v1.3.2 审计遗留 3 项并入：`min_photo_s_version` 安装时接线（`plugin install` 拒绝核心过旧 + `plugin list` 暴露 `compatible` 键）、`PHOTO_S_TLS` 真 TLS（stdlib ssl 包 socket，缺证书报错不静默）、GUI 预览 drain `rendered` 守卫（同 options 不重渲，`stable` 归零只是延迟不是修复）；787 测试全绿
 - [ ] **未发布**：push + CI + tag + PyPI + Release（发布流程见 RELEASE.md / 交接文档 §2）
 
 ### v1.5.1+（patch 轨道，随时发）
 - [ ] 依赖升级与平台坑修复（rawpy / Pillow 小版本、Windows/Linux 真机问题）
-- [ ] v1.3.2 审计剩余低危项（见交接文档清单）
 - [ ] 文档/示例补全
 
 ### v1.6.0（Agent 契约版本化 + server 安全加固，**开发完成待发布**）

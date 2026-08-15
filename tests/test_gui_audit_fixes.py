@@ -442,6 +442,71 @@ class TestPreviewStaleness:
                      seconds=3), "preview temp dir must be cleaned up"
         root.destroy()
 
+    def test_no_relaunch_on_unchanged_options(self, tmp_path, monkeypatch):
+        """Regression: after a preview render lands, the drain loop must NOT
+        relaunch with the same unchanged options.
+
+        Bug: `_done` cleared `inflight` but left `stable >= 5`, so the next
+        drain tick re-entered the launch branch → infinite re-render of the
+        same file. Fix: `_done` resets `stable` to 0 (an options change also
+        resets it via the `cur != sig` branch, so debounce still works).
+        """
+        import glob
+        from photo_s.engine import ProcessResult
+        from photo_s import gui as gui_mod
+        root, app = _make_app()
+        img = _img(tmp_path / "a.png", seed=1)
+        out = _img(tmp_path / "out.png", color=(0, 255, 0), size=(30, 30))
+        app._append_files([img])
+
+        calls = []
+
+        def fake_render(path, opts):
+            calls.append(path)
+            return ProcessResult(
+                input_path=path, output_path=out,
+                input_size=100, output_size=100,
+                input_format="PNG", output_format="PNG",
+                input_dims=(64, 48), output_dims=(30, 30),
+                success=True, error=None)
+        monkeypatch.setattr(app, "_preview_render", fake_render)
+
+        created = []
+        real_mkdtemp = gui_mod.tempfile.mkdtemp
+
+        def tracking_mkdtemp(*args, **kwargs):
+            d = real_mkdtemp(*args, **kwargs)
+            created.append(d)
+            return d
+        monkeypatch.setattr(gui_mod.tempfile, "mkdtemp", tracking_mkdtemp)
+
+        app._preview()
+        win = [w for w in _toplevels(root)
+               if w.title() == app._t("preview_title")][0]
+        # wait for the first render to complete AND for the drain loop to
+        # have ticked several times afterward (which is what would relaunch)
+        assert _poll(root, lambda: len(calls) == 1, seconds=4), \
+            "first render must launch exactly once"
+        for _ in range(15):  # let the drain loop run; bug would relaunch here
+            root.update()
+            time.sleep(0.05)
+        assert len(calls) == 1, \
+            "preview must not re-render with unchanged options (got {})" \
+            .format(len(calls))
+        win.destroy()
+        # wait for the drain loop to rmtree the preview temp dir, so this
+        # test doesn't leak a photos_preview_* dir that would break the
+        # cleanup-glob assertions in test_gui_workflows (same-suite order).
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            root.update()
+            if created and not os.path.exists(created[-1]):
+                break
+            time.sleep(0.05)
+        assert created and not os.path.exists(created[-1]), \
+            "preview temp dir must be cleaned up"
+        root.destroy()
+
     @staticmethod
     def _proc_is(win, color):
         """Pixel-check the image last applied to the processed panel (the

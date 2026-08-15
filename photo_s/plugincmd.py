@@ -21,7 +21,7 @@ import sys
 from typing import List, Optional
 
 from .plugin import discover_plugins
-from .registry import OFFICIAL_PLUGINS, get_official, to_dict
+from .registry import OFFICIAL_PLUGINS, get_official, to_dict, version_ok
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
@@ -75,6 +75,7 @@ def _cmd_list(parsed) -> int:
     for name, official in OFFICIAL_PLUGINS.items():
         entry = to_dict(official)
         entry["installed"] = name in installed_objs
+        entry["compatible"] = version_ok(official)
         available.append(entry)
 
     if use_json:
@@ -94,7 +95,9 @@ def _cmd_list(parsed) -> int:
     print("📦 官方插件 Official plugins (photo-s plugin install <name>):")
     for a in available:
         mark = "✅ 已装 installed" if a["installed"] else "·"
-        print("   {:>12}  {}  {}".format(a["name"], mark, a["description"]))
+        warn = ("  ⚠️ 需核心 v>={} (incompatible)"
+                .format(a["min_photo_s_version"]) if not a["compatible"] else "")
+        print("   {:>12}  {}  {}{}".format(a["name"], mark, a["description"], warn))
     if use_json is False:
         print()
         print("安装 Install:  photo-s plugin install <name>  或  pip install <pypi_distribution>")
@@ -114,6 +117,21 @@ def _cmd_install(parsed) -> int:
         else:
             print("❌ 未知官方插件 Unknown official plugin: {}".format(name))
             print("   可用列表 Available: photo-s plugin list")
+        return 1
+
+    if not version_ok(official):
+        from . import __version__ as _core_ver
+        if use_json:
+            print(json.dumps({
+                "ok": False, "name": name,
+                "error": "photo-s version too old for this plugin",
+                "requires": "photo-s>={}".format(official.min_photo_s_version),
+                "running": _core_ver,
+            }, indent=2))
+        else:
+            print("❌ 当前 photo-s 版本过旧 core version too old: "
+                  "{} < {}".format(_core_ver, official.min_photo_s_version))
+            print("   升级核心 Upgrade core: pip install -U photo-s-tools")
         return 1
 
     dist = official.pypi_distribution
