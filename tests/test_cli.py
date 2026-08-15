@@ -451,7 +451,7 @@ class TestCliDedupConfirmWording:
     def test_keep_sharpest_prompt_says_delete(self, tmp_path, monkeypatch):
         # pin zh so the Chinese wording assertion is deterministic on any
         # CI runner (a Linux runner without a Chinese locale resolves en)
-        monkeypatch.setenv("PHOTOS_LANG", "zh")
+        monkeypatch.setenv("PHOTO_S_LANG", "zh")
         # regression: keep-sharpest permanently deletes via os.unlink — the
         # confirm prompt must say 删除, not 移动
         import shutil
@@ -473,8 +473,8 @@ class TestCliExifPerFileErrors:
     def _zh_lang(self, monkeypatch):
         # the assertions check Chinese wording ("1 个文件写入失败") — that's
         # deterministic only when the CLI resolves Chinese. A locale-less CI
-        # runner resolves "en", so pin PHOTOS_LANG explicitly.
-        monkeypatch.setenv("PHOTOS_LANG", "zh")
+        # runner resolves "en", so pin PHOTO_S_LANG explicitly.
+        monkeypatch.setenv("PHOTO_S_LANG", "zh")
 
     def test_write_loop_continues_after_bad_file(self, tmp_path, capsys):
         # regression: PNG (no EXIF support in piexif) used to crash the loop
