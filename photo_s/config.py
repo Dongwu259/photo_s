@@ -160,6 +160,8 @@ def default_config_text() -> str:
 #   (or name this file photo-s.toml in the working dir for auto-discovery)
 
 [options]
+# 界面语言 UI language: "en" | "zh" | "auto" (default auto)
+#language = "auto"
 # 输出质量 Output quality 1-100
 #quality = 85
 # 目标格式 Target format: JPEG PNG WebP TIFF HEIC AVIF
@@ -294,10 +296,26 @@ def _coerce_value(key: str, field: str, value):
         ) from None
 
 
+def config_language(cfg) -> Optional[str]:
+    """Read the ``language`` key from a config dict (en/zh/auto → en|zh|None).
+
+    ``language`` is NOT a ProcessOptions field, so it lives outside
+    ``_SIMPLE_FIELDS`` and is consumed by ``i18n.resolve_language`` rather
+    than ``apply_config``.
+    """
+    opts = cfg.get("options", {}) if isinstance(cfg, dict) else {}
+    value = opts.get("language")
+    if value is None:
+        return None
+    lang = str(value).strip().lower()
+    return lang if lang in ("en", "zh") else None
+
+
 def apply_config(cfg, options: ProcessOptions) -> ProcessOptions:
     """Apply the [options] section of a config dict onto a ProcessOptions.
 
-    Only overrides fields present in the config; unknown keys are ignored.
+    Only overrides fields present in the config; unknown keys are ignored
+    (including ``language``, which is read by ``config_language``).
     Mutates and returns the same options object.
     """
     opts = cfg.get("options", {}) if isinstance(cfg, dict) else {}

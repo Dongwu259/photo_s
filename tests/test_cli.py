@@ -560,7 +560,7 @@ class TestRemoveOriginalConfirm:
             raise EOFError
         monkeypatch.setattr("builtins.input", _closed)
         rc = run_cli(["compress", img, "--remove-original",
-                      "-o", str(tmp_path / "out")])
+                      "--language", "en", "-o", str(tmp_path / "out")])
         assert rc == 1
         assert os.path.exists(img)  # refused → original kept
         assert "Cancelled" in capsys.readouterr().err
@@ -594,11 +594,12 @@ class TestConfigLoadErrors:
     def test_config_show_bad_toml(self, tmp_path, capsys):
         bad = tmp_path / "bad.toml"
         bad.write_text("[options\nquality = ")
-        rc = run_cli(["config", "show", "--path", str(bad)])
+        rc = run_cli(["config", "show", "--language", "en", "--path", str(bad)])
         assert rc == 1
         assert "Config load error" in capsys.readouterr().out
 
     def test_serve_missing_config(self, tmp_path, capsys):
-        rc = run_cli(["serve", "--config", str(tmp_path / "nope.toml")])
+        rc = run_cli(["serve", "--language", "en",
+                      "--config", str(tmp_path / "nope.toml")])
         assert rc == 1
         assert "Config load error" in capsys.readouterr().out

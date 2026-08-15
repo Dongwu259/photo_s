@@ -58,7 +58,7 @@ except ImportError:
 # ── Constants ───────────────────────────────────────────────────────────────
 
 APP_NAME = "PhotoS"
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.5.0"
 WINDOW_WIDTH = 1120
 WINDOW_HEIGHT = 720
 MIN_WIDTH = 980
@@ -176,6 +176,8 @@ FONT_BUTTON_LG = (PLATFORM_FONTS["body"], 12, "bold")
 
 # ── UI strings (zh / en) ─────────────────────────────────────────────────────
 
+# Fallback for _t missing-key lookups — NOT the startup default anymore.
+# Startup language comes from i18n.resolve_language() (persisted > env > system).
 DEFAULT_LANG = "zh"
 
 STRINGS = {
@@ -1265,7 +1267,10 @@ class PhotoSApp:
 
     def __init__(self, root):
         self.root = root
-        self.lang = DEFAULT_LANG
+        # Startup language: persisted user choice > PHOTO_S_LANG env >
+        # system detection. DEFAULT_LANG stays as the _t missing-key fallback.
+        from . import i18n
+        self.lang = i18n.resolve_language(use_config=False, use_persisted=True)
         self.dark_mode = _system_dark_mode()
         # COLORS is module-global and may be left flipped by a previous
         # app instance (e.g. tests, or embedding PhotoSApp twice in one
@@ -1508,7 +1513,12 @@ class PhotoSApp:
 
     def _on_language_selected(self, _event=None):
         display = self.lang_combo.get()
-        self._set_language("zh" if display == "中文" else "en")
+        lang = "zh" if display == "中文" else "en"
+        self._set_language(lang)
+        # Persist the user's choice so it survives restarts (auto-detect only
+        # applies on the first launch / when nothing is stored).
+        from . import i18n
+        i18n.save_language(lang)
 
     def _configure_ttk_styles(self):
         """Tune ttk widget appearance for a cleaner look.
@@ -6773,13 +6783,17 @@ class PhotoSApp:
 
 def run_gui():
     """Launch the PhotoS GUI application."""
+    # Resolve the startup language once (persisted choice > env > system);
+    # PhotoSApp.__init__ resolves again but _system_language() is memoized.
+    from . import i18n
+    _lang = i18n.resolve_language(use_config=False, use_persisted=True)
     # Use TkinterDnD root window when available so drag-and-drop works
     if DND_AVAILABLE:
         root = TkinterDnD.Tk()
     else:
         root = tk.Tk()
 
-    root.title(STRINGS[DEFAULT_LANG]["window_title"])
+    root.title(STRINGS[_lang]["window_title"])
     root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
     root.minsize(MIN_WIDTH, MIN_HEIGHT)
     root.configure(bg=COLORS["bg"])

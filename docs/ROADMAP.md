@@ -11,15 +11,16 @@
 | v1.2.0 | GUI 补全 | 6 工作流入口（预览/监视/联系表/cull/hash/预设）+ 安全修复 |
 | v1.3.0 | Agent 集成 + LUT + 性能工具 | MCP 7→11 工具、SSE 进度、LUT 调色 + 插件、auto-jobs、`bench`、`plugin scaffold`、Pillow14 兼容 |
 | v1.4.0 | GUI 深化 + 降噪大图适配 | EXIF 编辑器扩展（镜头/ISO/快门等 7 字段）、重命名实时预览、多图并排对比（同步缩放勾选）、SCUNet 分块推理（24MP 不再 OOM）+ padding 修复、性能实测定案（8 线程 5.83x，不做多进程）、bench 三件套（SSIM/分段计时/临时目录）、双版本 exe（完整版 + lite）、v1.3.2 遗留低危清扫 6 项 |
+| v1.5.0 | i18n：CLI + GUI 多语言 + 三平台自动检测 | 新 `photo_s/i18n.py`：CLI `STRINGS` 集中表（~280 key × 2，parity 测试强制）、`_t(key, lang, **kwargs)`、`--language {en,zh,auto}` 全局 flag（两段式解析）、`PHOTO_S_LANG` env、config `language` 键、257 条 help + ~190 条运行时消息全部单一语言、`--json` 键保持英文；GUI 启动自动检测（macOS AppleLanguages / Windows LCID / Linux env）+ `~/.photos/language` 持久化；三平台检测每级 try/except 永不崩、不用 `locale.setlocale` |
 
 ## 规划中
 
-### v1.4.1+（patch 轨道，随时发）
+### v1.5.1+（patch 轨道，随时发）
 - [ ] 依赖升级与平台坑修复（rawpy / Pillow 小版本、Windows/Linux 真机问题）
 - [ ] v1.3.2 审计剩余低危项（见交接文档清单）
 - [ ] 文档/示例补全
 
-### v1.5.0（主题待定，候选见下）
+### v1.6.0（主题待定，候选见下）
 
 ### v1.4.0 实施记录（2026-08-14，已全部落地）
 **A. 性能实测收尾** —— 真实照片集（29 张交付图）`bench -j 1,2,4,8`：2.62s → 0.45s，

@@ -47,6 +47,7 @@ from .engine import (
     PIL_WRITABLE,
 )
 from . import __version__
+from .i18n import _t  # reads i18n.CURRENT_LANG at call time; set in run_cli
 
 
 def _collect_files(patterns: List[str], recursive: bool = False) -> List[str]:
@@ -105,8 +106,7 @@ def _parse_size(size_str: str) -> int:
         value = float(size_str)
     except ValueError:
         raise argparse.ArgumentTypeError(
-            f"无效的大小格式 invalid size format: '{size_str}'. "
-            f"支持的格式 supported: 500, 500KB, 2MB, 1.5MB"
+            _t("val_size", val=size_str, supported="500, 500KB, 2MB, 1.5MB")
         )
 
     return int(value * multiplier)
@@ -144,29 +144,27 @@ def _add_advanced_args(parser):
     """
     parser.add_argument(
         "--strip-gps", action="store_true", default=argparse.SUPPRESS,
-        help="移除GPS位置信息 Strip GPS location data",
+        help=_t('help___strip_gps'),
     )
     parser.add_argument(
         "--keep-mtime", action="store_true", default=argparse.SUPPRESS,
-        help="保留原始文件修改时间 Preserve source modification time",
+        help=_t('help___keep_mtime'),
     )
     parser.add_argument(
         "--max-pixels", type=int, default=argparse.SUPPRESS, metavar="N",
-        help="最长边像素上限 Max pixels on longest side, e.g. 8000. "
-             "仅缩小 Only downscales.",
+        help=_t('help___max_pixels'),
     )
     parser.add_argument(
         "--evaluate", action="store_true", default=argparse.SUPPRESS,
-        help="计算SSIM质量评分 Compute SSIM quality score (input vs output)",
+        help=_t('help___evaluate'),
     )
     parser.add_argument(
         "--resume", action="store_true", default=argparse.SUPPRESS,
-        help="跳过输出已存在的文件（断点续跑）Skip files whose output "
-             "already exists (resume)",
+        help=_t('help___resume'),
     )
     parser.add_argument(
         "--config", type=str, default=None, metavar="PATH",
-        help="配置文件路径 Config file path (photo-s.toml)",
+        help=_t('help___config'),
     )
 
 
@@ -189,8 +187,7 @@ def _format_arg(fmt: str) -> str:
     canonical = _canonical_format(fmt)
     if canonical not in SUPPORTED_FORMATS:
         raise argparse.ArgumentTypeError(
-            f"无效格式 invalid format: '{fmt}'. "
-            f"可选 Choose from: {', '.join(sorted(SUPPORTED_FORMATS))}"
+            _t("val_format", fmt=fmt, formats=", ".join(sorted(SUPPORTED_FORMATS)))
         )
     return canonical
 
@@ -202,144 +199,138 @@ def _add_transform_args(parser):
     """
     parser.add_argument(
         "--brightness", type=float, default=argparse.SUPPRESS,
-        metavar="0-2", help="亮度 Brightness multiplier (1.0 = 不变 unchanged)",
+        metavar="0-2", help=_t('help___brightness'),
     )
     parser.add_argument(
         "--contrast", type=float, default=argparse.SUPPRESS,
-        metavar="0-2", help="对比度 Contrast multiplier (1.0 = 不变)",
+        metavar="0-2", help=_t('help___contrast'),
     )
     parser.add_argument(
         "--saturation", type=float, default=argparse.SUPPRESS,
-        metavar="0-2", help="饱和度 Saturation multiplier (1.0 = 不变)",
+        metavar="0-2", help=_t('help___saturation'),
     )
     parser.add_argument(
         "--gamma", type=float, default=argparse.SUPPRESS,
-        metavar="0.1-3", help="伽马 Gamma (1.0 = 不变, 显示亮度)",
+        metavar="0.1-3", help=_t('help___gamma'),
     )
     parser.add_argument(
         "--sharpen", type=float, default=argparse.SUPPRESS,
-        metavar="0-3", help="锐化 Sharpen (1.0 = 不变)",
+        metavar="0-3", help=_t('help___sharpen'),
     )
     parser.add_argument(
         "--grayscale", action="store_true", default=argparse.SUPPRESS,
-        help="转为黑白 Convert to grayscale",
+        help=_t('help___grayscale'),
     )
     parser.add_argument(
         "--sepia", action="store_true", default=argparse.SUPPRESS,
-        help="复古色调 Apply sepia toning",
+        help=_t('help___sepia'),
     )
     parser.add_argument(
         "--auto-levels", action="store_true", default=argparse.SUPPRESS,
-        help="自动色阶 Auto levels (2%% clip histogram stretch)",
+        help=_t('help___auto_levels'),
     )
     parser.add_argument(
         "--wb", type=float, default=argparse.SUPPRESS, metavar="KELVIN",
-        help="白平衡色温 White balance in Kelvin, e.g. 5600",
+        help=_t('help___wb'),
     )
     parser.add_argument(
         "--wb-from", type=str, default=argparse.SUPPRESS, metavar="REF.jpg",
-        help="从参考图取样白平衡 White balance from a reference image",
+        help=_t('help___wb_from'),
     )
     parser.add_argument(
         "--ev", type=float, default=argparse.SUPPRESS, metavar="STOPS",
-        help="曝光补偿 EV compensation in stops, e.g. -1.5 / +1",
+        help=_t('help___ev'),
     )
     parser.add_argument(
         "--auto-exposure", type=float, default=argparse.SUPPRESS, metavar="0-1",
-        help="自动曝光: 均值亮度归一化到目标 Auto-exposure target luminance",
+        help=_t('help___auto_exposure'),
     )
     parser.add_argument(
         "--log-curve", type=str, default=argparse.SUPPRESS, metavar="NAME",
         choices=["SLOG3", "CLOG3", "LOGC3", "DLOG", "VLOG", "HLG"],
-        help="LOG/平面文件还原曲线 LOG recovery curve (SLOG3 CLOG3 LOGC3 "
-             "DLOG VLOG HLG)",
+        help=_t('help___log_curve'),
     )
     parser.add_argument(
         "--denoise", type=float, default=argparse.SUPPRESS, metavar="N",
-        help="降噪强度（需 photo-s-tools[enhance]）NLM denoise strength 3-20 "
-             "(needs optional opencv)",
+        help=_t('help___denoise'),
     )
     parser.add_argument(
         "--lut", type=str, default=argparse.SUPPRESS, metavar="FILE|PRESET",
-        help="3D/1D .cube LUT 调色（内置三线性；装 photo-s-plugin-lut 后 "
-             "用四面体插值 + 电影预设）Apply a .cube LUT (built-in; "
-             "photo-s-plugin-lut adds tetrahedral + film presets)",
+        help=_t('help___lut'),
     )
     parser.add_argument(
         "--auto-straighten", action="store_true", default=argparse.SUPPRESS,
-        help="自动扶正地平线（需 photo-s-tools[enhance]）Auto-level the horizon "
-             "(needs optional opencv)",
+        help=_t('help___auto_straighten'),
     )
     parser.add_argument(
         "--max-straighten-angle", type=float, default=argparse.SUPPRESS,
         metavar="DEG",
-        help="扶正最大允许倾斜角 Max horizon tilt to correct (默认 default: 10°)",
+        help=_t('help___max_straighten_angle'),
     )
     parser.add_argument(
         "--print-size", type=str, default=argparse.SUPPRESS, metavar="WxH@DPI",
-        help="打印尺寸 Print size, e.g. 8x10@300dpi (中心裁剪+精确像素)",
+        help=_t('help___print_size'),
     )
     parser.add_argument(
         "--crop", type=str, default=argparse.SUPPRESS, metavar="WxH+X+Y",
-        help="裁剪 Crop, e.g. 800x600+100+50 (偏移可省 → 居中 centered)",
+        help=_t('help___crop'),
     )
     parser.add_argument(
         "--crop-ratio", type=str, default=argparse.SUPPRESS, metavar="16:9",
-        help="按比例居中裁剪 Center-crop to aspect ratio, e.g. 16:9",
+        help=_t('help___crop_ratio'),
     )
     parser.add_argument(
         "--rotate", type=float, default=argparse.SUPPRESS, metavar="DEG",
-        help="任意角度旋转 Rotate degrees (正数 = 顺时针 clockwise)",
+        help=_t('help___rotate'),
     )
     parser.add_argument(
         "--rotate-bg", type=str, default=argparse.SUPPRESS, metavar="#RRGGBB",
-        help="旋转背景填充色 Rotation corner fill color (默认 black)",
+        help=_t('help___rotate_bg'),
     )
     parser.add_argument(
         "--flip", type=str, default=argparse.SUPPRESS, choices=["h", "v"],
-        help="镜像翻转 Mirror: h 水平 horizontal / v 垂直 vertical",
+        help=_t('help___flip'),
     )
     parser.add_argument(
         "--pad", type=str, default=argparse.SUPPRESS, metavar="16:9",
-        help="留白补边到目标比例 Letterbox to aspect ratio, e.g. 16:9",
+        help=_t('help___pad'),
     )
     parser.add_argument(
         "--pad-bg", type=str, default=argparse.SUPPRESS, metavar="#RRGGBB",
-        help="留白背景色 Letterbox background (默认 #000000)",
+        help=_t('help___pad_bg'),
     )
     parser.add_argument(
         "--date-shift", type=_date_shift_arg, default=argparse.SUPPRESS,
         metavar="OFFSET",
-        help="EXIF 日期偏移 Date shift, e.g. \"-5h30m\" / \"+2h\" / \"1d\"",
+        help=_t('help___date_shift'),
     )
     parser.add_argument(
         "--scrub", action="store_true", default=argparse.SUPPRESS,
-        help="清除全部元数据（EXIF+ICC+注释）Strip ALL metadata (EXIF+ICC+comment)",
+        help=_t('help___scrub'),
     )
     parser.add_argument(
         "--sync-date", action="store_true", default=argparse.SUPPRESS,
-        help="输出时间设为 EXIF 拍摄时间 Set output mtime from EXIF datetime",
+        help=_t('help___sync_date'),
     )
     parser.add_argument(
         "--srgb", action="store_true", default=argparse.SUPPRESS,
-        help="输出标记 sRGB 色彩配置文件 Tag output with sRGB ICC profile",
+        help=_t('help___srgb'),
     )
     parser.add_argument(
         "--flatten-cmyk", action="store_true", default=argparse.SUPPRESS,
-        help="CMYK 输入转 RGB Convert CMYK input to RGB",
+        help=_t('help___flatten_cmyk'),
     )
     parser.add_argument(
         "--blur-score", action="store_true", default=argparse.SUPPRESS,
-        help="计算输入图模糊度评分 Compute blur heuristic for inputs",
+        help=_t('help___blur_score'),
     )
     parser.add_argument(
         "--report", type=str, default=argparse.SUPPRESS, metavar="OUT.csv",
-        help="导出 CSV 处理报告 Write per-file CSV report",
+        help=_t('help___report'),
     )
     parser.add_argument(
         "--gpx-trace", type=str, default=argparse.SUPPRESS, metavar="TRACK.gpx",
-        help="按 GPX 轨迹注入 GPS 坐标 Geo-tag from a GPX track "
-             "(matches EXIF datetime)",
+        help=_t('help___gpx_trace'),
     )
 
 
@@ -427,7 +418,7 @@ def _print_result(result: ProcessResult):
         else:
             print(f"     {result.input_format} → {result.output_format}")
         if result.achieved_quality:
-            print(f"     质量 Quality: {result.achieved_quality}")
+            print(f"     {_t('msg_quality')}: {result.achieved_quality}")
         if result.ssim is not None:
             print(f"     SSIM: {result.ssim:.3f}")
         print(f"     {result.input_dims[0]}×{result.input_dims[1]} → "
@@ -445,14 +436,33 @@ def _print_batch_summary(result: BatchResult):
     """Print batch processing summary."""
     print()
     print("─" * 60)
-    print(f"📊 处理完成 Summary")
-    print(f"   成功 Success: {result.success_count}")
-    print(f"   失败 Failed:  {result.fail_count}")
-    print(f"   原始总大小 Total original: {format_size(result.total_input_size)}")
-    print(f"   压缩后总大小 Total compressed: {format_size(result.total_output_size)}")
+    print(f"📊 {_t('msg_summary')}")
+    print(f"   {_t('msg_success')}: {result.success_count}")
+    print(f"   {_t('msg_failed')}:  {result.fail_count}")
+    print(f"   {_t('msg_total_original')}: {format_size(result.total_input_size)}")
+    print(f"   {_t('msg_total_compressed')}: {format_size(result.total_output_size)}")
     savings = format_size(result.savings_bytes)
-    print(f"   节省 Saved: {savings} ({result.savings_percent:.1f}%)")
+    print(f"   {_t('msg_saved')}: {savings} ({result.savings_percent:.1f}%)")
     print("─" * 60)
+
+
+def _pre_parse_language(args):
+    """Peek at --language/--lang and --config before the real parse.
+
+    argparse bakes help= strings at parser-construction time, so the language
+    must be resolved BEFORE the parser tree is built. A throwaway parser with
+    ``parse_known_args`` tolerates the full real CLI, handles both
+    ``--language zh`` and ``--language=zh``, and also surfaces ``--config`` so
+    an explicit config file's ``language`` key takes effect.
+    """
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--language", "--lang", default=None)
+    p.add_argument("--config", default=None)
+    try:
+        ns, _ = p.parse_known_args(args)
+        return ns.language, ns.config
+    except SystemExit:
+        return None, None
 
 
 def run_cli(args: List[str] = None) -> int:
@@ -464,30 +474,27 @@ def run_cli(args: List[str] = None) -> int:
     if args is None:
         args = sys.argv[1:]
 
+    # Resolve language first: all help= / message strings below are rendered
+    # via i18n._t, which reads i18n.CURRENT_LANG at call time.
+    lang_explicit, cfg_override = _pre_parse_language(args)
+    from . import i18n
+    i18n.CURRENT_LANG = i18n.resolve_language(
+        explicit=lang_explicit, config_path=cfg_override,
+        use_config=True, use_persisted=False)
+
     parser = argparse.ArgumentParser(
         prog="photo-s",
-        description="PhotoS — 批量图片压缩与格式转换工具 Batch Image Compression & Format Conversion",
+        description=_t("desc"),
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-使用示例 Examples:
-  photo-s compress *.jpg -q 80                 批量压缩JPEG图片
-  photo-s compress *.jpg --target-size 500KB   自动调优质量至500KB以内
-  photo-s compress *.ARW -q 90                 将RAW照片转为JPEG
-  photo-s compress *.ARW --raw-half-size -q 85  RAW半尺寸快速处理
-  photo-s convert *.png -f webp -q 85          转换PNG为WebP
-  photo-s batch ~/Pictures/ -r -f JPEG -q 70   递归处理整个目录
-  photo-s batch ~/Pictures/ -r --target-size 2MB  自动调优质量至2MB以内
-  photo-s batch . --resize 1920x1080           批量缩放图片
-  photo-s batch . --scale 50                    缩小到50%%
-  photo-s batch . --no-exif                     不保留EXIF信息
-  photo-s batch . --dry-run                      预览模式（不实际处理）
-  photo-s batch . --organize date                按日期创建子文件夹
-  photo-s batch . --organize date-camera         按日期+相机创建子文件夹
-        """,
+        epilog=_t("epilog"),
     )
     parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t("help___json"),
+    )
+    parser.add_argument(
+        "--language", "--lang", choices=["en", "zh", "auto"],
+        default="auto", help=_t("help___language"),
     )
     _version_str = f"photo-s {__version__}"
     if not _gui_module_available():
@@ -496,877 +503,867 @@ def run_cli(args: List[str] = None) -> int:
         _version_str += " (lite)"
     parser.add_argument(
         "--version", action="version", version=_version_str,
-        help="显示版本号 Show version",
+        help=_t("help___version"),
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="可用命令 Commands")
+    subparsers = parser.add_subparsers(dest="command", help=_t("cmd_commands"))
 
     # ── compress subcommand ──────────────────────────────────────────────────
     compress_parser = subparsers.add_parser(
-        "compress", help="压缩图片体积 Compress image file size",
+        "compress", help=_t('cmd_compress'),
     )
     compress_parser.add_argument(
-        "files", nargs="+", help="图片文件或通配符 Image files or glob patterns",
+        "files", nargs="+", help=_t('help___files'),
     )
     compress_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
     compress_parser.add_argument(
         "-q", "--quality", type=int, default=argparse.SUPPRESS,
-        help="输出质量 Output quality 1-100 (默认 default: 85)",
+        help=_t('help___quality'),
     )
     compress_parser.add_argument(
         "-o", "--output-dir", type=str, default=argparse.SUPPRESS,
-        help="输出目录 Output directory (默认 default: 与源文件相同 same as source)",
+        help=_t('help___output_dir'),
     )
     compress_parser.add_argument(
         "--suffix", type=str, default=argparse.SUPPRESS,
-        help="输出文件名后缀 Output filename suffix (默认 default: _compressed)",
+        help=_t('help___suffix'),
     )
     compress_parser.add_argument(
         "--no-exif", action="store_true",
-        help="不保留EXIF元数据 Strip EXIF metadata",
+        help=_t('help___no_exif'),
     )
     compress_parser.add_argument(
         "--resize", type=str, default=argparse.SUPPRESS, metavar="WxH",
-        help="缩放尺寸 Resize dimensions, e.g. 1920x1080, 800x, x600",
+        help=_t('help___resize'),
     )
     compress_parser.add_argument(
         "--scale", type=int, default=argparse.SUPPRESS, metavar="PCT",
-        help="缩放百分比 Scale percentage, e.g. 50",
+        help=_t('help___scale'),
     )
     compress_parser.add_argument(
         "--dry-run", action="store_true",
-        help="预览模式，不实际处理 Dry run — preview only",
+        help=_t('help___dry_run'),
     )
     compress_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归搜索目录 Recursively search directories",
+        help=_t('help___recursive'),
     )
     compress_parser.add_argument(
         "-j", "--jobs", type=int, default=argparse.SUPPRESS, metavar="N",
-        help="并行处理线程数 Parallel worker threads (默认 default: auto, "
-             "即 min(CPU核数, 8))",
+        help=_t('help___jobs'),
     )
     compress_parser.add_argument(
         "--target-size", type=str, default=argparse.SUPPRESS, metavar="SIZE",
-        help="目标文件体积 Target file size, e.g. 500KB, 2MB. "
-             "自动调整质量以适应该大小 Auto-tune quality to fit.",
+        help=_t('help___target_size'),
     )
     compress_parser.add_argument(
         "--raw-half-size", action="store_true",
-        help="RAW文件半尺寸解码（更快）RAW half-size decode (faster)",
+        help=_t('help___raw_half_size'),
     )
     compress_parser.add_argument(
         "--raw-no-auto-bright", action="store_true",
-        help="禁用RAW自动亮度 Disable RAW auto brightness",
+        help=_t('help___raw_no_auto_bright'),
     )
     compress_parser.add_argument(
         "--no-auto-rotate", action="store_true",
-        help="禁用自动旋转 Disable auto-rotate by EXIF",
+        help=_t('help___no_auto_rotate'),
     )
     compress_parser.add_argument(
         "--remove-original", action="store_true", default=argparse.SUPPRESS,
-        help="处理后删除原文件 Delete original after processing",
+        help=_t('help___remove_original'),
     )
     compress_parser.add_argument(
         "-y", "--yes", action="store_true",
-        help="跳过所有确认提示 Skip all confirmation prompts",
+        help=_t('help___yes'),
     )
     compress_parser.add_argument(
         "--rename", type=str, default=argparse.SUPPRESS, metavar="PATTERN",
-        help="智能重命名 Smart rename, 变量 vars: {year} {month} {day} {date} {time} "
-             "{camera} {make} {original} {iso} {focal} {seq}",
+        help=_t('help___rename'),
     )
     compress_parser.add_argument(
         "--organize", type=str, default=argparse.SUPPRESS, metavar="PRESET|PATTERN",
-        help="按模板创建子文件夹 Organize into subfolders. "
-             "预设 Presets: date, camera, date-camera. "
-             "自定义 Custom: {year}/{month}/{camera} 等 etc.",
+        help=_t('help___organize'),
     )
     compress_parser.add_argument(
         "--sizes", type=str, default=None, metavar="LABEL:WxH,...",
-        help="多尺寸输出 Multi-size, e.g. thumb:480x,screen:1920x1080",
+        help=_t('help___sizes'),
     )
     compress_parser.add_argument(
         "--watermark-text", type=str, default=argparse.SUPPRESS, metavar="TEXT",
-        help="文字水印 Text watermark",
+        help=_t('help___watermark_text'),
     )
     compress_parser.add_argument(
         "--watermark-pos", type=str, default=argparse.SUPPRESS,
-        help="水印位置 Watermark position",
+        help=_t('help___watermark_pos'),
     )
     compress_parser.add_argument(
         "--watermark-opacity", type=int, default=argparse.SUPPRESS,
-        help="水印透明度 Watermark opacity 0-100",
+        help=_t('help___watermark_opacity'),
     )
     _add_advanced_args(compress_parser)
     _add_transform_args(compress_parser)
 
     # ── convert subcommand ───────────────────────────────────────────────────
     convert_parser = subparsers.add_parser(
-        "convert", help="转换图片格式 Convert image format",
+        "convert", help=_t('cmd_convert'),
     )
     convert_parser.add_argument(
-        "files", nargs="+", help="图片文件或通配符 Image files or glob patterns",
+        "files", nargs="+", help=_t('help___files'),
     )
     convert_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
     convert_parser.add_argument(
         "-f", "--format", type=_format_arg, default=argparse.SUPPRESS,
-        help="目标格式 Target format (默认 default: JPEG, 大小写不敏感 case-insensitive)",
+        help=_t('help___format'),
     )
     convert_parser.add_argument(
         "-q", "--quality", type=int, default=argparse.SUPPRESS,
-        help="输出质量 Output quality 1-100 (JPEG/WebP/HEIC)",
+        help=_t('help___quality'),
     )
     convert_parser.add_argument(
         "-o", "--output-dir", type=str, default=argparse.SUPPRESS,
-        help="输出目录 Output directory",
+        help=_t('help___output_dir'),
     )
     convert_parser.add_argument(
         "--prefix", type=str, default=argparse.SUPPRESS,
-        help="输出文件名前缀 Output filename prefix",
+        help=_t('help___prefix'),
     )
     convert_parser.add_argument(
         "--suffix", type=str, default=argparse.SUPPRESS,
-        help="输出文件名后缀 Output filename suffix",
+        help=_t('help___suffix'),
     )
     convert_parser.add_argument(
         "--no-exif", action="store_true",
-        help="不保留EXIF元数据 Strip EXIF metadata",
+        help=_t('help___no_exif'),
     )
     convert_parser.add_argument(
         "--resize", type=str, default=argparse.SUPPRESS, metavar="WxH",
-        help="缩放尺寸 Resize dimensions",
+        help=_t('help___resize'),
     )
     convert_parser.add_argument(
         "--scale", type=int, default=argparse.SUPPRESS, metavar="PCT",
-        help="缩放百分比 Scale percentage",
+        help=_t('help___scale'),
     )
     convert_parser.add_argument(
         "--dry-run", action="store_true",
-        help="预览模式 Dry run — preview only",
+        help=_t('help___dry_run'),
     )
     convert_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归搜索目录 Recursively search directories",
+        help=_t('help___recursive'),
     )
     convert_parser.add_argument(
         "--overwrite", action="store_true", default=argparse.SUPPRESS,
-        help="覆盖已存在的文件 Overwrite existing files",
+        help=_t('help___overwrite'),
     )
     convert_parser.add_argument(
         "--target-size", type=str, default=argparse.SUPPRESS, metavar="SIZE",
-        help="目标文件体积 Target file size, e.g. 500KB, 2MB. "
-             "自动调整质量以适应该大小 Auto-tune quality to fit.",
+        help=_t('help___target_size'),
     )
     convert_parser.add_argument(
         "--raw-half-size", action="store_true",
-        help="RAW文件半尺寸解码（更快）RAW half-size decode (faster)",
+        help=_t('help___raw_half_size'),
     )
     convert_parser.add_argument(
         "--raw-no-auto-bright", action="store_true",
-        help="禁用RAW自动亮度 Disable RAW auto brightness",
+        help=_t('help___raw_no_auto_bright'),
     )
     convert_parser.add_argument(
         "--no-auto-rotate", action="store_true",
-        help="禁用自动旋转 Disable auto-rotate by EXIF",
+        help=_t('help___no_auto_rotate'),
     )
     convert_parser.add_argument(
         "--remove-original", action="store_true", default=argparse.SUPPRESS,
-        help="处理后删除原文件 Delete original after processing",
+        help=_t('help___remove_original'),
     )
     convert_parser.add_argument(
         "-y", "--yes", action="store_true",
-        help="跳过所有确认提示 Skip all confirmation prompts",
+        help=_t('help___yes'),
     )
     _add_advanced_args(convert_parser)
     _add_transform_args(convert_parser)
 
     # ── batch subcommand (combined) ──────────────────────────────────────────
     batch_parser = subparsers.add_parser(
-        "batch", help="批量处理（压缩+转换+缩放）Batch process (compress + convert + resize)",
+        "batch", help=_t('cmd_batch'),
     )
     batch_parser.add_argument(
-        "paths", nargs="+", help="文件/目录/通配符 Files, directories, or glob patterns",
+        "paths", nargs="+", help=_t('help___paths'),
     )
     batch_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
     batch_parser.add_argument(
         "-f", "--format", type=_format_arg, default=argparse.SUPPRESS,
-        help="目标格式 Target format (默认 default: JPEG, 大小写不敏感 case-insensitive)",
+        help=_t('help___format'),
     )
     batch_parser.add_argument(
         "-q", "--quality", type=int, default=argparse.SUPPRESS,
-        help="输出质量 Output quality 1-100",
+        help=_t('help___quality'),
     )
     batch_parser.add_argument(
         "-o", "--output-dir", type=str, default=argparse.SUPPRESS,
-        help="输出目录 Output directory",
+        help=_t('help___output_dir'),
     )
     batch_parser.add_argument(
         "--prefix", type=str, default=argparse.SUPPRESS,
-        help="输出文件名前缀 Output filename prefix",
+        help=_t('help___prefix'),
     )
     batch_parser.add_argument(
         "--suffix", type=str, default=argparse.SUPPRESS,
-        help="输出文件名后缀 Output filename suffix (默认 default: _processed)",
+        help=_t('help___suffix'),
     )
     batch_parser.add_argument(
         "--resize", type=str, default=argparse.SUPPRESS, metavar="WxH",
-        help="缩放尺寸 Resize dimensions, e.g. 1920x1080",
+        help=_t('help___resize'),
     )
     batch_parser.add_argument(
         "--scale", type=int, default=argparse.SUPPRESS, metavar="PCT",
-        help="缩放百分比 Scale percentage, e.g. 50",
+        help=_t('help___scale'),
     )
     batch_parser.add_argument(
         "--no-exif", action="store_true",
-        help="不保留EXIF元数据 Strip EXIF metadata",
+        help=_t('help___no_exif'),
     )
     batch_parser.add_argument(
         "--progressive", action="store_true", default=argparse.SUPPRESS,
-        help="使用渐进式JPEG Use progressive JPEG encoding",
+        help=_t('help___progressive'),
     )
     batch_parser.add_argument(
         "--no-optimize", action="store_true",
-        help="禁用PIL优化 Disable PIL optimize pass",
+        help=_t('help___no_optimize'),
     )
     batch_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归搜索目录 Recursively search directories",
+        help=_t('help___recursive'),
     )
     batch_parser.add_argument(
         "-j", "--jobs", type=int, default=argparse.SUPPRESS, metavar="N",
-        help="并行处理线程数 Parallel worker threads (默认 default: auto, "
-             "即 min(CPU核数, 8))",
+        help=_t('help___jobs'),
     )
     batch_parser.add_argument(
         "--overwrite", action="store_true", default=argparse.SUPPRESS,
-        help="覆盖已存在的文件 Overwrite existing files",
+        help=_t('help___overwrite'),
     )
     batch_parser.add_argument(
         "--dry-run", action="store_true",
-        help="预览模式，不实际处理 Dry run — preview only",
+        help=_t('help___dry_run'),
     )
     batch_parser.add_argument(
         "--target-size", type=str, default=argparse.SUPPRESS, metavar="SIZE",
-        help="目标文件体积 Target file size, e.g. 500KB, 2MB. "
-             "自动调整质量以适应该大小 Auto-tune quality to fit.",
+        help=_t('help___target_size'),
     )
     batch_parser.add_argument(
         "--raw-half-size", action="store_true",
-        help="RAW文件半尺寸解码（更快）RAW half-size decode (faster)",
+        help=_t('help___raw_half_size'),
     )
     batch_parser.add_argument(
         "--raw-no-auto-bright", action="store_true",
-        help="禁用RAW自动亮度 Disable RAW auto brightness",
+        help=_t('help___raw_no_auto_bright'),
     )
     batch_parser.add_argument(
         "--no-auto-rotate", action="store_true",
-        help="禁用自动旋转 Disable auto-rotate by EXIF",
+        help=_t('help___no_auto_rotate'),
     )
     batch_parser.add_argument(
         "--remove-original", action="store_true", default=argparse.SUPPRESS,
-        help="处理后删除原文件 Delete original after processing",
+        help=_t('help___remove_original'),
     )
     batch_parser.add_argument(
         "-y", "--yes", action="store_true",
-        help="跳过所有确认提示 Skip all confirmation prompts",
+        help=_t('help___yes'),
     )
     batch_parser.add_argument(
         "--rename", type=str, default=argparse.SUPPRESS, metavar="PATTERN",
-        help="智能重命名 Smart rename, 变量 vars: {year} {month} {day} {date} {time} "
-             "{camera} {make} {original} {iso} {focal} {seq}",
+        help=_t('help___rename'),
     )
     batch_parser.add_argument(
         "--organize", type=str, default=argparse.SUPPRESS, metavar="PRESET|PATTERN",
-        help="按模板创建子文件夹 Organize into subfolders. "
-             "预设 Presets: date, camera, date-camera. "
-             "自定义 Custom: {year}/{month}/{camera} 等 etc.",
+        help=_t('help___organize'),
     )
     batch_parser.add_argument(
         "--watermark-text", type=str, default=argparse.SUPPRESS, metavar="TEXT",
-        help="文字水印 Text watermark",
+        help=_t('help___watermark_text'),
     )
     batch_parser.add_argument(
         "--watermark-image", type=str, default=argparse.SUPPRESS, metavar="PATH",
-        help="图片水印路径 Image watermark path",
+        help=_t('help___watermark_image'),
     )
     batch_parser.add_argument(
         "--watermark-pos", type=str, default=argparse.SUPPRESS,
         choices=["CENTER", "TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT",
                  "BOTTOM_RIGHT", "TOP", "BOTTOM"],
-        help="水印位置 Watermark position",
+        help=_t('help___watermark_pos'),
     )
     batch_parser.add_argument(
         "--watermark-opacity", type=int, default=argparse.SUPPRESS, metavar="0-100",
-        help="水印透明度 Watermark opacity",
+        help=_t('help___watermark_opacity'),
     )
     batch_parser.add_argument(
         "--sizes", type=str, default=None, metavar="LABEL:WxH,...",
-        help="多尺寸输出 Multi-size, e.g. thumb:480x,screen:1920x1080",
+        help=_t('help___sizes'),
     )
     _add_advanced_args(batch_parser)
     _add_transform_args(batch_parser)
     batch_parser.add_argument(
         "--profiles", type=str, default=None, metavar="P1,P2",
-        help="按预设多跑 Multi-profile: 同一批文件按每个预设各输出一份 "
-             "(preset names, comma-separated, e.g. web,thumb)",
+        help=_t('help___profiles'),
     )
 
     # ── exif subcommand ─────────────────────────────────────────────────────
     exif_parser = subparsers.add_parser(
-        "exif", help="批量读写EXIF元数据/打标/筛选 Read, write & filter EXIF metadata",
+        "exif", help=_t('cmd_exif'),
     )
     exif_parser.add_argument(
-        "files", nargs="*", help="图片文件 Image files",
+        "files", nargs="*", help=_t('help___image_files'),
     )
     exif_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归搜索目录 Recursively search directories",
+        help=_t('help___recursive'),
     )
     exif_parser.add_argument(
         "--show", action="store_true",
-        help="读取模式: 显示元数据并按条件筛选 Read mode (filters apply)",
+        help=_t('help___show'),
     )
     exif_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
     exif_parser.add_argument(
         "--list", action="store_true",
-        help="仅输出匹配文件路径（供管道）Output matching paths only (for piping)",
+        help=_t('help___list'),
     )
     # ── write tags ──
     exif_parser.add_argument(
-        "--artist", type=str, default=None, help="作者 Artist / Photographer",
+        "--artist", type=str, default=None, help=_t('help___artist'),
     )
     exif_parser.add_argument(
-        "--copyright", type=str, default=None, help="版权 Copyright",
+        "--copyright", type=str, default=None, help=_t('help___copyright'),
     )
     exif_parser.add_argument(
-        "--description", type=str, default=None, help="图片描述 Image description",
+        "--description", type=str, default=None, help=_t('help___description'),
     )
     exif_parser.add_argument(
-        "--caption", type=str, default=None, help="图注 Caption (= description)",
+        "--caption", type=str, default=None, help=_t('help___caption'),
     )
     exif_parser.add_argument(
-        "--title", type=str, default=None, help="标题 Title",
+        "--title", type=str, default=None, help=_t('help___title'),
     )
     exif_parser.add_argument(
         "--rating", type=int, default=None, metavar="0-5",
-        help="星级 Rating 0-5（写模式=赋值；--show 下=精确筛选）"
-             "(write: set; --show: exact filter)",
+        help=_t('help___rating'),
     )
     exif_parser.add_argument(
         "--keywords", type=str, default=None, metavar="A,B",
-        help="关键词 Keywords，逗号分隔（写模式=赋值；--show 下=任意命中筛选）"
-             "(write: set; --show: any-match filter)",
+        help=_t('help___keywords'),
     )
     exif_parser.add_argument(
         "--date", type=str, default=None, metavar="DATETIME",
-        help="拍摄日期 Date taken, e.g. '2024:07:30 14:30:00'",
+        help=_t('help___date'),
     )
     exif_parser.add_argument(
-        "--software", type=str, default=None, help="软件 Software tag",
+        "--software", type=str, default=None, help=_t('help___software'),
     )
     exif_parser.add_argument(
         "--lens", type=str, default=None,
-        help="镜头型号 Lens model, e.g. 'FE 24-70mm F2.8 GM'",
+        help=_t('help___lens'),
     )
     exif_parser.add_argument(
         "--iso", type=int, default=None, metavar="N",
-        help="感光度 ISO speed, e.g. 400",
+        help=_t('help___iso'),
     )
     exif_parser.add_argument(
         "--shutter", type=str, default=None, metavar="SEC",
-        help="快门速度 Shutter speed, e.g. '1/250' 或秒 or '2' (seconds)",
+        help=_t('help___shutter'),
     )
     exif_parser.add_argument(
         "--aperture", type=str, default=None, metavar="F",
-        help="光圈 Aperture f-number, e.g. '2.8' 或 or 'f/2.8'",
+        help=_t('help___aperture'),
     )
     exif_parser.add_argument(
         "--focal", type=str, default=None, metavar="MM",
-        help="焦距 Focal length in mm, e.g. '50'",
+        help=_t('help___focal'),
     )
     exif_parser.add_argument(
         "--date-from-mtime", action="store_true",
-        help="用文件修改时间写拍摄日期（反向同步）Set DateTimeOriginal "
-             "from the file's mtime (reverse sync)",
+        help=_t('help___date_from_mtime'),
     )
     # ── filter (with --show) ──
     exif_parser.add_argument(
         "--rating-min", type=int, default=None, metavar="N",
-        help="筛选: 最低星级 Minimum rating (with --show)",
+        help=_t('help___rating_min'),
     )
     exif_parser.add_argument(
         "--camera", type=str, default=None, metavar="MODEL",
-        help="筛选: 相机型号子串 Camera model substring (with --show)",
+        help=_t('help___camera'),
     )
     exif_parser.add_argument(
         "--date-from", type=str, default=None, metavar="YYYY-MM-DD",
-        help="筛选: 起始日期 (with --show)",
+        help=_t('help___date_from'),
     )
     exif_parser.add_argument(
         "--date-to", type=str, default=None, metavar="YYYY-MM-DD",
-        help="筛选: 结束日期 (with --show)",
+        help=_t('help___date_to'),
     )
     # ── batch import ──
     exif_parser.add_argument(
         "--from-csv", type=str, default=None, metavar="meta.csv",
-        help="从CSV批量写入元数据（首列 path）Batch write from CSV "
-             "(columns: path,rating,keywords,caption,title,...)",
+        help=_t('help___from_csv'),
     )
     exif_parser.add_argument(
         "--from-json", type=str, default=None, metavar="meta.json",
-        help="从JSON批量写入元数据 Batch write from JSON "
-             "([{path, rating, keywords, ...}, ...])",
+        help=_t('help___from_json'),
     )
 
     # ── preset subcommand ───────────────────────────────────────────────────
     preset_parser = subparsers.add_parser(
-        "preset", help="管理预设配置 Manage presets",
+        "preset", help=_t('cmd_preset'),
     )
     preset_subs = preset_parser.add_subparsers(dest="preset_action")
 
-    preset_save = preset_subs.add_parser("save", help="保存预设 Save a preset")
-    preset_save.add_argument("name", help="预设名称 Preset name")
+    preset_save = preset_subs.add_parser("save", help=_t('cmd_save'))
+    preset_save.add_argument("name", help=_t('help___preset_name'))
     preset_save.add_argument("-f", "--format", type=str, default="JPEG")
     preset_save.add_argument("-q", "--quality", type=int, default=85)
     preset_save.add_argument("--resize", type=str, default=None)
     preset_save.add_argument("--suffix", type=str, default="_compressed")
-    preset_save.add_argument("--desc", type=str, default="", help="描述 Description")
+    preset_save.add_argument("--desc", type=str, default="", help=_t('help___desc'))
 
-    preset_list = preset_subs.add_parser("list", help="列出所有预设 List presets")
-    preset_load = preset_subs.add_parser("load", help="加载预设 Print preset config")
-    preset_load.add_argument("name", help="预设名称 Preset name")
-    preset_delete = preset_subs.add_parser("delete", help="删除预设 Delete preset")
-    preset_delete.add_argument("name", help="预设名称 Preset name")
+    preset_list = preset_subs.add_parser("list", help=_t('cmd_list'))
+    preset_load = preset_subs.add_parser("load", help=_t('cmd_load'))
+    preset_load.add_argument("name", help=_t('help___preset_name'))
+    preset_delete = preset_subs.add_parser("delete", help=_t('cmd_delete'))
+    preset_delete.add_argument("name", help=_t('help___preset_name'))
 
     # ── plugin subcommand ───────────────────────────────────────────────────
     plugin_parser = subparsers.add_parser(
-        "plugin", help="管理官方插件 Manage official plugins",
+        "plugin", help=_t('cmd_plugin'),
     )
     plugin_subs = plugin_parser.add_subparsers(dest="plugin_action")
 
     plugin_list = plugin_subs.add_parser(
-        "list", help="列出已装/可用插件 List installed & available",
+        "list", help=_t('cmd_list'),
     )
     plugin_list.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
 
     plugin_install = plugin_subs.add_parser(
-        "install", help="安装官方插件 Install an official plugin",
+        "install", help=_t('cmd_install'),
     )
-    plugin_install.add_argument("name", help="插件名 Plugin name (如 scunet)")
+    plugin_install.add_argument("name", help=_t('help___plugin_name_eg'))
     plugin_install.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
     plugin_install.add_argument(
         "--dry-run", action="store_true",
-        help="只显示将执行的 pip 命令，不实际安装 Preview pip command",
+        help=_t('help___dry_run'),
     )
 
     plugin_uninstall = plugin_subs.add_parser(
-        "uninstall", help="卸载插件 Uninstall a plugin",
+        "uninstall", help=_t('cmd_uninstall'),
     )
-    plugin_uninstall.add_argument("name", help="插件名 Plugin name")
+    plugin_uninstall.add_argument("name", help=_t('help___plugin_name'))
     plugin_uninstall.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
     plugin_uninstall.add_argument(
         "--dry-run", action="store_true",
-        help="只显示将执行的 pip 命令，不实际卸载 Preview pip command",
+        help=_t('help___dry_run'),
     )
 
     plugin_info = plugin_subs.add_parser(
-        "info", help="插件详情 + 权重状态 Plugin details & weight status",
+        "info", help=_t('cmd_info'),
     )
-    plugin_info.add_argument("name", help="插件名 Plugin name")
+    plugin_info.add_argument("name", help=_t('help___plugin_name'))
     plugin_info.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
 
     plugin_fetch = plugin_subs.add_parser(
-        "fetch", help="预下载模型权重 Pre-download model weights",
+        "fetch", help=_t('cmd_fetch'),
     )
-    plugin_fetch.add_argument("name", help="插件名 Plugin name")
+    plugin_fetch.add_argument("name", help=_t('help___plugin_name'))
     plugin_fetch.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
 
     plugin_scaffold = plugin_subs.add_parser(
-        "scaffold", help="生成插件开发脚手架 Scaffold a new plugin",
+        "scaffold", help=_t('cmd_scaffold'),
     )
     plugin_scaffold.add_argument(
-        "name", help="插件名（字母数字连字符）Plugin name (alnum + -)",
+        "name", help=_t('help___plugin_name_alnum'),
     )
     plugin_scaffold.add_argument(
         "--dir", type=str, default=None, metavar="DIR",
-        help="生成目录（默认 plugins/<name>）Output dir (default plugins/<name>)",
+        help=_t('help___dir'),
     )
     plugin_scaffold.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
 
     # ── watch subcommand ────────────────────────────────────────────────────
     watch_parser = subparsers.add_parser(
-        "watch", help="监视文件夹自动处理 Watch folder and auto-process",
+        "watch", help=_t('cmd_watch'),
     )
     watch_parser.add_argument(
-        "directory", help="要监视的文件夹 Directory to watch",
+        "directory", help=_t('help___directory'),
     )
     watch_parser.add_argument(
         "-f", "--format", type=_format_arg, default="JPEG",
-        help="目标格式 Target format (大小写不敏感 case-insensitive)",
+        help=_t('help___format'),
     )
     watch_parser.add_argument(
         "-q", "--quality", type=int, default=85,
-        help="输出质量 Output quality 1-100",
+        help=_t('help___quality'),
     )
     watch_parser.add_argument(
         "-o", "--output-dir", type=str, default=None,
-        help="输出目录 Output directory",
+        help=_t('help___output_dir'),
     )
     watch_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归监视子目录 Watch subdirectories",
+        help=_t('help___recursive'),
     )
     watch_parser.add_argument(
         "--remove-original", action="store_true",
-        help="处理后删除原文件 Delete original after processing",
+        help=_t('help___remove_original'),
     )
     watch_parser.add_argument(
         "--resize", type=str, default=None, metavar="WxH",
-        help="缩放尺寸 Resize dimensions",
+        help=_t('help___resize'),
     )
 
     # ── dedup subcommand ────────────────────────────────────────────────────
     dedup_parser = subparsers.add_parser(
-        "dedup", help="查找重复图片 Find duplicate images",
+        "dedup", help=_t('cmd_dedup'),
     )
     dedup_parser.add_argument(
-        "paths", nargs="+", help="文件/目录/通配符 Files, directories, or glob patterns",
+        "paths", nargs="+", help=_t('help___paths'),
     )
     dedup_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
     dedup_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归搜索目录 Recursively search subdirectories",
+        help=_t('help___recursive'),
     )
     dedup_parser.add_argument(
         "--threshold", type=int, default=5, metavar="N",
-        help="汉明距离阈值 Hamming distance threshold (默认 default: 5, 越小越严格 stricter)",
+        help=_t('help___threshold'),
     )
     dedup_parser.add_argument(
         "--action", type=str, default="report",
         choices=["report", "move", "delete", "keep-sharpest"],
-        help="操作: report=仅报告, move=移到_duplicates文件夹, delete=删除, "
-             "keep-sharpest=连拍保留最清晰 (默认 default: report)",
+        help=_t('help___action'),
     )
     dedup_parser.add_argument(
         "--dry-run", action="store_true",
-        help="预览模式 不实际移动/删除 Dry run — only show what would happen",
+        help=_t('help___dry_run'),
     )
 
     # ── info subcommand ─────────────────────────────────────────────────────
     info_parser = subparsers.add_parser(
-        "info", help="显示支持的格式列表 Show supported formats",
+        "info", help=_t('cmd_info'),
     )
     info_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
 
     # ── rename subcommand ───────────────────────────────────────────────────
     rename_parser = subparsers.add_parser(
-        "rename", help="批量重命名图片 Batch rename images",
+        "rename", help=_t('cmd_rename'),
     )
     rename_parser.add_argument(
-        "files", nargs="+", help="图片文件或通配符 Image files or glob patterns",
+        "files", nargs="+", help=_t('help___files'),
     )
     rename_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
     rename_parser.add_argument(
         "--pattern", type=str, required=True, metavar="PATTERN",
-        help="命名模板 Rename pattern, 变量 vars: {year} {month} {day} {date} {time} "
-             "{camera} {make} {original} {iso} {focal} {seq}",
+        help=_t('help___pattern'),
     )
     rename_parser.add_argument(
         "-o", "--output-dir", type=str, default=None,
-        help="输出目录（复制改名而非就地）Copy to directory instead of renaming in place",
+        help=_t('help___output_dir'),
     )
     rename_parser.add_argument(
         "--dry-run", action="store_true",
-        help="预览模式 Dry run — preview only",
+        help=_t('help___dry_run'),
     )
     rename_parser.add_argument(
         "--overwrite", action="store_true",
-        help="覆盖已存在的文件 Overwrite existing files",
+        help=_t('help___overwrite'),
     )
     rename_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归搜索目录 Recursively search directories",
+        help=_t('help___recursive'),
     )
 
     # ── check subcommand ────────────────────────────────────────────────────
     check_parser = subparsers.add_parser(
-        "check", help="检查图片完整性 Verify image integrity",
+        "check", help=_t('cmd_check'),
     )
     check_parser.add_argument(
-        "files", nargs="+", help="图片文件或通配符 Image files or glob patterns",
+        "files", nargs="+", help=_t('help___files'),
     )
     check_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归搜索目录 Recursively search directories",
+        help=_t('help___recursive'),
     )
     check_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
 
     # ── contact-sheet subcommand ────────────────────────────────────────────
     sheet_parser = subparsers.add_parser(
-        "contact-sheet", help="生成联系表 Contact sheet (grid montage)",
+        "contact-sheet", help=_t('cmd_contact_sheet'),
     )
     sheet_parser.add_argument(
-        "files", nargs="+", help="图片文件或通配符 Image files or glob patterns",
+        "files", nargs="+", help=_t('help___files'),
     )
     sheet_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
     sheet_parser.add_argument(
         "-o", "--output", type=str, required=True,
-        help="输出文件路径 Output image path (.jpg/.png)",
+        help=_t('help___output'),
     )
     sheet_parser.add_argument(
         "--cols", type=int, default=4,
-        help="每行列数 Columns per row (默认 default: 4)",
+        help=_t('help___cols'),
     )
     sheet_parser.add_argument(
         "--thumb", type=str, default="240x240", metavar="WxH",
-        help="缩略图尺寸 Thumbnail size (默认 default: 240x240)",
+        help=_t('help___thumb'),
     )
     sheet_parser.add_argument(
         "--caption", action="store_true",
-        help="显示文件名 Show filename captions",
+        help=_t('help___caption'),
     )
     sheet_parser.add_argument(
         "--bg", type=str, default="#000000",
-        help="背景色 Background color, e.g. #1a1a1a",
+        help=_t('help___bg'),
     )
     sheet_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归搜索目录 Recursively search directories",
+        help=_t('help___recursive'),
     )
 
     # ── cull subcommand ─────────────────────────────────────────────────────
     cull_parser = subparsers.add_parser(
-        "cull", help="曝光/清晰度筛选 Cull by exposure & sharpness",
+        "cull", help=_t('cmd_cull'),
     )
     cull_parser.add_argument(
-        "paths", nargs="+", help="文件/目录/通配符 Files, directories, or glob patterns",
+        "paths", nargs="+", help=_t('help___paths'),
     )
     cull_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归搜索目录 Recursively search subdirectories",
+        help=_t('help___recursive'),
     )
     cull_parser.add_argument(
         "--overexposed-max", type=float, default=None, metavar="PCT",
-        help="筛选: 过曝像素上限 Max overexposed %% (default: 不筛选 no filter)",
+        help=_t('help___overexposed_max'),
     )
     cull_parser.add_argument(
         "--underexposed-max", type=float, default=None, metavar="PCT",
-        help="筛选: 欠曝像素上限 Max underexposed %%",
+        help=_t('help___underexposed_max'),
     )
     cull_parser.add_argument(
         "--luminance-min", type=float, default=None, metavar="0-1",
-        help="筛选: 最低平均亮度 Min mean luminance (0-1)",
+        help=_t('help___luminance_min'),
     )
     cull_parser.add_argument(
         "--luminance-max", type=float, default=None, metavar="0-1",
-        help="筛选: 最高平均亮度 Max mean luminance (0-1)",
+        help=_t('help___luminance_max'),
     )
     cull_parser.add_argument(
         "--sharpness-min", type=float, default=None, metavar="N",
-        help="筛选: 最低清晰度分 Min blur-score",
+        help=_t('help___sharpness_min'),
     )
     cull_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
     cull_parser.add_argument(
         "--list", action="store_true",
-        help="仅输出通过筛选的路径（供管道）Output passing paths only (for piping)",
+        help=_t('help___list'),
     )
 
     # ── hash subcommand ─────────────────────────────────────────────────────
     hash_parser = subparsers.add_parser(
-        "hash", help="生成/校验校验和清单 Checksum manifest (SHA-256)",
+        "hash", help=_t('cmd_hash'),
     )
     hash_parser.add_argument(
-        "paths", nargs="*", help="文件/目录/通配符 Files, directories, or glob patterns",
+        "paths", nargs="*", help=_t('help___paths'),
     )
     hash_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归搜索目录 Recursively search subdirectories",
+        help=_t('help___recursive'),
     )
     hash_parser.add_argument(
         "-o", "--output", type=str, default=None, metavar="manifest.csv",
-        help="清单输出路径 Manifest output (默认 default: ./manifest.csv)",
+        help=_t('help___output'),
     )
     hash_parser.add_argument(
         "--verify", type=str, default=None, metavar="manifest.csv",
-        help="校验模式: 重新哈希并对照清单 Verify mode",
+        help=_t('help___verify'),
     )
     hash_parser.add_argument(
-        "--sha256", action="store_true", help="使用 SHA-256（默认）Use SHA-256",
+        "--sha256", action="store_true", help=_t('help___sha256'),
     )
     hash_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
 
     # ── gallery subcommand ──────────────────────────────────────────────────
     gallery_parser = subparsers.add_parser(
-        "gallery", help="生成 HTML 画廊 Generate HTML gallery",
+        "gallery", help=_t('cmd_gallery'),
     )
     gallery_parser.add_argument(
-        "paths", nargs="+", help="文件/目录/通配符 Files, directories, or glob patterns",
+        "paths", nargs="+", help=_t('help___paths'),
     )
     gallery_parser.add_argument(
         "-o", "--output", type=str, required=True, metavar="DIR",
-        help="输出目录 Output directory",
+        help=_t('help___output_dir'),
     )
     gallery_parser.add_argument(
         "--title", type=str, default="PhotoS Gallery", metavar="TITLE",
-        help="画廊标题 Gallery title (默认 default: PhotoS Gallery)",
+        help=_t('help___title'),
     )
     gallery_parser.add_argument(
         "--thumb", type=int, default=360, metavar="PX",
-        help="缩略图最长边 Thumbnail longest side (默认 default: 360)",
+        help=_t('help___thumb'),
     )
     gallery_parser.add_argument(
         "-r", "--recursive", action="store_true",
-        help="递归搜索目录 Recursively search subdirectories",
+        help=_t('help___recursive'),
     )
     gallery_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
 
     # ── bench subcommand ────────────────────────────────────────────────────
     bench_parser = subparsers.add_parser(
-        "bench", help="批量处理基准测试 Batch pipeline benchmark",
+        "bench", help=_t('cmd_bench'),
     )
     bench_parser.add_argument(
         "--dir", type=str, required=True, metavar="DIR",
-        help="图片目录（含 RAW/JPEG 等）Directory with images to benchmark",
+        help=_t('help___dir'),
     )
     bench_parser.add_argument(
         "-j", "--jobs", type=str, default="1,2,4,8", metavar="N,N,...",
-        help="要测的并发数列表 Comma-separated worker counts "
-             "(默认 default: 1,2,4,8)",
+        help=_t('help___jobs'),
     )
     bench_parser.add_argument(
         "--images", type=int, default=None, metavar="N",
-        help="最多取前 N 张图（默认全部）Limit to first N images",
+        help=_t('help___images'),
     )
     bench_parser.add_argument(
         "--denoise", type=float, default=None, metavar="N",
-        help="附加降噪强度（模拟高负载管线）Add denoise to the workload",
+        help=_t('help___denoise'),
     )
     bench_parser.add_argument(
         "--evaluate", action="store_true",
-        help="评估输出质量（PSNR/SSIM 对比源图）Score output quality "
-             "(PSNR/SSIM vs sources)",
+        help=_t('help___evaluate'),
     )
     bench_parser.add_argument(
         "--json", action="store_true",
-        help="输出 JSON 格式（供 AI agent 调用）Output JSON format for AI agents",
+        help=_t('help___json'),
     )
 
     # ── config subcommand ───────────────────────────────────────────────────
     config_parser = subparsers.add_parser(
-        "config", help="管理配置文件 Manage config file (photo-s.toml)",
+        "config", help=_t('cmd_config'),
     )
     config_subs = config_parser.add_subparsers(dest="config_action")
     config_init = config_subs.add_parser(
-        "init", help="创建默认配置文件 Create a default config file",
+        "init", help=_t('cmd_init'),
     )
     config_init.add_argument(
         "--path", type=str, default=None,
-        help="输出路径 Output path (默认 default: ./photo-s.toml)",
+        help=_t('help___path'),
     )
     config_show = config_subs.add_parser(
-        "show", help="显示生效配置 Show effective config",
+        "show", help=_t('cmd_show'),
     )
     config_show.add_argument(
         "--path", type=str, default=None,
-        help="配置文件路径 Config file path",
+        help=_t('help___path'),
     )
 
     # ── serve subcommand ────────────────────────────────────────────────────
     serve_parser = subparsers.add_parser(
-        "serve", help="启动REST API服务（供 AI agent 调用）Start REST API server",
+        "serve", help=_t('cmd_serve'),
     )
     serve_parser.add_argument(
         "--host", type=str, default="127.0.0.1",
-        help="监听地址 Listen address (默认 default: 127.0.0.1)",
+        help=_t('help___host'),
     )
     serve_parser.add_argument(
         "--port", type=int, default=8787,
-        help="监听端口 Port (默认 default: 8787)",
+        help=_t('help___port'),
     )
     serve_parser.add_argument(
         "--token", type=str, default=None, metavar="TOKEN|auto",
-        help="Bearer token 认证；auto = 随机生成 Bearer auth. "
-             "'auto' generates a random token",
+        help=_t('help___token'),
     )
     serve_parser.add_argument(
         "--ready-file", type=str, default=None, metavar="PATH",
-        help="监听成功后写入 {port, token, pid} 握手文件（供宿主 agent 读取）"
-             "Write a handshake JSON for host agents",
+        help=_t('help___ready_file'),
     )
     serve_parser.add_argument(
         "--config", type=str, default=None,
-        help="配置文件路径 Config file path",
+        help=_t('help___path'),
     )
 
     # ── mcp subcommand ───────────────────────────────────────────────────────
     mcp_parser = subparsers.add_parser(
-        "mcp", help="启动 MCP server（供 AI agent / Claude Desktop 调用）"
-                    "Start MCP server (stdio)",
+        "mcp", help=_t('cmd_mcp'),
     )
     mcp_parser.add_argument(
         "--config", type=str, default=None,
-        help="配置文件路径 Config file path",
+        help=_t('help___path'),
     )
     mcp_parser.add_argument(
         "--list-tools", action="store_true",
-        help="列出工具与参数 schema（不启动服务器）"
-             "List tools & schemas without starting",
+        help=_t('help___list_tools'),
     )
+
+    # Accept --language anywhere (before or after a subcommand). Resolution
+    # already happened in _pre_parse_language; these copies just let
+    # parse_args tolerate the flag after a subcommand, hidden from --help.
+    for _sub in (compress_parser, convert_parser, batch_parser, exif_parser,
+                 preset_parser, plugin_parser, watch_parser, dedup_parser,
+                 info_parser, rename_parser, check_parser, sheet_parser,
+                 cull_parser, hash_parser, gallery_parser, bench_parser,
+                 config_parser, serve_parser, mcp_parser,
+                 preset_save, preset_load, preset_delete,
+                 plugin_install, plugin_uninstall, plugin_info, plugin_fetch,
+                 config_init, config_show):
+        _sub.add_argument("--language", "--lang",
+                          choices=["en", "zh", "auto"],
+                          default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
     parsed = parser.parse_args(args)
 
@@ -1380,7 +1377,7 @@ def run_cli(args: List[str] = None) -> int:
 
         watch_dir = parsed.directory
         if not os.path.isdir(watch_dir):
-            print(f"❌ 目录不存在 Directory not found: {watch_dir}")
+            print(f"{_t('msg_dir_not_found')}: {watch_dir}")
             return 1
 
         w, h = _parse_dimensions(parsed.resize) if parsed.resize else (None, None)
@@ -1400,16 +1397,16 @@ def run_cli(args: List[str] = None) -> int:
 
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print("❌ 没有找到支持的图片文件。No supported image files found.")
+            print(_t("msg_no_images"))
             return 1
 
         dedup_json = getattr(parsed, 'json', False)
-        print(f"🔍 正在扫描 {len(files)} 个文件 Scanning...", file=sys.stderr)
+        print(_t("msg_scanning", n=len(files)), file=sys.stderr)
         print(file=sys.stderr)
 
         def progress_cb(current, total):
-            print(f"  计算哈希 Hashing: [{current}/{total}]", end="\r",
-                  file=sys.stderr)
+            print(f"  {_t('msg_hashing_progress')}: [{current}/{total}]",
+                  end="\r", file=sys.stderr)
 
         dup_groups = find_duplicates(files, threshold=parsed.threshold,
                                      progress_callback=progress_cb)
@@ -1430,32 +1427,33 @@ def run_cli(args: List[str] = None) -> int:
             }, indent=2, ensure_ascii=False))
         else:
             if not dup_groups:
-                print("✅ 未发现重复图片。No duplicates found.")
+                print(_t("msg_no_dupes"))
             else:
-                print(f"📊 发现 {len(dup_groups)} 组重复 Found duplicate groups:")
+                print(_t("msg_dup_groups", n=len(dup_groups)))
                 print()
                 for i, (h, paths) in enumerate(dup_groups.items(), 1):
-                    print(f"  组 #{i}: {len(paths)} 个文件 files")
+                    print(_t("msg_group_files", i=i, n=len(paths)))
                     for p in paths:
                         print(f"    {'⭐' if p == paths[0] else '📎'} {p} "
                               f"({format_size(os.path.getsize(p))})")
                     print()
-                print(f"共 {total_dupes} 个重复文件 duplicate files, "
-                      f"可节省 {savings:,} 字节")
+                print(_t("msg_dupes_total", n=total_dupes, savings=savings))
 
         if parsed.action in ("move", "delete", "keep-sharpest"):
             if parsed.dry_run:
                 print()
-                print("🔍 预览模式 Dry run — 不会实际操作 no files will be changed")
+                print(_t("msg_dry_run"))
             elif not dedup_json:
                 # JSON callers have no stdin; requesting the action explicitly
                 # IS the confirmation (same rule as --remove-original --json).
-                verb = ("保留最清晰并删除其余" if parsed.action == "keep-sharpest"
-                        else ("移动" if parsed.action == "move" else "删除"))
-                confirm = input(f"\n⚠️  即将{verb} {total_dupes} 个文件. 确认? [y/N]: "
-                                ).strip().lower()
+                verb = (_t("msg_verb_keep_sharpest")
+                        if parsed.action == "keep-sharpest"
+                        else (_t("msg_verb_move")
+                              if parsed.action == "move" else _t("msg_verb_delete")))
+                confirm = input(_t("msg_confirm_dedup", verb=verb,
+                                   n=total_dupes)).strip().lower()
                 if confirm not in ("y", "yes"):
-                    print("已取消 Cancelled.")
+                    print(_t("msg_cancelled"))
                     return 0
 
             kept, removed = handle_duplicates(dup_groups, action=parsed.action,
@@ -1465,15 +1463,17 @@ def run_cli(args: List[str] = None) -> int:
                                   "removed": removed},
                                  indent=2, ensure_ascii=False))
             else:
-                action_verb = {
-                    "move": "移动 moved",
-                    "delete": "删除 deleted",
-                    "keep-sharpest": "保留最清晰并移除",
+                _will = {
+                    "move": _t("msg_will_move", removed=removed, kept=kept),
+                    "delete": _t("msg_will_delete", removed=removed, kept=kept),
+                    "keep-sharpest": _t("msg_will_keep", removed=removed, kept=kept),
                 }[parsed.action]
-                if parsed.dry_run:
-                    print(f"将{action_verb} {removed} 个文件, 保留 {kept} 个")
-                else:
-                    print(f"已{action_verb} {removed} files, 保留 kept {kept}")
+                _done = {
+                    "move": _t("msg_done_move", removed=removed, kept=kept),
+                    "delete": _t("msg_done_delete", removed=removed, kept=kept),
+                    "keep-sharpest": _t("msg_done_keep", removed=removed, kept=kept),
+                }[parsed.action]
+                print(_will if parsed.dry_run else _done)
 
         # report mode: exit 1 when duplicates were found — agents can branch on
         # the exit code, consistent with `check` (1 = problems found)
@@ -1494,34 +1494,34 @@ def run_cli(args: List[str] = None) -> int:
                 suffix=parsed.suffix,
             )
             save_preset(parsed.name, opts, parsed.desc)
-            print(f"✅ 预设已保存 Preset saved: {parsed.name}")
+            print(f"{_t('msg_preset_saved')}: {parsed.name}")
 
         elif parsed.preset_action == "list":
             presets = list_presets()
             if presets:
-                print("📋 可用预设 Available presets:")
+                print(_t("msg_presets_available"))
                 for p in presets:
                     print(f"   {p}")
             else:
-                print("📋 暂无预设 No presets saved yet.")
+                print(_t("msg_no_presets"))
 
         elif parsed.preset_action == "load":
             opts = load_preset(parsed.name)
             if opts:
-                print(f"📋 预设 Preset '{parsed.name}':")
+                print(_t("msg_preset_show", name=parsed.name))
                 print(f"   photo-s batch <files> -f {opts.output_format} -q {opts.quality}", end="")
                 if opts.max_width or opts.max_height:
                     print(f" --resize {opts.max_width or ''}x{opts.max_height or ''}", end="")
                 print(f" --suffix {opts.suffix}")
             else:
-                print(f"❌ 预设不存在 Preset not found: {parsed.name}")
+                print(f"{_t('msg_preset_not_found')}: {parsed.name}")
                 return 1
 
         elif parsed.preset_action == "delete":
             if delete_preset(parsed.name):
-                print(f"✅ 预设已删除 Preset deleted: {parsed.name}")
+                print(f"{_t('msg_preset_deleted')}: {parsed.name}")
             else:
-                print(f"❌ 预设不存在 Preset not found: {parsed.name}")
+                print(f"{_t('msg_preset_not_found')}: {parsed.name}")
                 return 1
 
         else:
@@ -1578,9 +1578,9 @@ def run_cli(args: List[str] = None) -> int:
             with open(parsed.from_csv, newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
             done, failed = _apply_batch_meta(rows, parsed.from_csv)
-            print(f"✅ 已从CSV写入元数据 Written from CSV: {done} 个文件 files")
+            print(f"{_t('msg_written_csv')}: {done} {_t('msg_files_suffix')}")
             if failed:
-                print(f"⚠️  {failed} 个文件写入失败 failed to write", file=sys.stderr)
+                print(_t("msg_write_failed", n=failed), file=sys.stderr)
             return 0 if failed == 0 else 1
         if getattr(parsed, 'from_json', None):
             import json
@@ -1588,9 +1588,9 @@ def run_cli(args: List[str] = None) -> int:
             if not isinstance(rows, list):
                 rows = [rows]
             done, failed = _apply_batch_meta(rows, parsed.from_json)
-            print(f"✅ 已从JSON写入元数据 Written from JSON: {done} 个文件 files")
+            print(f"{_t('msg_written_json')}: {done} {_t('msg_files_suffix')}")
             if failed:
-                print(f"⚠️  {failed} 个文件写入失败 failed to write", file=sys.stderr)
+                print(_t("msg_write_failed", n=failed), file=sys.stderr)
             return 0 if failed == 0 else 1
 
         # ── Read / filter mode ──
@@ -1598,7 +1598,7 @@ def run_cli(args: List[str] = None) -> int:
             files = _collect_files(parsed.files,
                                    recursive=getattr(parsed, 'recursive', False))
             if not files:
-                print("❌ 没有找到支持的图片文件。No supported image files found.")
+                print(_t("msg_no_images"))
                 return 1
 
             rating_min = parsed.rating_min
@@ -1635,13 +1635,13 @@ def run_cli(args: List[str] = None) -> int:
             else:
                 for r in results:
                     print(f"  {r['path']}")
-                    print(f"     日期 date: {r['date']} {r['time']}"
-                          f" | 相机 camera: {r['camera'] or '-'}"
-                          f" | ISO: {r['iso'] or '-'} | 焦距 focal: {r['focal'] or '-'}")
-                    print(f"     星级 rating: {r['rating']}"
-                          f" | 关键词 keywords: {', '.join(r['keywords']) or '-'}"
-                          f" | 标题 title: {r['title'] or '-'}"
-                          f" | 图注 caption: {r['caption'] or '-'}")
+                    print(f"     {_t('msg_date_label')}: {r['date']} {r['time']}"
+                          f" | camera: {r['camera'] or '-'}"
+                          f" | ISO: {r['iso'] or '-'} | focal: {r['focal'] or '-'}")
+                    print(f"     {_t('msg_rating_label')}: {r['rating']}"
+                          f" | keywords: {', '.join(r['keywords']) or '-'}"
+                          f" | title: {r['title'] or '-'}"
+                          f" | caption: {r['caption'] or '-'}")
             return 0
 
         # ── Write mode: collect tags from flags ──
@@ -1667,23 +1667,22 @@ def run_cli(args: List[str] = None) -> int:
                     failed += 1
                     print(f"  ❌ {os.path.basename(f)}: {e}", file=sys.stderr)
                     continue
-            print("✅ 已用文件修改时间写入拍摄日期 DateTimeOriginal ← mtime")
+            print(_t("msg_synced_date"))
             if failed:
-                print(f"⚠️  {failed} 个文件写入失败 failed to write", file=sys.stderr)
+                print(_t("msg_write_failed", n=failed), file=sys.stderr)
             return 0 if failed == 0 else 1
 
         if not tags:
-            print("❌ 请指定至少一个EXIF标签，或 --show 读取。"
-                  "Specify at least one EXIF tag, or --show to read.")
+            print(_t("msg_no_exif_tags"))
             return 1
 
         files = _collect_files(parsed.files,
                                recursive=getattr(parsed, 'recursive', False))
         if not files:
-            print("❌ 没有找到支持的图片文件。No supported image files found.")
+            print(_t("msg_no_images"))
             return 1
 
-        print(f"📝 编辑EXIF标签 Editing EXIF tags on {len(files)} file(s)...")
+        print(f"{_t('msg_editing_exif')} ({len(files)} {_t('msg_files_suffix')})...")
         for tag, val in tags.items():
             print(f"   {tag}: {val}")
         print()
@@ -1698,9 +1697,9 @@ def run_cli(args: List[str] = None) -> int:
                 continue
             print(f"  {os.path.basename(f)}: {msg}")
 
-        print("\n✅ EXIF编辑完成 EXIF editing done.")
+        print(f"\n{_t('msg_exif_done')}")
         if failed:
-            print(f"⚠️  {failed} 个文件写入失败 failed to write", file=sys.stderr)
+            print(_t("msg_write_failed", n=failed), file=sys.stderr)
         return 0 if failed == 0 else 1
 
     # ── Handle 'info' command ────────────────────────────────────────────────
@@ -1719,14 +1718,14 @@ def run_cli(args: List[str] = None) -> int:
                 "plugins": plugins(),
             }, indent=2, ensure_ascii=False))
             return 0
-        print("PhotoS — 支持的图片格式 Supported Formats")
+        print(_t("msg_formats_title"))
         print("=" * 50)
         print()
-        print("输入格式 Input (可读取 can read):")
+        print(_t("msg_input_formats"))
         for ext in sorted(ALL_INPUT_EXTENSIONS):
             print(f"  {ext}")
         print()
-        print("输出格式 Output (可写入 can write):")
+        print(_t("msg_output_formats"))
         for fmt, info in SUPPORTED_FORMATS.items():
             if fmt in PIL_WRITABLE:
                 pil = "✅"
@@ -1737,21 +1736,21 @@ def run_cli(args: List[str] = None) -> int:
             print(f"  {fmt}  {info['ext']}  {pil}")
         if not _HAS_PILLOW_HEIF:
             print()
-            print("💡 提示: 安装 pillow-heif 可获得跨平台 HEIC 支持")
+            print(_t("msg_heic_hint"))
             print("   pip install pillow-heif")
         print()
-        print("可选依赖 Optional features:")
+        print(_t("msg_optional_features"))
         for name, installed in optional_features().items():
             print(f"  {'✅' if installed else '·'} {name}")
         plugins = plugins()
         print()
-        print("已装插件 Installed plugins:")
+        print(_t("msg_installed_plugins"))
         if plugins:
             for p in plugins:
                 provides = ", ".join(p["provides"]) or "-"
                 print(f"  {p['name']}  [{provides}]")
         else:
-            print("  （无 none）")
+            print(f"  {_t('msg_none')}")
         return 0
 
     # ── Handle 'config' command ─────────────────────────────────────────────
@@ -1761,25 +1760,25 @@ def run_cli(args: List[str] = None) -> int:
         if parsed.config_action == "init":
             path = parsed.path or "photo-s.toml"
             save_config(path, default_config_text())
-            print(f"✅ 已创建配置文件 Created config file: {os.path.abspath(path)}")
-            print("   在此文件设置默认值, 之后用 --config 指定或放在工作目录自动生效")
+            print(f"{_t('msg_config_created')}: {os.path.abspath(path)}")
+            print(f"   {_t('msg_config_hint')}")
             return 0
         elif parsed.config_action == "show":
             path = parsed.path or find_config()
             if not path:
-                print("⚠️  未找到配置文件。No config file found.")
-                print("   用 `photo-s config init` 创建 Create with `photo-s config init`")
+                print(_t("msg_no_config"))
+                print(f"   {_t('msg_config_init_hint')}")
                 return 0
             try:
                 cfg = load_config(path)
                 apply_config(cfg, ProcessOptions())
             except Exception as e:
-                print(f"❌ 配置文件加载失败 Config load error: {e}")
+                print(f"{_t('msg_config_load_err')}: {e}")
                 return 1
-            print(f"📋 配置文件 Config file: {path}")
+            print(f"{_t('msg_config_file')} {path}")
             opts_dict = cfg.get("options", {})
             if not opts_dict:
-                print("   (无自定义选项 no custom options)")
+                print(f"   {_t('msg_no_custom_opts')}")
             for key, value in opts_dict.items():
                 print(f"   {key} = {value}")
             return 0
@@ -1797,12 +1796,12 @@ def run_cli(args: List[str] = None) -> int:
                 cfg = load_config(parsed.config)
                 base_options = apply_config(cfg, base_options)
             except Exception as e:
-                print(f"❌ 配置文件加载失败 Config load error: {e}")
+                print(f"{_t('msg_config_load_err')}: {e}")
                 return 1
         token = parsed.token
         if token == "auto":
             token = generate_token()
-            print(f"🔐 已生成 token Generated: {token}", file=sys.stderr)
+            print(f"{_t('msg_token_generated')}: {token}", file=sys.stderr)
         run_server(parsed.host, parsed.port, options=base_options,
                    token=token, ready_file=parsed.ready_file)
         return 0
@@ -1812,9 +1811,7 @@ def run_cli(args: List[str] = None) -> int:
         # The mcp SDK requires Python >= 3.10 — check before any import so
         # py3.9 gets a clear message instead of an ImportError.
         if sys.version_info < (3, 10):
-            print("❌ photo-s mcp 需要 Python 3.10+（mcp SDK 要求）"
-                  "MCP server requires Python 3.10+ (mcp SDK).",
-                  file=sys.stderr)
+            print(_t("msg_mcp_py310"), file=sys.stderr)
             return 1
         try:
             if parsed.list_tools:
@@ -1837,18 +1834,18 @@ def run_cli(args: List[str] = None) -> int:
 
         files = _collect_files(parsed.files, recursive=parsed.recursive)
         if not files:
-            print("❌ 没有找到支持的图片文件。No supported image files found.")
+            print(_t("msg_no_images"))
             return 1
 
         rename_json = getattr(parsed, 'json', False)
         if rename_json:
             pass  # machine output only — no human preamble on stdout
         elif parsed.dry_run:
-            print("🔍 预览模式 Dry Run — 不会改动任何文件 (no files will be changed)")
+            print(_t("msg_dry_run_settings"))
         elif parsed.output_dir:
-            print(f"📁 将复制到 Copy to: {parsed.output_dir}")
+            print(f"{_t('msg_copy_to')}: {parsed.output_dir}")
         else:
-            print("📝 将就地改名 Renaming in place")
+            print(_t("msg_rename_in_place"))
         if not rename_json:
             print()
 
@@ -1871,9 +1868,9 @@ def run_cli(args: List[str] = None) -> int:
                       f"{os.path.basename(r['input'])} → "
                       f"{os.path.basename(r['output'])}{extra}")
             print()
-            print(f"📊 成功 {ok}/{len(results)} files")
+            print(_t("msg_rename_ok", ok=ok, total=len(results)))
             if not parsed.dry_run and not parsed.output_dir:
-                print("   （注意: 就地改名会替换原文件名 in-place rename replaces the original name）")
+                print(f"   {_t('msg_rename_note')}")
         return 0 if ok == len(results) else 1
 
     # ── Handle 'check' command ──────────────────────────────────────────────
@@ -1882,7 +1879,7 @@ def run_cli(args: List[str] = None) -> int:
 
         files = _collect_files(parsed.files, recursive=parsed.recursive)
         if not files:
-            print("❌ 没有找到支持的图片文件。No supported image files found.")
+            print(_t("msg_no_images"))
             return 1
 
         results = verify_images(files)
@@ -1901,8 +1898,8 @@ def run_cli(args: List[str] = None) -> int:
                 mark = "✅" if r["ok"] else "❌"
                 extra = "" if r["ok"] else f" — {r['error']}"
                 print(f"  {mark} {r['path']}{extra}")
-            print(f"\n📊 检查完成 Checked {len(results)} 个文件 files, "
-                  f"{len(corrupt)} 个损坏 corrupt")
+            print(f"\n{_t('msg_check_done')}: {len(results)} {_t('msg_files_suffix')}, "
+                  f"{len(corrupt)} {_t('msg_check_corrupt')}")
 
         return 0 if not corrupt else 1
 
@@ -1913,7 +1910,7 @@ def run_cli(args: List[str] = None) -> int:
 
         files = _collect_files(parsed.files, recursive=parsed.recursive)
         if not files:
-            print("❌ 没有找到支持的图片文件。No supported image files found.")
+            print(_t("msg_no_images"))
             return 1
 
         tw, th = _parse_dimensions(parsed.thumb) if parsed.thumb else (240, 240)
@@ -1931,7 +1928,8 @@ def run_cli(args: List[str] = None) -> int:
             print(json.dumps({"output": out, "count": len(files)},
                              indent=2, ensure_ascii=False))
         else:
-            print(f"✅ 已生成 Generated contact sheet: {out}  ({len(files)} 张 images)")
+            print(f"{_t('msg_contact_sheet')}: {out}  "
+                  f"({_t('msg_images_count', n=len(files))})")
         return 0
 
     # ── Handle 'cull' command ───────────────────────────────────────────────
@@ -1939,7 +1937,7 @@ def run_cli(args: List[str] = None) -> int:
         from .cull import cull_files
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print("❌ 没有找到支持的图片文件。No supported image files found.")
+            print(_t("msg_no_images"))
             return 1
 
         results = cull_files(
@@ -1968,7 +1966,7 @@ def run_cli(args: List[str] = None) -> int:
                 print(f"  {mark} {r['path']}  lum={r['luminance']} "
                       f"over={r['overexposed_pct']}% "
                       f"under={r['underexposed_pct']}%{extra}")
-            print(f"\n📊 通过 Kept: {len(kept_paths)}/{len(results)}")
+            print(f"\n{_t('msg_cull_kept')}: {len(kept_paths)}/{len(results)}")
         return 0
 
     # ── Handle 'hash' command ───────────────────────────────────────────────
@@ -1982,27 +1980,27 @@ def run_cli(args: List[str] = None) -> int:
             if parsed.json:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
             else:
-                print(f"清单 Manifest: {parsed.verify}  ({report['algorithm']})")
-                print(f"  共 {report['total']} 项, 一致 OK: {report['ok']}")
+                print(f"{_t('msg_manifest')}: {parsed.verify}  ({report['algorithm']})")
+                print(_t("msg_total_ok", total=report["total"], ok=report["ok"]))
                 if report["missing"]:
-                    print(f"  ❌ 缺失 Missing ({len(report['missing'])}):")
+                    print(f"  {_t('msg_missing')} ({len(report['missing'])}):")
                     for p in report["missing"]:
                         print(f"    {p}")
                 if report["mismatched"]:
-                    print(f"  ⚠️  不匹配 Mismatched ({len(report['mismatched'])}):")
+                    print(f"  {_t('msg_mismatched')} ({len(report['mismatched'])}):")
                     for m in report["mismatched"]:
                         print(f"    {m['path']}")
-                        print(f"     期望 expected: {m['expected']}")
-                        print(f"     实际 actual:   {m['actual']}")
+                        print(f"     {_t('msg_expected')}: {m['expected']}")
+                        print(f"     {_t('msg_actual')}:   {m['actual']}")
             return 0 if (not report["missing"] and not report["mismatched"]) else 1
 
         # Hash every file (not just images — for archives)
         files = collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print("❌ 没有找到文件。No files found.")
+            print(_t("msg_no_files"))
             return 1
 
-        print(f"🔍 计算哈希 Hashing {len(files)} 个文件...", file=sys.stderr)
+        print(_t("msg_hashing_start", n=len(files)), file=sys.stderr)
         entries = compute_checksums(files)
         out = parsed.output or "manifest.csv"
         write_manifest(out, entries)
@@ -2010,7 +2008,7 @@ def run_cli(args: List[str] = None) -> int:
             print(json.dumps({"output": os.path.abspath(out),
                               "count": len(files)}, indent=2, ensure_ascii=False))
         else:
-            print(f"✅ 清单已写入 Written manifest: {os.path.abspath(out)} "
+            print(f"{_t('msg_manifest_written')}: {os.path.abspath(out)} "
                   f"({len(files)} 项)")
         return 0
 
@@ -2020,20 +2018,17 @@ def run_cli(args: List[str] = None) -> int:
         from .bench import run_benchmark
         files = _collect_files([parsed.dir], recursive=True)
         if not files:
-            print("❌ 目录里没有找到支持的图片文件。No images found.",
-                  file=sys.stderr)
+            print(_t("msg_no_images_dir"), file=sys.stderr)
             return 1
         if parsed.images:
             files = files[:parsed.images]
         try:
             job_list = [int(x.strip()) for x in parsed.jobs.split(",") if x.strip()]
         except ValueError:
-            print("❌ --jobs 格式应为逗号分隔的数字。Bad --jobs list.",
-                  file=sys.stderr)
+            print(_t("msg_bad_jobs"), file=sys.stderr)
             return 1
         if not job_list or any(j < 1 for j in job_list):
-            print("❌ --jobs 需要 >= 1 的整数。--jobs needs ints >= 1.",
-                  file=sys.stderr)
+            print(_t("msg_jobs_ints"), file=sys.stderr)
             return 1
         job_list = list(dict.fromkeys(job_list))  # dedupe, keep order
 
@@ -2064,9 +2059,8 @@ def run_cli(args: List[str] = None) -> int:
                     print(f"  evaluate: {ev['files']} files  "
                           f"PSNR={psnr}  SSIM={ev['ssim']:.4f}")
                 else:
-                    print("  evaluate: 无可比对输出 no comparable outputs")
-            print("提示 Tip: 在真实照片集上跑，用结果决定并发数；"
-                  "多进程一般不必要（重活释放 GIL）")
+                    print(f"  {_t('msg_eval_no_output')}")
+            print(_t("msg_bench_tip"))
         return 0
 
     # ── Handle 'gallery' command ────────────────────────────────────────────
@@ -2074,7 +2068,7 @@ def run_cli(args: List[str] = None) -> int:
         from .gallery import build_gallery
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print("❌ 没有找到支持的图片文件。No supported image files found.")
+            print(_t("msg_no_images"))
             return 1
         res = build_gallery(files, parsed.output, title=parsed.title,
                             thumb_size=parsed.thumb)
@@ -2082,7 +2076,8 @@ def run_cli(args: List[str] = None) -> int:
             import json
             print(json.dumps(res, indent=2, ensure_ascii=False))
         else:
-            print(f"✅ 已生成 Gallery: {res['output']}  ({res['count']} 张 images)")
+            print(f"{_t('msg_gallery')}: {res['output']}  "
+                  f"({_t('msg_images_count', n=res['count'])})")
         return 0
 
     # ── Build options from parsed args ──────────────────────────────────────
@@ -2192,9 +2187,9 @@ def run_cli(args: List[str] = None) -> int:
             _apply_config_defaults(options, parsed, cfg)
         except Exception as e:
             if explicit_config:
-                print(f"❌ 配置文件加载失败 Config load error: {e}")
+                print(f"{_t('msg_config_load_err')}: {e}")
                 return 1
-            print(f"⚠️  配置文件加载失败 Config load error: {e}", file=sys.stderr)
+            print(f"⚠️  {_t('msg_config_load_err')}: {e}", file=sys.stderr)
 
     # ── Collect files ───────────────────────────────────────────────────────
     file_patterns = getattr(parsed, 'files', None) or getattr(parsed, 'paths', [])
@@ -2202,13 +2197,13 @@ def run_cli(args: List[str] = None) -> int:
     files = _collect_files(file_patterns, recursive=recursive)
 
     if not files:
-        print("❌ 没有找到支持的图片文件。No supported image files found.")
+        print(_t("msg_no_images"))
         return 1
 
     is_json = getattr(parsed, 'json', False)
     jout = sys.stderr if is_json else sys.stdout
 
-    print(f"📁 找到 Found {len(files)} 个图片文件 image file(s):", file=jout)
+    print(_t("msg_files_found", n=len(files)), file=jout)
     for f in files:
         sz = format_size(os.path.getsize(f))
         print(f"    {f} ({sz})", file=jout)
@@ -2237,32 +2232,33 @@ def run_cli(args: List[str] = None) -> int:
                 },
             }, indent=2, ensure_ascii=False))
             return 0
-        print("🔍 预览模式 Dry Run — 不会实际处理文件 (no files will be modified)")
+        print(_t("msg_dry_run_settings"))
         print()
-        print("将应用的设置 Settings that would be applied:")
-        print(f"  目标格式 Target format: {options.output_format}")
+        print(_t("msg_settings_applied"))
+        print(f"  {_t('msg_target_format')}: {options.output_format}")
         if options.target_size_bytes:
-            print(f"  目标体积 Target size:   {format_size(options.target_size_bytes)} (自动调优 auto-tune)")
-            print(f"  质量上限 Quality max:   {options.quality} (上限 ceiling)")
+            print(f"  {_t('msg_target_size')}: {format_size(options.target_size_bytes)} {_t('msg_auto_tune')}")
+            print(f"  {_t('msg_quality_max')}: {options.quality} {_t('msg_ceiling')}")
         else:
-            print(f"  质量 Quality:          {options.quality}")
+            print(f"  {_t('msg_quality_label')}: {options.quality}")
         if options.max_width or options.max_height:
-            print(f"  缩放 Resize:           {options.max_width or 'auto'}×{options.max_height or 'auto'}")
+            print(f"  {_t('msg_resize_label')}: {options.max_width or 'auto'}×{options.max_height or 'auto'}")
         if options.scale_percent:
-            print(f"  缩放 Scale:            {options.scale_percent}%")
-        print(f"  保留EXIF EXIF:         {'是 Yes' if options.preserve_exif else '否 No'}")
-        print(f"  优化 Optimize:         {'是 Yes' if options.optimize else '否 No'}")
-        print(f"  输出目录 Output dir:   {options.output_dir or '(与源文件相同 same as source)'}")
+            print(f"  {_t('msg_scale_label')}: {options.scale_percent}%")
+        print(f"  {_t('msg_exif_label')}: {_t('msg_yes') if options.preserve_exif else _t('msg_no')}")
+        print(f"  {_t('msg_optimize_label')}: {_t('msg_yes') if options.optimize else _t('msg_no')}")
+        print(f"  {_t('msg_output_dir_label')}: {options.output_dir or _t('msg_same_as_source')}")
         if options.folder_pattern:
-            print(f"  子文件夹 Subfolder:     {options.folder_pattern}")
+            print(f"  {_t('msg_subfolder')}: {options.folder_pattern}")
         return 0
 
     def progress_callback(current, total, path):
         if path:
             name = os.path.basename(path)
-            print(f"  [{current}/{total}] 处理中 {name}...", end="\r", file=jout)
+            print(f"  {_t('msg_processing', i=current, n=total, name=name)}",
+                  end="\r", file=jout)
         else:
-            print(f"  [{total}/{total}] 完成 Done!" + " " * 20, file=jout)
+            print(f"  {_t('msg_done', n=total)}" + " " * 20, file=jout)
 
     # ── Safety check for --remove-original ──────────────────────────────────
     # In --json mode the caller is an agent with no stdin to confirm against;
@@ -2270,17 +2266,15 @@ def run_cli(args: List[str] = None) -> int:
     # prompt (otherwise input() hangs forever on a closed stdin).
     if (options.remove_original and not getattr(parsed, 'yes', False)
             and not is_json):
-        print(f"⚠️  警告: 将删除 {len(files)} 个原始文件！")
-        print(f"   Warning: {len(files)} original file(s) will be deleted!")
+        print(_t("msg_confirm_delete", n=len(files)))
         try:
-            confirm = input("   确认继续? Confirm? [y/N]: ").strip().lower()
+            confirm = input(f"   {_t('msg_confirm_continue')}").strip().lower()
         except EOFError:
             # stdin closed (pipe/agent): treat as refusal, not a traceback
-            print("   已取消（无法读取确认输入）"
-                  "Cancelled (no stdin for confirmation).", file=sys.stderr)
+            print(_t("msg_cancel_input_err"), file=sys.stderr)
             return 1
         if confirm not in ("y", "yes"):
-            print("   已取消 Cancelled.")
+            print(f"   {_t('msg_cancelled')}")
             return 0
 
     # ── Multi-profile batch run (--profiles web,thumb) ──────────────────────
@@ -2290,19 +2284,18 @@ def run_cli(args: List[str] = None) -> int:
 
         names = [n.strip() for n in parsed.profiles.split(",") if n.strip()]
         if not names:
-            print("❌ --profiles 需要至少一个预设名 Need at least one preset name")
+            print(_t("msg_profiles_need"))
             return 1
 
         if getattr(parsed, 'report', None):
-            print("⚠️  --report 与 --profiles 不能同时使用; 已跳过 report "
-                  "(skipped, incompatible with --profiles)", file=sys.stderr)
+            print(_t("msg_report_profiles_conflict"), file=sys.stderr)
 
         profile_results = {}
         failed_total = 0
         for name in names:
             base = load_preset(name)
             if base is None:
-                print(f"❌ 预设不存在 Preset not found: {name}")
+                print(_t("msg_preset_not_found_generic", name=name))
                 return 1
             # Preset values win over CLI/config EXCEPT output_dir/suffix
             # (presets serialize stale directories — those come from CLI/config),
@@ -2319,7 +2312,7 @@ def run_cli(args: List[str] = None) -> int:
             profile_results[name] = prof_result
             failed_total += prof_result.fail_count
             if not is_json:
-                print(f"\n📦 预设 Profile: {name}  ({len(files)} files)")
+                print(f"\n{_t('msg_profile_start', name=name, n=len(files))}")
                 _print_batch_summary(prof_result)
 
         if is_json:
@@ -2331,15 +2324,13 @@ def run_cli(args: List[str] = None) -> int:
 
     # ── Execute ──────────────────────────────────────────────────────────────
     if not is_json:
-        print("🚀 开始处理 Processing...")
+        print(_t("msg_start_processing"))
         if options.target_size_bytes:
             lossy_fmts = {"JPEG", "WebP", "HEIC"}
             if options.output_format not in lossy_fmts:
-                print(f"⚠️  注意: {options.output_format} 是无损/弱压缩格式，目标体积控制效果有限。")
-                print(f"   Note: {options.output_format} is lossless/weakly-compressed, "
-                      f"target size control is limited.")
-            print(f"🎯 目标体积 Target: ≤ {format_size(options.target_size_bytes)}")
-            print(f"   质量范围 Quality range: 5–{options.quality}")
+                print(_t("msg_lossless_note", fmt=options.output_format))
+            print(_t("msg_target_size_header", size=format_size(options.target_size_bytes)))
+            print(f"   {_t('msg_quality_range', q=options.quality)}")
         print()
 
     result = batch_process(files, options, progress_callback=progress_callback)
@@ -2350,7 +2341,7 @@ def run_cli(args: List[str] = None) -> int:
         try:
             _write_report(parsed.report, result)
         except OSError as e:
-            print(f"❌ 报告写入失败 Report write error: {e}", file=sys.stderr)
+            print(f"{_t('msg_report_err')}: {e}", file=sys.stderr)
 
     # ── Print results ───────────────────────────────────────────────────────
     if is_json:
@@ -2366,11 +2357,12 @@ def run_cli(args: List[str] = None) -> int:
     return 0 if result.fail_count == 0 else 1
 
 
-_NO_GUI_MSG = (
-    "⚠️  此版本为 CLI/MCP 精简版，不含图形界面 / This is the CLI+MCP (lite) "
-    "build without the GUI.\n"
-    "   完整版 Full edition: "
-    "https://github.com/Dongwu259/photo_s/releases")
+def _no_gui_msg() -> str:
+    """Lite-build hint — rendered in the current language."""
+    return (
+        f"{_t('msg_no_gui')}\n"
+        f"   {_t('msg_full_edition')}: "
+        "https://github.com/Dongwu259/photo_s/releases")
 
 
 def _gui_module_available() -> bool:
@@ -2389,10 +2381,12 @@ def _gui_module_available() -> bool:
 def _run_gui() -> bool:
     """Launch the GUI; print a hint and return False when this build /
     system has no GUI (lite exe, or tkinter missing)."""
+    from . import i18n
+    i18n.CURRENT_LANG = i18n.resolve_language(use_config=True, use_persisted=False)
     try:
         from .gui import run_gui
     except ImportError:
-        print(_NO_GUI_MSG, file=sys.stderr)
+        print(_no_gui_msg(), file=sys.stderr)
         return False
     run_gui()
     return True

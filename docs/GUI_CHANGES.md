@@ -430,3 +430,19 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 `test_gui_workflows.py` 新增 23 项：`TestReviewExifEditor`(6)、`TestRenamePreview`(6，
 含预览=真实执行 parity)、`TestZoomPanState`(8 纯数学)、`TestCompareDialog`(3 smoke)。
 全量 689 个。
+
+## 10. 第八轮：启动语言自动检测 + 持久化（v1.5.0）
+
+- **启动语言**：`DEFAULT_LANG="zh"` 不再是启动默认，只作 `_t` 缺 key 回退常量。
+  启动语言来自 `photo_s/i18n.py` 的 `resolve_language(use_config=False, use_persisted=True)`：
+  **持久化用户选择 > `PHOTO_S_LANG` env > 系统检测**（macOS `defaults read -g
+  AppleLanguages` / Windows `GetUserDefaultUILanguage` / Linux `LANG`/`LC_ALL` /
+  `locale.getlocale()` 兜底，每级 try/except 永不崩，`_system_language()` 记忆化）。
+  接线点：`run_gui()` 预置标题、`PhotoSApp.__init__` 的 `self.lang`。
+- **持久化**：用户经语言下拉手动切换（`_on_language_selected`）时写
+  `~/.photos/language`（纯文本单 key，`i18n.save_language`）；重启后 persisted
+  值优先于 auto-detect。**持久化只在用户动作处发生**，`_set_language` 内不写，
+  程序化重建不会覆盖用户选择。文件读写 try/except 吞 OSError（GUI 永不崩）。
+- **GUI 自己的 STRINGS 留在 gui.py 不动**，只 import i18n 的 resolve/save；
+  CLI 字符串表在 `i18n.STRINGS`（zh/en parity 测试分开强制）。
+- 测试：test_i18n.py（`TestPersistence` 磁盘回环、`resolve_language` 优先级链）。

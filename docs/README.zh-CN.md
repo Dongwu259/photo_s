@@ -107,6 +107,7 @@ pip install -e .
 
 ```bash
 photo-s --help                  # 显示全部命令
+photo-s --language en --help    # 英文帮助（zh / auto 跟随系统）
 photo-s compress *.jpg -q 80    # 批量压缩
 photo-s convert *.png -f webp   # 格式转换
 photo-s batch ~/photos/ -r      # 递归批量处理
@@ -198,7 +199,7 @@ photo-s          # 启动 GUI（无参数 = GUI）
 photo-s gui      # 显式 GUI 模式
 ```
 
-GUI 特性：中英文切换、拖放（需要 `pip install photo-s-tools[gui]`）、可取消的批量处理、
+GUI 特性：中英文自动检测（首次启动跟随系统语言；手动切换后记住，重启沿用）、拖放（需要 `pip install photo-s-tools[gui]`）、可取消的批量处理、
 前后对比、全局快捷键（⌘/Ctrl+O 添加、⌘/Ctrl+R 开始、Esc 取消、⌘/Ctrl+E 审查、⌘/Ctrl+D 去重、⌘/Ctrl+G 画廊、⌘/Ctrl+Z 撤销）、**勾选式文件列表**（每行一个与设置面板同款的勾选框；处理/审查/去重/画廊全部作用于
 勾选文件；添加文件夹自动递归扫描子文件夹；工具栏「全选/全不选」批量切换）、
 **视觉预览**（⌘/Ctrl+P：原图↔处理后并排实时渲染，设置变化自动刷新）、

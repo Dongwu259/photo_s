@@ -108,6 +108,7 @@ pip install -e .
 
 ```bash
 photo-s --help                  # Show all commands
+photo-s --language en --help    # Help in English (zh / auto follow the system)
 photo-s compress *.jpg -q 80    # Batch compress
 photo-s convert *.png -f webp   # Convert format
 photo-s batch ~/photos/ -r      # Recursive batch
@@ -199,7 +200,7 @@ photo-s          # Launch GUI (no args = GUI)
 photo-s gui      # Explicit GUI mode
 ```
 
-GUI features: Chinese/English language switch, drag-and-drop (needs `pip install photo-s-tools[gui]`),
+GUI features: auto-detected Chinese/English language (system locale on first launch; manual choice is remembered across restarts), drag-and-drop (needs `pip install photo-s-tools[gui]`),
 cancellable batch processing, before/after comparison, global shortcuts
 (⌘/Ctrl+O add, ⌘/Ctrl+R start, Esc cancel, ⌘/Ctrl+E review, ⌘/Ctrl+D dedup, ⌘/Ctrl+G gallery, ⌘/Ctrl+Z undo),
 a **checkbox file list** (every row has a
