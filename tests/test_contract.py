@@ -143,8 +143,12 @@ class TestReadyFilePerms:
     def test_mode_is_0600(self, tmp_path):
         p = tmp_path / "ready.json"
         write_ready_file(str(p), 1234, "secret")
-        mode = os.stat(p).st_mode & 0o777
-        assert mode == 0o600
+        # 0600 is a POSIX permission; Windows has no POSIX mode bits (os.chmod
+        # only toggles the read-only attribute, st_mode reports 0o666), so the
+        # mode assertion is POSIX-only — the token content check is universal.
+        if os.name != "nt":
+            mode = os.stat(p).st_mode & 0o777
+            assert mode == 0o600
         content = json.loads(p.read_text(encoding="utf-8"))
         assert content["token"] == "secret"
 

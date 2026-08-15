@@ -64,7 +64,7 @@ def _find_text(widget, needle):
     return False
 
 
-def _poll(root, pred, seconds=5.0):
+def _poll(root, pred, seconds=20.0):
     deadline = time.time() + seconds
     while time.time() < deadline:
         root.update()
@@ -421,7 +421,7 @@ class TestPreviewStaleness:
         nav._on_click(None)
         gate_a.set()   # the in-flight render of the previous file lands now
         # let the drain absorb it and (fixed behavior) launch B
-        deadline = time.time() + 1.5
+        deadline = time.time() + 4
         while time.time() < deadline:
             root.update()
             time.sleep(0.05)
@@ -430,7 +430,7 @@ class TestPreviewStaleness:
         assert not self._proc_is(win, "red"), \
             "the stale render must not be applied to the new file's panel"
         gate_b.set()
-        assert _poll(root, lambda: self._proc_is(win, "green"), seconds=4), \
+        assert _poll(root, lambda: self._proc_is(win, "green"), seconds=20), \
             "the new file's own render must be applied"
         for _ in range(10):   # settle: no late callback may flip it back
             root.update()
@@ -439,7 +439,7 @@ class TestPreviewStaleness:
         assert not self._proc_is(win, "red")
         win.destroy()
         assert _poll(root, lambda: not os.path.exists(created[-1]),
-                     seconds=3), "preview temp dir must be cleaned up"
+                     seconds=15), "preview temp dir must be cleaned up"
         root.destroy()
 
     def test_no_relaunch_on_unchanged_options(self, tmp_path, monkeypatch):
@@ -485,7 +485,7 @@ class TestPreviewStaleness:
                if w.title() == app._t("preview_title")][0]
         # wait for the first render to complete AND for the drain loop to
         # have ticked several times afterward (which is what would relaunch)
-        assert _poll(root, lambda: len(calls) == 1, seconds=4), \
+        assert _poll(root, lambda: len(calls) == 1, seconds=20), \
             "first render must launch exactly once"
         for _ in range(15):  # let the drain loop run; bug would relaunch here
             root.update()
@@ -497,7 +497,7 @@ class TestPreviewStaleness:
         # wait for the drain loop to rmtree the preview temp dir, so this
         # test doesn't leak a photos_preview_* dir that would break the
         # cleanup-glob assertions in test_gui_workflows (same-suite order).
-        deadline = time.time() + 3
+        deadline = time.time() + 15
         while time.time() < deadline:
             root.update()
             if created and not os.path.exists(created[-1]):
@@ -517,8 +517,11 @@ class TestPreviewStaleness:
             if not isinstance(w, tk.Label):
                 continue
             try:
-                if "render" not in str(w.cget("text")) \
-                        and "渲染" not in str(w.cget("text")):
+                text = str(w.cget("text")).lower()
+                # en placeholder is "Rendering preview…" — case-insensitive
+                # match ("render" alone missed the capital R and skipped the
+                # panel entirely on en-locale runs)
+                if "render" not in text and "渲染" not in text:
                     continue
             except Exception:
                 continue

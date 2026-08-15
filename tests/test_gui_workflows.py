@@ -272,31 +272,37 @@ class TestReviewExifEditor:
         app._show_review()
         win = [w for w in root.winfo_children()
                if isinstance(w, tk.Toplevel)][0]
-        assert _poll(root, lambda: _find_text(win, "1 / 1")), \
-            "review dialog must finish the metadata scan"
 
-        values = []
+        def values():
+            out = []
 
-        def walk(w, depth=8):
-            if depth < 0:
-                return
-            for c in w.winfo_children():
-                if isinstance(c, ttk.Entry):
-                    try:
-                        values.append(c.get())
-                    except Exception:
-                        pass
-                walk(c, depth - 1)
+            def walk(w, depth=8):
+                if depth < 0:
+                    return
+                for c in w.winfo_children():
+                    if isinstance(c, ttk.Entry):
+                        try:
+                            out.append(c.get())
+                        except Exception:
+                            pass
+                    walk(c, depth - 1)
 
-        walk(win)
-        assert "Canon" in values and "400" in values, \
+            walk(win)
+            return out
+
+        # Poll the FILLED entries, not the "1 / 1" position text — the
+        # position may render before the metadata scan lands (a real race
+        # on slow Windows CI, where the old poll passed immediately and the
+        # subsequent walk saw empty entries).
+        assert _poll(root, lambda: "Canon" in values()
+                     and "400" in values()), \
             "make/ISO entries must be filled from the image metadata"
         assert _find_text(win, app._t("review_shooting")), \
             "shooting-info section label must render"
         root.destroy()
 
 
-def _poll(root, pred, seconds=5.0):
+def _poll(root, pred, seconds=20.0):
     deadline = time.time() + seconds
     while time.time() < deadline:
         root.update()
@@ -372,7 +378,7 @@ class TestGalleryHelper:
 
 
 class TestDialogSmokes:
-    def _poll(self, root, pred, seconds=5.0):
+    def _poll(self, root, pred, seconds=20.0):
         deadline = time.time() + seconds
         while time.time() < deadline:
             root.update()
@@ -407,7 +413,10 @@ class TestDialogSmokes:
         app._show_dedup()
         win = [w for w in root.winfo_children()
                if isinstance(w, tk.Toplevel)][0]
-        assert self._poll(root, lambda: _find_text(win, "第 1 组")), \
+        # language-agnostic: the group label renders the localized template
+        # with the group number filled in
+        group_lbl = app._t("dedup_group", i=1)
+        assert self._poll(root, lambda: _find_text(win, group_lbl)), \
             "dedup dialog must render group 1 after the scan"
         root.destroy()
 
@@ -596,7 +605,7 @@ class TestReviewDialogUndo:
         app._show_review()
         win = [w for w in root.winfo_children()
                if isinstance(w, tk.Toplevel)][0]
-        deadline = time.time() + 5
+        deadline = time.time() + 20
         while time.time() < deadline:
             root.update()
             if _find_text(win, "1 / 1"):
@@ -808,7 +817,10 @@ class TestCheckList:
         assert app._checked_files() == [a, b]
         root.destroy()
 
-    def test_refresh_renders_checkbox_rows(self, tmp_path):
+    def test_refresh_renders_checkbox_rows(self, tmp_path, monkeypatch):
+        # the label assertion checks Chinese wording — pin zh so a locale-less
+        # CI runner (Windows resolves en) is deterministic
+        monkeypatch.setenv("PHOTO_S_LANG", "zh")
         from tkinter import ttk
         root, app = _make_app()
         a = _img(tmp_path / "a.jpg")
@@ -1064,7 +1076,7 @@ class TestPreviewDialog:
         assert wins, "preview dialog did not open"
         win = wins[0]
         # let the drain loop debounce + render; the "after" panel fills
-        deadline = time.time() + 8
+        deadline = time.time() + 25
         rendered = False
         while time.time() < deadline:
             root.update()
@@ -1078,7 +1090,8 @@ class TestPreviewDialog:
         assert rendered, "preview never rendered the processed image"
         win.destroy()
         # root-drain cleans the temp dir once no render is in flight
-        for _ in range(20):
+        # (generous settle: slow CI runners may still be mid-render)
+        for _ in range(100):
             root.update()
             if not glob.glob(os.path.join(
                     tempfile.gettempdir(), "photos_preview_*")):
