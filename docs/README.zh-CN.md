@@ -11,7 +11,7 @@
 
 > 🖥 **GUI** 给人用 — ⌨️ **CLI** 给 AI agent 用 — `pip install photo-s-tools`
 
-> ✍️ **核心开发者：** deepseek-v4-flash · GLM-5.2
+> ✍️ **核心开发者：** deepseek-v4-flash · GLM-5.2 · Kimi K3
 
 [English](../README.md) · **中文**
 
@@ -388,13 +388,15 @@ Desktop / 任意 MCP 客户端直接调用 PhotoS 工具（需要 Python 3.10+ �
 
 ```bash
 pip install "photo-s-tools[mcp]"
-photo-s mcp --list-tools        # 查看 7 个工具及参数 schema（JSON）
+photo-s mcp --list-tools        # 查看 11 个工具及参数 schema（JSON）
 photo-s mcp                     # 启动 stdio MCP server
 ```
 
 工具：`process`（批量质量/格式/缩放/影调/降噪）、`info`（环境探测）、
 `exif`（元数据读写/筛选）、`dedup`（感知哈希分组、keep-sharpest）、
-`cull`（曝光/清晰度筛选）、`hash`（SHA-256 清单）、`plugin`（官方插件管理）。
+`cull`（曝光/清晰度筛选）、`hash`（SHA-256 清单）、`contact_sheet`（联系表
+网格拼图）、`gallery`（HTML 画廊）、`watermark`（文字/图片水印）、
+`preset`（预设 增删查取）、`plugin`（官方插件管理）。
 输出结构与 CLI `--json` 契约一致。
 
 Claude Desktop 配置（`claude_desktop_config.json`）：
@@ -405,6 +407,20 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
     "photo-s": {
       "command": "photo-s",
       "args": ["mcp"]
+    }
+  }
+}
+```
+
+零安装变体（uvx 首次运行自动解析 PyPI 依赖——与[官方 MCP Registry](https://registry.modelcontextprotocol.io)
+发布的 `io.github.Dongwu259/photo-s` 调用方式一致）：
+
+```json
+{
+  "mcpServers": {
+    "photo-s": {
+      "command": "uvx",
+      "args": ["--from", "photo-s-tools[mcp]", "photo-s", "mcp"]
     }
   }
 }

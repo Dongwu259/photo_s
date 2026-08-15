@@ -13,7 +13,7 @@
 | Python 直调 | 宿主是 Python | `from photo_s.engine import ProcessOptions, batch_process` |
 | `photo-s ... --json` | 一次性脚本 / CI | 每次调用有 ~200-300ms 解释器启动开销 |
 | `photo-s serve` | 跨进程 / 长任务 / 需进度与取消 | stdlib HTTP，同步 + 异步任务两种模式 |
-| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，7 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
+| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，11 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
 
 ---
 
@@ -221,7 +221,18 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 }
 ```
 
-`photo-s mcp --list-tools` 返回 7 个工具及 inputSchema（JSON，不启动服务器）。
+`photo-s mcp --list-tools` 返回 11 个工具及 inputSchema（JSON，不启动服务器）。
+
+零安装变体（uvx 自动解析 PyPI 依赖，与官方 MCP Registry
+`io.github.Dongwu259/photo-s` 发布的调用一致）：
+
+```json
+{
+  "mcpServers": {
+    "photo-s": { "command": "uvx", "args": ["--from", "photo-s-tools[mcp]", "photo-s", "mcp"] }
+  }
+}
+```
 
 ### 工具表（输出结构与 CLI `--json` 一致）
 
@@ -234,6 +245,10 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 | `cull` | `paths[]`, `recursive`, `overexposed_max`, `underexposed_max`, `luminance_min/max`, `sharpness_min` | `{"count", "kept", "results": [{path, luminance, …, kept}]}` |
 | `hash` | `paths[]`, `recursive`, `output`, `verify` (清单路径) | 生成 → `{"output", "count", "entries"}`；verify → `{"ok", "missing", "mismatched"}` |
 | `plugin` | `action` "list"\|"install"\|"uninstall", `name`, `dry_run` | list → `{"installed", "available"}`；install/uninstall → `{"ok", "name", "distribution", "version"?}` |
+| `contact_sheet` | `paths[]`, `output`, `recursive`, `cols` (默认 4), `thumb` (默认 240), `captions`, `bg` | `{"ok", "output", "count"}`（网格拼图输出路径） |
+| `gallery` | `paths[]`, `out_dir`, `recursive`, `title`, `thumb` (默认 360) | `{"ok", "output", "count"}`（同 `photo-s gallery --json`） |
+| `watermark` | `paths[]`, `text`/`image`, `position` (默认 BOTTOM_RIGHT), `opacity`, `output_format`, `quality`, `output_dir` | 走批量管线，返回 `BatchResult` JSON |
+| `preset` | `action` "list"\|"save"\|"load"\|"delete", `name`, `description`, `options{}` | list → 预设清单；load → 可直接喂给 `process` 的 options JSON |
 
 **破坏性安全**：`dedup keep-sharpest` 默认 `dry_run=True`，删除需显式
 `dry_run=False`；`process` 不覆盖输入（`overwrite` 默认 False）。MCP 模式仅

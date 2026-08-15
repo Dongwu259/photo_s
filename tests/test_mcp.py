@@ -38,6 +38,13 @@ class TestTools:
                          "hash", "plugin", "contact_sheet", "gallery",
                          "watermark", "preset"}
 
+    def test_server_info_version(self):
+        # serverInfo must report the PhotoS version, not the mcp SDK's
+        # (FastMCP has no version kwarg in mcp>=1.20, so _mcp() sets it
+        # on the low-level server directly).
+        from photo_s import __version__
+        assert create_server()._mcp_server.version == __version__
+
 
 class TestProcessTool:
     def test_end_to_end_webp(self, tmp_path):

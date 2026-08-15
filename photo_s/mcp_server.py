@@ -34,9 +34,14 @@ def _mcp():
     """Lazily import FastMCP (mirrors denoise._cv2's pattern)."""
     try:
         from mcp.server.fastmcp import FastMCP
-        return FastMCP("photo-s",
-                       instructions="PhotoS MCP server - batch image "
-                                    "processing. Returns JSON-only results.")
+        server = FastMCP("photo-s",
+                         instructions="PhotoS MCP server - batch image "
+                                      "processing. Returns JSON-only results.")
+        # FastMCP has no version kwarg in mcp>=1.20; without this the
+        # initialize handshake reports the *SDK* version (e.g. 1.29.0)
+        # as serverInfo instead of the PhotoS version.
+        server._mcp_server.version = __version__
+        return server
     except ImportError:
         raise RuntimeError(
             "MCP server requires the optional dependency: "

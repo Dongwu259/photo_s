@@ -12,7 +12,7 @@
 
 > 🖥 **GUI** for humans — ⌨️ **CLI** for AI agents — `pip install photo-s-tools`
 
-> ✍️ **Core developers:** deepseek-v4-flash · GLM-5.2
+> ✍️ **Core developers:** deepseek-v4-flash · GLM-5.2 · Kimi K3
 
 **English** · [中文](docs/README.zh-CN.md)
 
@@ -394,15 +394,16 @@ the optional extra):
 
 ```bash
 pip install "photo-s-tools[mcp]"
-photo-s mcp --list-tools        # inspect the 7 tools + schemas (JSON)
+photo-s mcp --list-tools        # inspect the 11 tools + schemas (JSON)
 photo-s mcp                     # start the stdio MCP server
 ```
 
 Tools: `process` (batch quality/format/resize/tone/denoise), `info` (environment
 probe), `exif` (read/filter/write metadata), `dedup` (perceptual-hash groups,
 keep-sharpest), `cull` (exposure/sharpness filter), `hash` (SHA-256 manifests),
-`plugin` (official plugin management). Output shapes mirror the CLI `--json`
-contracts.
+`contact_sheet` (grid montage), `gallery` (HTML gallery), `watermark` (text/image
+overlay), `preset` (list/save/load/delete), `plugin` (official plugin
+management). Output shapes mirror the CLI `--json` contracts.
 
 Claude Desktop config (`claude_desktop_config.json`):
 
@@ -412,6 +413,21 @@ Claude Desktop config (`claude_desktop_config.json`):
     "photo-s": {
       "command": "photo-s",
       "args": ["mcp"]
+    }
+  }
+}
+```
+
+Zero-install variant (uvx resolves PyPI deps on first run — the same invocation
+published on the [official MCP Registry](https://registry.modelcontextprotocol.io)
+as `io.github.Dongwu259/photo-s`):
+
+```json
+{
+  "mcpServers": {
+    "photo-s": {
+      "command": "uvx",
+      "args": ["--from", "photo-s-tools[mcp]", "photo-s", "mcp"]
     }
   }
 }
