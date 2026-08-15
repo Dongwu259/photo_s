@@ -333,6 +333,10 @@ def _add_transform_args(parser):
         "--gpx-trace", type=str, default=argparse.SUPPRESS, metavar="TRACK.gpx",
         help=_t('help___gpx_trace'),
     )
+    parser.add_argument(
+        "--preset", type=str, default=argparse.SUPPRESS, metavar="NAME",
+        help=_t('help___preset'),
+    )
 
 
 # Config keys the CLI applies outside the generic field mapping
@@ -405,6 +409,170 @@ def _apply_config_defaults(options: ProcessOptions, parsed, cfg: dict) -> Proces
     options.output_format = _canonical_format(options.output_format)
 
     return options
+
+
+# ProcessOptions field → CLI dest name when they differ, for the --preset
+# merge (extends _CONFIG_CLI_DESTS with renames only preset application needs).
+_PRESET_CLI_DESTS = {
+    **_CONFIG_CLI_DESTS,
+    "pad_ratio": "pad",
+    "output_sizes": "sizes",
+    "lut_file": "lut",
+    "wb_temp": "wb",
+    "folder_pattern": "organize",
+}
+
+
+def _build_process_options(parsed) -> ProcessOptions:
+    """Build a ProcessOptions from parsed CLI args.
+
+    Shared by the batch/compress/convert shared handler and ``preset save``
+    (which captures the full option set as a named preset).
+    """
+    # Parse target size if provided
+    target_size_bytes = None
+    target_size_str = getattr(parsed, 'target_size', None)
+    if target_size_str:
+        target_size_bytes = _parse_size(target_size_str)
+
+    # auto-jobs: explicit -j / config wins, else smart default (CPU count)
+    _jobs = getattr(parsed, 'jobs', None)
+    if _jobs is None:
+        _jobs = auto_jobs()
+
+    options = ProcessOptions(
+        quality=getattr(parsed, 'quality', 85),
+        output_format=getattr(parsed, 'format', 'JPEG'),
+        output_dir=getattr(parsed, 'output_dir', None),
+        preserve_exif=not getattr(parsed, 'no_exif', False),
+        optimize=not getattr(parsed, 'no_optimize', False),
+        progressive=getattr(parsed, 'progressive', False),
+        overwrite=getattr(parsed, 'overwrite', False),
+        prefix=getattr(parsed, 'prefix', ''),
+        suffix=getattr(parsed, 'suffix', None),  # resolved per-command below
+        target_size_bytes=target_size_bytes,
+        raw_half_size=getattr(parsed, 'raw_half_size', False),
+        raw_auto_bright=not getattr(parsed, 'raw_no_auto_bright', False),
+        auto_rotate=not getattr(parsed, 'no_auto_rotate', False),
+        remove_original=getattr(parsed, 'remove_original', False),
+        rename_pattern=getattr(parsed, 'rename', None) or "",
+        folder_pattern=_resolve_folder_pattern(getattr(parsed, 'organize', None) or ""),
+        watermark_text=getattr(parsed, 'watermark_text', None) or "",
+        watermark_image=getattr(parsed, 'watermark_image', None) or "",
+        watermark_position=getattr(parsed, 'watermark_pos', None) or "BOTTOM_RIGHT",
+        watermark_opacity=getattr(parsed, 'watermark_opacity', 50),
+        output_sizes=_parse_sizes(getattr(parsed, 'sizes', None)),
+        strip_gps=getattr(parsed, 'strip_gps', False),
+        keep_mtime=getattr(parsed, 'keep_mtime', False),
+        max_pixels=getattr(parsed, 'max_pixels', None),
+        evaluate=getattr(parsed, 'evaluate', False),
+        brightness=getattr(parsed, 'brightness', 1.0),
+        contrast=getattr(parsed, 'contrast', 1.0),
+        saturation=getattr(parsed, 'saturation', 1.0),
+        gamma=getattr(parsed, 'gamma', 1.0),
+        sharpen=getattr(parsed, 'sharpen', 1.0),
+        grayscale=getattr(parsed, 'grayscale', False),
+        sepia=getattr(parsed, 'sepia', False),
+        auto_levels=getattr(parsed, 'auto_levels', False),
+        wb_temp=getattr(parsed, 'wb', None),
+        wb_reference=getattr(parsed, 'wb_from', None),
+        ev=getattr(parsed, 'ev', None),
+        auto_exposure=getattr(parsed, 'auto_exposure', None),
+        log_curve=getattr(parsed, 'log_curve', None),
+        denoise=getattr(parsed, 'denoise', None),
+        lut_file=getattr(parsed, 'lut', None),
+        auto_straighten=getattr(parsed, 'auto_straighten', False),
+        max_straighten_angle=getattr(parsed, 'max_straighten_angle', 10.0),
+        print_size=getattr(parsed, 'print_size', None),
+        crop=getattr(parsed, 'crop', None),
+        crop_ratio=getattr(parsed, 'crop_ratio', None),
+        rotate_degrees=float(getattr(parsed, 'rotate', 0) or 0),
+        rotate_bg=getattr(parsed, 'rotate_bg', None),
+        flip=getattr(parsed, 'flip', None),
+        pad_ratio=getattr(parsed, 'pad', None),
+        pad_bg=getattr(parsed, 'pad_bg', None) or "#000000",
+        date_shift=getattr(parsed, 'date_shift', None),
+        scrub=getattr(parsed, 'scrub', False),
+        sync_date=getattr(parsed, 'sync_date', False),
+        blur_score=getattr(parsed, 'blur_score', False),
+        srgb=getattr(parsed, 'srgb', False),
+        flatten_cmyk=getattr(parsed, 'flatten_cmyk', False),
+        resume=getattr(parsed, 'resume', False),
+        gpx_trace=getattr(parsed, 'gpx_trace', None),
+        jobs=_jobs,
+    )
+
+    # Handle --resize
+    resize_str = getattr(parsed, 'resize', None)
+    if resize_str:
+        w, h = _parse_dimensions(resize_str)
+        options.max_width = w
+        options.max_height = h
+
+    # Handle --scale
+    options.scale_percent = getattr(parsed, 'scale', None)
+
+    # Fix suffix for 'compress' command
+    if parsed.command == "compress":
+        if not getattr(parsed, 'suffix', None) or parsed.suffix == '_processed':
+            options.suffix = "_compressed"
+    elif parsed.command == "convert":
+        options.suffix = getattr(parsed, 'suffix', '')
+        options.output_format = getattr(parsed, 'format', 'JPEG')
+    else:  # batch
+        options.suffix = getattr(parsed, 'suffix', None) or "_processed"
+
+    return options
+
+
+def _apply_preset_defaults(options: ProcessOptions, parsed) -> ProcessOptions:
+    """Apply a --preset's values for options the user did not set on the CLI.
+
+    Precedence: explicit CLI > --preset > config file > built-in defaults.
+    A CLI option counts as "set" when it appears in the parsed namespace
+    (config-capable args use ``default=argparse.SUPPRESS``). Runs AFTER the
+    config layer so a preset overrides config-file defaults.
+
+    ``jobs`` and ``output_dir`` are deliberately not applied from a preset:
+    job count is machine-specific and output dir is job-specific.
+
+    Returns None (after printing an error) when the named preset doesn't exist
+    — the caller turns that into a nonzero exit.
+    """
+    preset_name = getattr(parsed, "preset", None)
+    if not preset_name:
+        return options
+    from .presets import load_preset
+    preset_opts = load_preset(preset_name)
+    if preset_opts is None:
+        # stderr so a --json stdout payload stays clean
+        print(f"{_t('msg_preset_not_found')}: {preset_name}", file=sys.stderr)
+        return None
+    for field in ProcessOptions.__dataclass_fields__:
+        if field in ("jobs", "output_dir"):
+            continue
+        cli_dest = _PRESET_CLI_DESTS.get(field, field)
+        if not hasattr(parsed, cli_dest):
+            setattr(options, field, getattr(preset_opts, field))
+    return options
+
+
+def _summarize_preset_options(opts: ProcessOptions) -> list:
+    """List non-default ProcessOptions fields (what a preset actually carries).
+
+    Lets ``preset save`` report how many settings were captured and ``preset
+    load`` show the option set it would apply. jobs/output_dir are job-specific
+    and never summarized.
+    """
+    defaults = ProcessOptions()
+    out = []
+    for f in ProcessOptions.__dataclass_fields__:
+        if f in ("jobs", "output_dir"):
+            continue
+        v = getattr(opts, f)
+        if v != getattr(defaults, f):
+            out.append(f"{f}={v}")
+    return out
 
 
 def _print_result(result: ProcessResult):
@@ -935,6 +1103,10 @@ def run_cli(args: List[str] = None) -> int:
     preset_save.add_argument("--resize", type=str, default=None)
     preset_save.add_argument("--suffix", type=str, default="_compressed")
     preset_save.add_argument("--desc", type=str, default="", help=_t('help___desc'))
+    # Full option capture: the shared transform args let a CLI-created
+    # preset carry the whole "look" (tone, composition, denoise, LUT, ...),
+    # not just quality/format/resize — parity with GUI-saved presets.
+    _add_transform_args(preset_save)
 
     preset_list = preset_subs.add_parser("list", help=_t('cmd_list'))
     preset_load = preset_subs.add_parser("load", help=_t('cmd_load'))
@@ -1487,15 +1659,11 @@ def run_cli(args: List[str] = None) -> int:
         from .presets import save_preset, load_preset, list_presets, delete_preset
 
         if parsed.preset_action == "save":
-            w, h = _parse_dimensions(parsed.resize) if parsed.resize else (None, None)
-            opts = ProcessOptions(
-                quality=parsed.quality,
-                output_format=parsed.format,
-                max_width=w, max_height=h,
-                suffix=parsed.suffix,
-            )
+            opts = _build_process_options(parsed)
             save_preset(parsed.name, opts, parsed.desc)
-            print(f"{_t('msg_preset_saved')}: {parsed.name}")
+            n = len(_summarize_preset_options(opts))
+            print(f"{_t('msg_preset_saved')}: {parsed.name} "
+                  f"({_t('msg_preset_captured', n=n)})")
 
         elif parsed.preset_action == "list":
             presets = list_presets()
@@ -1510,10 +1678,9 @@ def run_cli(args: List[str] = None) -> int:
             opts = load_preset(parsed.name)
             if opts:
                 print(_t("msg_preset_show", name=parsed.name))
-                print(f"   photo-s batch <files> -f {opts.output_format} -q {opts.quality}", end="")
-                if opts.max_width or opts.max_height:
-                    print(f" --resize {opts.max_width or ''}x{opts.max_height or ''}", end="")
-                print(f" --suffix {opts.suffix}")
+                for c in _summarize_preset_options(opts):
+                    print(f"   {c}")
+                print(_t("msg_preset_apply_hint", name=parsed.name))
             else:
                 print(f"{_t('msg_preset_not_found')}: {parsed.name}")
                 return 1
@@ -2081,99 +2248,9 @@ def run_cli(args: List[str] = None) -> int:
                   f"({_t('msg_images_count', n=res['count'])})")
         return 0
 
-    # ── Build options from parsed args ──────────────────────────────────────
-    # Parse target size if provided
-    target_size_bytes = None
-    target_size_str = getattr(parsed, 'target_size', None)
-    if target_size_str:
-        target_size_bytes = _parse_size(target_size_str)
-
-    # auto-jobs: explicit -j / config wins, else smart default (CPU count)
-    _jobs = getattr(parsed, 'jobs', None)
-    if _jobs is None:
-        _jobs = auto_jobs()
-
-    options = ProcessOptions(
-        quality=getattr(parsed, 'quality', 85),
-        output_format=getattr(parsed, 'format', 'JPEG'),
-        output_dir=getattr(parsed, 'output_dir', None),
-        preserve_exif=not getattr(parsed, 'no_exif', False),
-        optimize=not getattr(parsed, 'no_optimize', False),
-        progressive=getattr(parsed, 'progressive', False),
-        overwrite=getattr(parsed, 'overwrite', False),
-        prefix=getattr(parsed, 'prefix', ''),
-        suffix=getattr(parsed, 'suffix', None),  # resolved per-command below
-        target_size_bytes=target_size_bytes,
-        raw_half_size=getattr(parsed, 'raw_half_size', False),
-        raw_auto_bright=not getattr(parsed, 'raw_no_auto_bright', False),
-        auto_rotate=not getattr(parsed, 'no_auto_rotate', False),
-        remove_original=getattr(parsed, 'remove_original', False),
-        rename_pattern=getattr(parsed, 'rename', None) or "",
-        folder_pattern=_resolve_folder_pattern(getattr(parsed, 'organize', None) or ""),
-        watermark_text=getattr(parsed, 'watermark_text', None) or "",
-        watermark_image=getattr(parsed, 'watermark_image', None) or "",
-        watermark_position=getattr(parsed, 'watermark_pos', None) or "BOTTOM_RIGHT",
-        watermark_opacity=getattr(parsed, 'watermark_opacity', 50),
-        output_sizes=_parse_sizes(getattr(parsed, 'sizes', None)),
-        strip_gps=getattr(parsed, 'strip_gps', False),
-        keep_mtime=getattr(parsed, 'keep_mtime', False),
-        max_pixels=getattr(parsed, 'max_pixels', None),
-        evaluate=getattr(parsed, 'evaluate', False),
-        brightness=getattr(parsed, 'brightness', 1.0),
-        contrast=getattr(parsed, 'contrast', 1.0),
-        saturation=getattr(parsed, 'saturation', 1.0),
-        gamma=getattr(parsed, 'gamma', 1.0),
-        sharpen=getattr(parsed, 'sharpen', 1.0),
-        grayscale=getattr(parsed, 'grayscale', False),
-        sepia=getattr(parsed, 'sepia', False),
-        auto_levels=getattr(parsed, 'auto_levels', False),
-        wb_temp=getattr(parsed, 'wb', None),
-        wb_reference=getattr(parsed, 'wb_from', None),
-        ev=getattr(parsed, 'ev', None),
-        auto_exposure=getattr(parsed, 'auto_exposure', None),
-        log_curve=getattr(parsed, 'log_curve', None),
-        denoise=getattr(parsed, 'denoise', None),
-        lut_file=getattr(parsed, 'lut', None),
-        auto_straighten=getattr(parsed, 'auto_straighten', False),
-        max_straighten_angle=getattr(parsed, 'max_straighten_angle', 10.0),
-        print_size=getattr(parsed, 'print_size', None),
-        crop=getattr(parsed, 'crop', None),
-        crop_ratio=getattr(parsed, 'crop_ratio', None),
-        rotate_degrees=float(getattr(parsed, 'rotate', 0) or 0),
-        rotate_bg=getattr(parsed, 'rotate_bg', None),
-        flip=getattr(parsed, 'flip', None),
-        pad_ratio=getattr(parsed, 'pad', None),
-        pad_bg=getattr(parsed, 'pad_bg', None) or "#000000",
-        date_shift=getattr(parsed, 'date_shift', None),
-        scrub=getattr(parsed, 'scrub', False),
-        sync_date=getattr(parsed, 'sync_date', False),
-        blur_score=getattr(parsed, 'blur_score', False),
-        srgb=getattr(parsed, 'srgb', False),
-        flatten_cmyk=getattr(parsed, 'flatten_cmyk', False),
-        resume=getattr(parsed, 'resume', False),
-        gpx_trace=getattr(parsed, 'gpx_trace', None),
-        jobs=_jobs,
-    )
-
-    # Handle --resize
-    resize_str = getattr(parsed, 'resize', None)
-    if resize_str:
-        w, h = _parse_dimensions(resize_str)
-        options.max_width = w
-        options.max_height = h
-
-    # Handle --scale
-    options.scale_percent = getattr(parsed, 'scale', None)
-
-    # Fix suffix for 'compress' command
-    if parsed.command == "compress":
-        if not getattr(parsed, 'suffix', None) or parsed.suffix == '_processed':
-            options.suffix = "_compressed"
-    elif parsed.command == "convert":
-        options.suffix = getattr(parsed, 'suffix', '')
-        options.output_format = getattr(parsed, 'format', 'JPEG')
-    else:  # batch
-        options.suffix = getattr(parsed, 'suffix', None) or "_processed"
+    # ── Build options from parsed args (shared builder; also used by
+    #    ``preset save`` so a CLI preset captures the full option set) ──────
+    options = _build_process_options(parsed)
 
     # ── Apply config file defaults (explicit CLI args take precedence) ──────
     config_path = getattr(parsed, "config", None)
@@ -2191,6 +2268,11 @@ def run_cli(args: List[str] = None) -> int:
                 print(f"{_t('msg_config_load_err')}: {e}")
                 return 1
             print(f"⚠️  {_t('msg_config_load_err')}: {e}", file=sys.stderr)
+
+    # ── Apply --preset (runs after config so a preset overrides config) ─────
+    options = _apply_preset_defaults(options, parsed)
+    if options is None:  # --preset named a nonexistent preset
+        return 1
 
     # ── Collect files ───────────────────────────────────────────────────────
     file_patterns = getattr(parsed, 'files', None) or getattr(parsed, 'paths', [])
