@@ -1391,6 +1391,46 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___list'),
     )
 
+    # ── select subcommand (keeper workflow: sort by rating) ────────────────
+    select_parser = subparsers.add_parser(
+        "select", help=_t('cmd_select'),
+    )
+    select_parser.add_argument(
+        "paths", nargs="+", help=_t('help___paths'),
+    )
+    select_parser.add_argument(
+        "-r", "--recursive", action="store_true",
+        help=_t('help___recursive'),
+    )
+    select_parser.add_argument(
+        "--keep-min", type=int, default=4, metavar="N",
+        help=_t('help___keep_min'),
+    )
+    select_parser.add_argument(
+        "--reject-max", type=int, default=2, metavar="N",
+        help=_t('help___reject_max'),
+    )
+    select_parser.add_argument(
+        "--selects-dir", type=str, default=None, metavar="DIR",
+        help=_t('help___selects_dir'),
+    )
+    select_parser.add_argument(
+        "--rejects-dir", type=str, default=None, metavar="DIR",
+        help=_t('help___rejects_dir'),
+    )
+    select_parser.add_argument(
+        "--copy", action="store_true",
+        help=_t('help___select_copy'),
+    )
+    select_parser.add_argument(
+        "--dry-run", action="store_true",
+        help=_t('help___dry_run'),
+    )
+    select_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
     # ── hash subcommand ─────────────────────────────────────────────────────
     hash_parser = subparsers.add_parser(
         "hash", help=_t('cmd_hash'),
@@ -1539,8 +1579,8 @@ def run_cli(args: List[str] = None) -> int:
     for _sub in (compress_parser, convert_parser, batch_parser, exif_parser,
                  preset_parser, plugin_parser, watch_parser, dedup_parser,
                  info_parser, rename_parser, check_parser, sheet_parser,
-                 cull_parser, hash_parser, gallery_parser, bench_parser,
-                 config_parser, serve_parser, mcp_parser,
+                 cull_parser, select_parser, hash_parser, gallery_parser,
+                 bench_parser, config_parser, serve_parser, mcp_parser,
                  preset_save, preset_load, preset_delete,
                  plugin_install, plugin_uninstall, plugin_info, plugin_fetch,
                  config_init, config_show):
@@ -2146,6 +2186,56 @@ def run_cli(args: List[str] = None) -> int:
                       f"over={r['overexposed_pct']}% "
                       f"under={r['underexposed_pct']}%{extra}")
             print(f"\n{_t('msg_cull_kept')}: {len(kept_paths)}/{len(results)}")
+        return 0
+
+    # ── Handle 'select' command (keeper workflow by rating) ────────────────
+    if parsed.command == "select":
+        from .select import select_files
+        files = _collect_files(parsed.paths, recursive=parsed.recursive)
+        if not files:
+            print(_t("msg_no_images"))
+            return 1
+
+        try:
+            results = select_files(
+                files,
+                keep_min=parsed.keep_min,
+                reject_max=parsed.reject_max,
+                selects_dir=parsed.selects_dir,
+                rejects_dir=parsed.rejects_dir,
+                mode="copy" if parsed.copy else "move",
+                dry_run=parsed.dry_run,
+            )
+        except ValueError as e:  # keep_min <= reject_max
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+
+        moved = [r for r in results if r["action"] in
+                 ("move", "copy", "would_move", "would_copy")]
+        kept = [r for r in results if r["status"] == "keep"]
+        rejected = [r for r in results if r["status"] == "reject"]
+        if getattr(parsed, 'json', False):
+            import json
+            print(json.dumps(versioned({
+                "count": len(results),
+                "kept": len(kept), "rejected": len(rejected),
+                "moved": len(moved), "dry_run": parsed.dry_run,
+                "results": results,
+            }), indent=2, ensure_ascii=False))
+        else:
+            for r in results:
+                if r["status"] == "skip":
+                    mark = "⏸"
+                elif r["action"].startswith("would"):
+                    mark = "🔮"
+                else:
+                    mark = "📦"
+                print(f"  {mark} [{r['status']}] {r['path']}"
+                      f"  rating={r['rating']}"
+                      + (f"  → {r['dest']}" if r["dest"] else ""))
+            summary = _t('msg_select_summary', kept=len(kept),
+                         rejected=len(rejected), moved=len(moved))
+            print(f"\n{summary}")
         return 0
 
     # ── Handle 'hash' command ───────────────────────────────────────────────

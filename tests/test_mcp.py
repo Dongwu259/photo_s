@@ -34,7 +34,7 @@ def _img(path, color=(120, 100, 80), size=(32, 32)):
 class TestTools:
     def test_registered_tools(self):
         names = {t.name for t in asyncio.run(create_server().list_tools())}
-        assert names == {"process", "info", "exif", "dedup", "cull",
+        assert names == {"process", "info", "exif", "dedup", "cull", "select",
                          "hash", "plugin", "contact_sheet", "gallery",
                          "watermark", "preset", "bench",
                          "watch", "watch_status", "watch_stop"}
@@ -264,6 +264,56 @@ class TestCullTool:
         assert white not in kept_paths
 
 
+class TestSelectTool:
+    def _rate(self, path, rating):
+        _call("exif", {"action": "write", "tags": {path: {"rating": rating}}})
+
+    def test_dry_run_classifies(self, tmp_path):
+        pytest.importorskip("piexif")
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg")
+        c = _img(tmp_path / "c.jpg")
+        self._rate(a, 5)
+        self._rate(b, 1)
+        # c stays unrated → skip
+        r = _call("select", {"paths": [a, b, c],
+                             "selects_dir": str(tmp_path / "sel"),
+                             "rejects_dir": str(tmp_path / "rej"),
+                             "dry_run": True})
+        assert r["ok"] is True and r["dry_run"] is True
+        by_name = {os.path.basename(x["path"]): x for x in r["results"]}
+        assert by_name["a.jpg"]["status"] == "keep"
+        assert by_name["a.jpg"]["action"] == "would_move"
+        assert by_name["b.jpg"]["status"] == "reject"
+        assert by_name["c.jpg"]["status"] == "skip"
+        # dry_run: nothing was created
+        assert not os.path.exists(str(tmp_path / "sel"))
+
+    def test_move_and_remove_sources(self, tmp_path):
+        pytest.importorskip("piexif")
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg")
+        self._rate(a, 5)
+        self._rate(b, 1)
+        sel, rej = tmp_path / "sel", tmp_path / "rej"
+        r = _call("select", {"paths": [a, b], "selects_dir": str(sel),
+                             "rejects_dir": str(rej)})
+        assert r["kept"] == 1 and r["rejected"] == 1
+        assert os.path.isfile(str(sel / "a.jpg"))
+        assert os.path.isfile(str(rej / "b.jpg"))
+        assert not os.path.exists(a) and not os.path.exists(b)
+
+    def test_copy_preserves_originals(self, tmp_path):
+        pytest.importorskip("piexif")
+        a = _img(tmp_path / "a.jpg")
+        self._rate(a, 5)
+        r = _call("select", {"paths": [a], "selects_dir": str(tmp_path / "sel"),
+                             "mode": "copy"})
+        assert r["kept"] == 1
+        assert os.path.isfile(a)  # original kept
+        assert os.path.isfile(str(tmp_path / "sel" / "a.jpg"))
+
+
 class TestHashTool:
     def test_generate_and_verify(self, tmp_path):
         f = tmp_path / "data.bin"
@@ -317,7 +367,7 @@ class TestCliListTools:
         out = capsys.readouterr().out
         assert rc == 0
         data = json.loads(out)
-        assert len(data["tools"]) == 15
+        assert len(data["tools"]) == 16
         for t in data["tools"]:
             assert "input_schema" in t
             assert "properties" in t["input_schema"]
@@ -346,7 +396,7 @@ class TestStdioEndToEnd:
                     tools = await session.list_tools()
                     names = {t.name for t in tools.tools}
                     assert names == {"process", "info", "exif", "dedup",
-                                     "cull", "hash", "plugin",
+                                     "cull", "select", "hash", "plugin",
                                      "contact_sheet", "gallery",
                                      "watermark", "preset", "bench",
                                      "watch", "watch_status", "watch_stop"}

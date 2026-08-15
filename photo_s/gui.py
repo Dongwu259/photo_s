@@ -395,6 +395,13 @@ STRINGS = {
         "review_shutter": "快门(如 1/250)",
         "review_aperture": "光圈(如 2.8)",
         "review_date": "日期(YYYY:MM:DD HH:MM:SS)",
+        "review_select_lbl": "精选",
+        "review_rejects_lbl": "淘汰",
+        "review_select_go": "移动精选/淘汰",
+        "review_select_browse": "选择目标文件夹",
+        "review_select_need_dir": "请至少指定一个目标文件夹（精选或淘汰）",
+        "review_select_done": "已移动 {n} 个文件",
+        "review_select_done_warn": "移动 {ok} 个，{err} 个失败",
         "analyze_title": "曝光统计",
         "analyze_none": "请先在文件列表中选择一张图片",
         "analyze_err": "无法读取该图片",
@@ -834,6 +841,13 @@ STRINGS = {
         "review_shutter": "Shutter (e.g. 1/250)",
         "review_aperture": "Aperture (e.g. 2.8)",
         "review_date": "Date (YYYY:MM:DD HH:MM:SS)",
+        "review_select_lbl": "Selects",
+        "review_rejects_lbl": "Rejects",
+        "review_select_go": "Move keepers/rejects",
+        "review_select_browse": "Choose a target folder",
+        "review_select_need_dir": "Set at least one target folder (selects or rejects)",
+        "review_select_done": "Moved {n} files",
+        "review_select_done_warn": "Moved {ok}, {err} failed",
         "analyze_title": "Exposure Stats",
         "analyze_none": "Select an image in the file list first",
         "analyze_err": "Cannot read that image",
@@ -3885,6 +3899,28 @@ class PhotoSApp:
             self._t("undo_tag", name=os.path.basename(path)), revert)
         return True, msg, revert, entry
 
+    def _select_move(self, paths, selects_dir, rejects_dir,
+                     keep_min=4, reject_max=2, mode="move"):
+        """Sync: sort rated files into selects/rejects folders.
+
+        Tk-free seam (mirrors _cull_scan) so the review lightbox can call it
+        directly; ratings are read from EXIF — the ones the review flow wrote.
+        Returns (results, ok_count, error_count).
+        """
+        from .select import select_files
+        try:
+            results = select_files(
+                list(paths), keep_min=keep_min, reject_max=reject_max,
+                selects_dir=selects_dir, rejects_dir=rejects_dir,
+                mode=mode, dry_run=False,
+            )
+        except ValueError as e:
+            return None, 0, 0, str(e)
+        ok_count = sum(1 for r in results if r["ok"] and r["action"]
+                       in ("move", "copy"))
+        error_count = sum(1 for r in results if not r["ok"])
+        return results, ok_count, error_count, ""
+
     def _post_more_menu(self):
         """Toolbar 'More Tools' popup: watch / contact sheet / cull / hash /
         presets. A single button keeps the workflow row uncluttered; the whole
@@ -4084,6 +4120,83 @@ class PhotoSApp:
             bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
             border_color=COLORS["border"], font=FONT_SMALL,
             padx=10, pady=3).pack(side="right")
+
+        # Select (keeper workflow) row: after rating, move keepers/rejects to
+        # the chosen folders. Acts on the currently filtered set.
+        sel = tk.Frame(win, bg=COLORS["bg"])
+        sel.pack(fill="x", padx=20, pady=(0, 14))
+        tk.Label(sel, text=self._t("review_select_lbl"), font=FONT_BODY,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
+            side="left")
+        selects_var = tk.StringVar()
+        ttk.Entry(sel, textvariable=selects_var, font=FONT_SMALL,
+                  width=16).pack(side="left", padx=(8, 0))
+        FlatButton(
+            sel, text="📁",
+            command=lambda: browse_dir(selects_var),
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+            padx=6, pady=3).pack(side="left", padx=(2, 10))
+        tk.Label(sel, text=self._t("review_rejects_lbl"), font=FONT_BODY,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
+            side="left")
+        rejects_var = tk.StringVar()
+        ttk.Entry(sel, textvariable=rejects_var, font=FONT_SMALL,
+                  width=16).pack(side="left", padx=(8, 0))
+        FlatButton(
+            sel, text="📁",
+            command=lambda: browse_dir(rejects_var),
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+            padx=6, pady=3).pack(side="left", padx=(2, 10))
+        FlatButton(
+            sel, text=self._t("review_select_go"),
+            command=lambda: do_select(),
+            bg=COLORS["accent"], fg="white", hover_bg=COLORS["accent_hover"],
+            border_color=COLORS["accent"], font=FONT_SMALL,
+            padx=12, pady=3).pack(side="left")
+
+        def browse_dir(var):
+            from tkinter import filedialog
+            d = filedialog.askdirectory(
+                title=self._t("review_select_browse"))
+            self._after_file_dialog()
+            if d:
+                var.set(d)
+
+        def do_select():
+            save_current()  # persist the pending rating before sorting
+            sd = selects_var.get().strip()
+            rd = rejects_var.get().strip()
+            if not sd and not rd:
+                messagebox.showwarning(
+                    self._t("app_title"),
+                    self._t("review_select_need_dir"))
+                return
+            seq = list(state["seq"])
+            if not seq:
+                return
+            results, okc, errc, err = self._select_move(
+                seq, sd or None, rd or None, keep_min=4, reject_max=2)
+            if err:
+                messagebox.showerror(self._t("app_title"), err)
+                return
+            moved = {r["path"] for r in results
+                     if r["ok"] and r["action"] in ("move", "copy")}
+            # drop moved files from the queue so the lightbox advances
+            state["seq"] = [p for p in state["seq"] if p not in moved]
+            if not state["seq"]:
+                state["seq"] = list(all_paths)
+            state["idx"] = 0
+            show()
+            if errc:
+                messagebox.showwarning(
+                    self._t("app_title"),
+                    self._t("review_select_done_warn",
+                            ok=okc, err=errc))
+            else:
+                set_status(self._t("review_select_done", n=okc),
+                           COLORS["accent"])
 
         # Worker→UI marshalling queue (see gallery dialog for rationale)
         q = queue.Queue()

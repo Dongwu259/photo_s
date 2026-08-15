@@ -1,8 +1,8 @@
 """
 PhotoS - MCP (Model Context Protocol) server.
 
-Exposes PhotoS tools (process/info/exif/dedup/cull/hash/plugin) to MCP
-clients (Claude Desktop, AI agents) over stdio. Tools call photo_s module
+Exposes PhotoS tools (process/info/exif/dedup/cull/select/hash/plugin) to
+MCP clients (Claude Desktop, AI agents) over stdio. Tools call photo_s module
 functions directly (no CLI subprocess) and return JSON-serializable dicts
 whose shapes mirror the `--json` CLI contract.
 
@@ -365,6 +365,45 @@ def cull_tool(
         if ok:
             kept += 1
     return {"count": len(results), "kept": kept, "results": results}
+
+
+@_versioned
+def select_tool(
+    paths: list,
+    recursive: bool = False,
+    keep_min: int = 4,
+    reject_max: int = 2,
+    selects_dir: Optional[str] = None,
+    rejects_dir: Optional[str] = None,
+    mode: str = "move",
+    dry_run: bool = False,
+) -> dict:
+    """Sort rated photos into selects/rejects folders (keeper workflow).
+
+    Reads EXIF ratings (the PhotoS: UserComment payload the review flow
+    writes): rating >= keep_min → keeper (moved to ``selects_dir``),
+    rating <= reject_max → reject (moved to ``rejects_dir``), everything in
+    between stays in place. ``mode="copy"`` keeps originals; ``dry_run``
+    reports would-moves with zero filesystem writes.
+    """
+    from .cli import _collect_files
+    from .select import select_files
+
+    files = _collect_files(list(paths), recursive=recursive)
+    try:
+        results = select_files(
+            files, keep_min=keep_min, reject_max=reject_max,
+            selects_dir=selects_dir, rejects_dir=rejects_dir,
+            mode=mode, dry_run=dry_run,
+        )
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    kept = sum(1 for r in results if r["status"] == "keep")
+    rejected = sum(1 for r in results if r["status"] == "reject")
+    moved = sum(1 for r in results if r["action"].startswith(("move", "copy", "would")))
+    return {"ok": True, "count": len(results), "kept": kept,
+            "rejected": rejected, "moved": moved, "dry_run": dry_run,
+            "results": results}
 
 
 @_versioned
@@ -759,6 +798,11 @@ def create_server(config_path: Optional[str] = None):
                  description="Filter images by exposure and sharpness "
                              "thresholds; returns per-file stats and a kept "
                              "list.")
+    mcp.add_tool(select_tool, name="select",
+                 description="Sort rated photos into selects/rejects folders "
+                             "(rating >= keep_min → selects_dir, <= reject_max "
+                             "→ rejects_dir, else in place). dry_run reports "
+                             "would-moves without writing.")
     mcp.add_tool(hash_tool, name="hash",
                  description="Generate or verify a SHA-256 checksum manifest "
                              "(any file type).")
