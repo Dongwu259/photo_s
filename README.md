@@ -102,6 +102,40 @@ cd photo_s
 pip install -e .
 ```
 
+### Zero-install (uvx)
+
+Run without installing into your environment — uvx resolves the PyPI
+dependencies on first run:
+
+```bash
+uvx --from photo-s-tools photo-s --help          # CLI
+uvx --from "photo-s-tools[mcp]" photo-s mcp      # MCP server (Python 3.10+)
+```
+
+### Windows pre-built executables (no Python needed)
+
+GitHub Releases ships two PyInstaller bundles (built by CI):
+- `photo-s-windows` — full: GUI + CLI + MCP
+- `photo-s-lite-windows` — CLI + MCP only, no Tk
+
+Download the zip from the [Releases](https://github.com/Dongwu259/photo_s/releases)
+page and run the `.exe` directly.
+
+### Official plugins (separate PyPI distributions)
+
+```bash
+photo-s plugin install scunet          # SCUNet strong denoising
+photo-s plugin install lut             # LUT film grading
+
+# or directly via pip
+pip install photo-s-plugin-scunet
+pip install photo-s-plugin-lut
+```
+
+> `photo-s` itself is blocked on PyPI (too similar to the existing `photos`
+> package), so the distribution name is **`photo-s-tools`**. Core requires
+> Python ≥ 3.9; the `mcp` extra needs ≥ 3.10.
+
 ---
 
 ## ⌨️ CLI Usage

@@ -101,6 +101,37 @@ cd photo_s
 pip install -e .
 ```
 
+### 零安装（uvx）
+
+不装进环境直接跑——uvx 首次运行自动解析 PyPI 依赖：
+
+```bash
+uvx --from photo-s-tools photo-s --help          # CLI
+uvx --from "photo-s-tools[mcp]" photo-s mcp      # MCP server（需 Python 3.10+）
+```
+
+### Windows 预编译 exe（免 Python 环境）
+
+GitHub Releases 提供两个 PyInstaller 打包版（CI 构建）：
+- `photo-s-windows` — 完整版：GUI + CLI + MCP
+- `photo-s-lite-windows` — 精简版：CLI + MCP，无 Tk
+
+从 [Releases](https://github.com/Dongwu259/photo_s/releases) 下载 zip，解压直接运行 `.exe`。
+
+### 官方插件（独立 PyPI 发行版）
+
+```bash
+photo-s plugin install scunet          # SCUNet 强降噪
+photo-s plugin install lut             # LUT 电影调色
+
+# 或直接 pip
+pip install photo-s-plugin-scunet
+pip install photo-s-plugin-lut
+```
+
+> `photo-s` 这个包名被 PyPI 拦截（与已有 `photos` 包太相似），所以发行名是
+> **`photo-s-tools`**。核心要求 Python ≥ 3.9；`mcp` extra 需 ≥ 3.10。
+
 ---
 
 ## ⌨️ CLI 用法
