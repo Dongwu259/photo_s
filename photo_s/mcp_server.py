@@ -1,8 +1,9 @@
 """
 PhotoS - MCP (Model Context Protocol) server.
 
-Exposes PhotoS tools (process/info/exif/dedup/cull/select/hdr/hash/plugin)
-to MCP clients (Claude Desktop, AI agents) over stdio. Tools call photo_s module
+Exposes PhotoS tools
+(process/info/exif/dedup/cull/select/hdr/blurfaces/hash/plugin) to MCP
+clients (Claude Desktop, AI agents) over stdio. Tools call photo_s module
 functions directly (no CLI subprocess) and return JSON-serializable dicts
 whose shapes mirror the `--json` CLI contract.
 
@@ -429,6 +430,41 @@ def hdr_tool(
 
 
 @_versioned
+def blurfaces_tool(
+    paths: list,
+    recursive: bool = False,
+    mode: str = "blur",
+    margin: int = 20,
+    output_dir: Optional[str] = None,
+) -> dict:
+    """Detect and blur/pixelate faces in a batch of images (privacy).
+
+    Runs the standard batch pipeline with ``blur_faces`` set, so EXIF/ICC are
+    preserved and naming follows batch rules. Requires the optional opencv
+    extra; per-file failures are reported, not fatal.
+    """
+    from .cli import _collect_files
+    from .engine import batch_process, ProcessOptions
+
+    files = _collect_files(list(paths), recursive=recursive)
+    if not files:
+        return {"ok": False, "error": "no supported image files found"}
+    opts = ProcessOptions(
+        output_dir=output_dir,
+        blur_faces=mode,
+        blur_faces_margin=margin,
+        suffix="_blurred",
+        preserve_exif=True,
+    )
+    batch = batch_process(files, opts)
+    results = batch.results
+    ok = [r for r in results if r.success]
+    return {"ok": len(ok) == len(results),
+            "count": len(results), "success": len(ok),
+            "results": [r.to_dict() for r in results]}
+
+
+@_versioned
 def hash_tool(
     paths: Optional[list] = None,
     recursive: bool = False,
@@ -829,6 +865,10 @@ def create_server(config_path: Optional[str] = None):
                  description="Merge bracketed exposures into one HDR image "
                              "(exposure fusion). align=True runs AlignMTB for "
                              "handheld brackets.")
+    mcp.add_tool(blurfaces_tool, name="blurfaces",
+                 description="Detect and blur/pixelate faces in a batch "
+                             "(privacy). mode=blur|pixelate, margin expands the "
+                             "face box; runs the batch pipeline so EXIF is kept.")
     mcp.add_tool(hash_tool, name="hash",
                  description="Generate or verify a SHA-256 checksum manifest "
                              "(any file type).")

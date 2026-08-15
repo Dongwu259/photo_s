@@ -337,6 +337,15 @@ def _add_transform_args(parser):
         "--preset", type=str, default=argparse.SUPPRESS, metavar="NAME",
         help=_t('help___preset'),
     )
+    parser.add_argument(
+        "--blur-faces", type=str, default=argparse.SUPPRESS,
+        choices=["blur", "pixelate"], metavar="blur|pixelate",
+        help=_t('help___blur_faces'),
+    )
+    parser.add_argument(
+        "--blur-faces-margin", type=int, default=argparse.SUPPRESS,
+        metavar="PCT", help=_t('help___blur_faces_margin'),
+    )
 
 
 # Config keys the CLI applies outside the generic field mapping
@@ -499,6 +508,8 @@ def _build_process_options(parsed) -> ProcessOptions:
         flatten_cmyk=getattr(parsed, 'flatten_cmyk', False),
         resume=getattr(parsed, 'resume', False),
         gpx_trace=getattr(parsed, 'gpx_trace', None),
+        blur_faces=getattr(parsed, 'blur_faces', None),
+        blur_faces_margin=getattr(parsed, 'blur_faces_margin', None),
         jobs=_jobs,
     )
 
@@ -1451,6 +1462,38 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___json'),
     )
 
+    # ── blurfaces subcommand (privacy masking, optional opencv) ────────────
+    blurfaces_parser = subparsers.add_parser(
+        "blurfaces", help=_t('cmd_blurfaces'),
+    )
+    blurfaces_parser.add_argument(
+        "paths", nargs="+", help=_t('help___paths'),
+    )
+    blurfaces_parser.add_argument(
+        "-r", "--recursive", action="store_true",
+        help=_t('help___recursive'),
+    )
+    blurfaces_parser.add_argument(
+        "--mode", type=str, default="blur", choices=["blur", "pixelate"],
+        help=_t('help___blur_faces'),
+    )
+    blurfaces_parser.add_argument(
+        "--margin", type=int, default=20, metavar="PCT",
+        help=_t('help___blur_faces_margin'),
+    )
+    blurfaces_parser.add_argument(
+        "-o", "--output-dir", type=str, default=None, metavar="DIR",
+        help=_t('help___output_dir'),
+    )
+    blurfaces_parser.add_argument(
+        "--overwrite", action="store_true", default=argparse.SUPPRESS,
+        help=_t('help___overwrite'),
+    )
+    blurfaces_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
     # ── hash subcommand ─────────────────────────────────────────────────────
     hash_parser = subparsers.add_parser(
         "hash", help=_t('cmd_hash'),
@@ -1599,9 +1642,9 @@ def run_cli(args: List[str] = None) -> int:
     for _sub in (compress_parser, convert_parser, batch_parser, exif_parser,
                  preset_parser, plugin_parser, watch_parser, dedup_parser,
                  info_parser, rename_parser, check_parser, sheet_parser,
-                 cull_parser, select_parser, hdr_parser, hash_parser,
-                 gallery_parser, bench_parser, config_parser, serve_parser,
-                 mcp_parser,
+                 cull_parser, select_parser, hdr_parser, blurfaces_parser,
+                 hash_parser, gallery_parser, bench_parser, config_parser,
+                 serve_parser, mcp_parser,
                  preset_save, preset_load, preset_delete,
                  plugin_install, plugin_uninstall, plugin_info, plugin_fetch,
                  config_init, config_show):
@@ -2285,6 +2328,41 @@ def run_cli(args: List[str] = None) -> int:
             print(f"{_t('msg_hdr_done', n=len(parsed.paths), out=out)}"
                   f"  ({result.size[0]}×{result.size[1]})")
         return 0
+
+    # ── Handle 'blurfaces' command (privacy masking) ───────────────────────
+    if parsed.command == "blurfaces":
+        # module-qualified: a plain from-import here would shadow the shared
+        # handler's `batch_process` local for the rest of run_cli
+        from . import engine as _engine
+        files = _collect_files(parsed.paths, recursive=parsed.recursive)
+        if not files:
+            print(_t("msg_no_images"))
+            return 1
+        opts = _engine.ProcessOptions(
+            output_dir=getattr(parsed, 'output_dir', None),
+            blur_faces=parsed.mode,
+            blur_faces_margin=parsed.margin,
+            suffix="_blurred",
+            preserve_exif=True,
+            overwrite=getattr(parsed, 'overwrite', False),
+        )
+        batch = _engine.batch_process(files, opts)
+        results = batch.results
+        ok = [r for r in results if r.success]
+        if getattr(parsed, 'json', False):
+            import json
+            print(json.dumps(versioned({
+                "count": len(results), "ok": len(ok),
+                "results": [r.to_dict() for r in results],
+            }), indent=2, ensure_ascii=False))
+        else:
+            for r in results:
+                if r.success:
+                    print(f"  ✅ {r.output_path}")
+                else:
+                    print(f"  ❌ {r.input_path}: {r.error}", file=sys.stderr)
+            print(f"\n{_t('msg_blurfaces_done', ok=len(ok), n=len(results))}")
+        return 0 if len(ok) == len(results) else 1
 
     # ── Handle 'hash' command ───────────────────────────────────────────────
     if parsed.command == "hash":

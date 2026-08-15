@@ -499,6 +499,12 @@ STRINGS = {
         "gpx_trace": "GPX 轨迹文件",
         "gpx_trace_hint": "按拍摄时间插值写入 GPS；空 = 不写入",
         "browse_gpx": "浏览…",
+        "blur_faces": "人脸模糊",
+        "blur_faces_off": "关闭",
+        "blur_faces_blur": "模糊",
+        "blur_faces_pixelate": "马赛克",
+        "blur_faces_margin_lbl": "外扩 %",
+        "blur_faces_hint": "检测并模糊人脸（需 pip install photo-s-tools[enhance]）",
         "cmp_no_result": "无对比结果",
         "cmp_no_result_body": "该文件尚未处理或处理失败。\nProcess this file first to compare before/after.",
         # About
@@ -955,6 +961,12 @@ STRINGS = {
         "gpx_trace": "GPX track file",
         "gpx_trace_hint": "interpolate GPS from timestamps; blank = off",
         "browse_gpx": "Browse…",
+        "blur_faces": "Face blur",
+        "blur_faces_off": "Off",
+        "blur_faces_blur": "Blur",
+        "blur_faces_pixelate": "Mosaic",
+        "blur_faces_margin_lbl": "margin %",
+        "blur_faces_hint": "Detect & blur faces (needs pip install photo-s-tools[enhance])",
         "cmp_no_result": "No comparison",
         "cmp_no_result_body": "This file was not processed yet (or failed).\nProcess it first to compare before/after.",
         # About
@@ -1396,6 +1408,8 @@ class PhotoSApp:
         self.sync_date = tk.BooleanVar(value=False)
         self.scrub = tk.BooleanVar(value=False)
         self.gpx_trace = tk.StringVar(value="")
+        self.blur_faces = tk.StringVar(value="")       # ""|blur|pixelate
+        self.blur_faces_margin = tk.StringVar(value="20")
         # Composition
         self.crop = tk.StringVar(value="")
         self.crop_ratio = tk.StringVar(value="")
@@ -2587,6 +2601,28 @@ class PhotoSApp:
         self._add_checkbox(meta_frame, self._t("scrub"),
                            self.scrub, row=5)
 
+        # Face blur (privacy mask; needs opencv via [enhance] extra)
+        tk.Label(meta_frame, text=self._t("blur_faces"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=6, column=0, sticky="w", pady=(8, 0))
+        ttk.Combobox(meta_frame,
+                     values=(self._t("blur_faces_off"), self._t("blur_faces_blur"),
+                             self._t("blur_faces_pixelate")),
+                     textvariable=self.blur_faces, state="readonly",
+                     width=12, font=FONT_SMALL).grid(
+            row=6, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+        tk.Label(meta_frame, text=self._t("blur_faces_margin_lbl"),
+                 font=FONT_SMALL, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=6, column=2, sticky="w", padx=(12, 0), pady=(8, 0))
+        ttk.Entry(meta_frame, textvariable=self.blur_faces_margin,
+                  font=FONT_BODY, width=4).grid(
+            row=6, column=3, sticky="w", padx=(4, 0), pady=(8, 0))
+        tk.Label(meta_frame, text=self._t("blur_faces_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=7, column=0, columnspan=4, sticky="w", pady=(2, 0))
+
     def _browse_wb_reference(self):
         """Pick a white-balance reference image (gray card)."""
         if self._dlg_cooldown_active():
@@ -3355,6 +3391,14 @@ class PhotoSApp:
                      "crop_ratio", "rotate_bg", "flip", "pad_ratio",
                      "pad_bg", "rename_pattern", "folder_pattern"):
             _set(getattr(self, name), getattr(opts, name), str)
+        # face blur combobox stores localized labels, options store
+        # "blur"/"pixelate"/None
+        self.blur_faces.set({
+            None: "", "blur": self._t("blur_faces_blur"),
+            "pixelate": self._t("blur_faces_pixelate")}.get(
+                getattr(opts, "blur_faces", None), ""))
+        _set(self.blur_faces_margin, getattr(opts, "blur_faces_margin", None),
+             str)
         # ints
         _set(self.quality, getattr(opts, "quality", None), int)
         _set(self.watermark_opacity, getattr(opts, "watermark_opacity", None),
@@ -5356,6 +5400,11 @@ class PhotoSApp:
             sync_date=self.sync_date.get(),
             scrub=self.scrub.get(),
             gpx_trace=self.gpx_trace.get().strip() or None,
+            blur_faces={"": None,
+                        self._t("blur_faces_blur"): "blur",
+                        self._t("blur_faces_pixelate"): "pixelate"}.get(
+                            self.blur_faces.get()),
+            blur_faces_margin=_to_float(self.blur_faces_margin.get(), 20.0),
             max_straighten_angle=_to_float(self.max_straighten_angle.get(), 10.0),
             crop=self.crop.get().strip() or None,
             crop_ratio=self.crop_ratio.get().strip() or None,

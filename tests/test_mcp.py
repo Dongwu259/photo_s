@@ -34,8 +34,8 @@ def _img(path, color=(120, 100, 80), size=(32, 32)):
 class TestTools:
     def test_registered_tools(self):
         names = {t.name for t in asyncio.run(create_server().list_tools())}
-        assert names == {"process", "info", "exif", "dedup", "cull", "select",
-                         "hdr", "hash", "plugin", "contact_sheet", "gallery",
+        assert names == {"process", "info", "exif", "dedup", "cull", "select", "hdr", "blurfaces", "hash",
+                         "plugin", "contact_sheet", "gallery",
                          "watermark", "preset", "bench",
                          "watch", "watch_status", "watch_stop"}
 
@@ -345,6 +345,24 @@ class TestHdrTool:
         assert "enhance" in r["error"]
 
 
+class TestBlurFacesTool:
+    def test_missing_cv2_is_per_file_error(self, tmp_path, monkeypatch):
+        # blurfaces_tool routes through the engine pipeline; when opencv is
+        # missing the failure is recorded per file, not fatal to the batch
+        import photo_s.faceblur as fb
+        monkeypatch.setattr(
+            fb, "_cv2",
+            lambda: (_ for _ in ()).throw(
+                RuntimeError("face blur requires the optional dependency: "
+                             "pip install 'photo-s-tools[enhance]'")))
+        a = _img(tmp_path / "a.jpg")
+        out = tmp_path / "out"
+        r = _call("blurfaces", {"paths": [a], "output_dir": str(out)})
+        assert r["ok"] is False
+        assert r["success"] == 0
+        assert "enhance" in r["results"][0]["error"]
+
+
 class TestHashTool:
     def test_generate_and_verify(self, tmp_path):
         f = tmp_path / "data.bin"
@@ -398,7 +416,7 @@ class TestCliListTools:
         out = capsys.readouterr().out
         assert rc == 0
         data = json.loads(out)
-        assert len(data["tools"]) == 17
+        assert len(data["tools"]) == 18
         for t in data["tools"]:
             assert "input_schema" in t
             assert "properties" in t["input_schema"]
@@ -427,7 +445,7 @@ class TestStdioEndToEnd:
                     tools = await session.list_tools()
                     names = {t.name for t in tools.tools}
                     assert names == {"process", "info", "exif", "dedup",
-                                     "cull", "select", "hdr", "hash", "plugin",
+                                     "cull", "select", "hdr", "blurfaces", "hash", "plugin",
                                      "contact_sheet", "gallery",
                                      "watermark", "preset", "bench",
                                      "watch", "watch_status", "watch_stop"}

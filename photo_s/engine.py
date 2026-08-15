@@ -204,6 +204,8 @@ class ProcessOptions:
     # Workflow
     resume: bool = False           # skip inputs whose output already exists
     gpx_trace: Optional[str] = None  # GPX track path for GPS geo-tagging
+    blur_faces: Optional[str] = None  # "blur"|"pixelate" privacy mask (opencv)
+    blur_faces_margin: Optional[int] = None  # face-box expansion % (default 20)
 
 
 @dataclass
@@ -1106,6 +1108,17 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
                     position=options.watermark_position,
                     opacity=options.watermark_opacity,
                 )
+
+        # ── Face blur (privacy mask, optional opencv) ───────────────────────
+        # After watermark so the mask covers the final saved pixels; before
+        # EXIF extraction so the EXIF the pipeline writes is untouched. Only
+        # pixels change (.info is copied by the module), so the EXIF
+        # preservation in _save_image is unaffected.
+        if options.blur_faces:
+            from .faceblur import apply_face_blur
+            img, _faces = apply_face_blur(
+                img, mode=options.blur_faces,
+                margin=options.blur_faces_margin or 20)
 
         # ── Extract EXIF metadata for smart rename ──────────────────────────
         exif_meta = _extract_exif_metadata(img, input_path)
