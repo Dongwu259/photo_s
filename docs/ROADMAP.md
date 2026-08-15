@@ -11,10 +11,11 @@
 | v1.2.0 | GUI 补全 | 6 工作流入口（预览/监视/联系表/cull/hash/预设）+ 安全修复 |
 | v1.3.0 | Agent 集成 + LUT + 性能工具 | MCP 7→11 工具、SSE 进度、LUT 调色 + 插件、auto-jobs、`bench`、`plugin scaffold`、Pillow14 兼容 |
 | v1.4.0 | GUI 深化 + 降噪大图适配 | EXIF 编辑器扩展（镜头/ISO/快门等 7 字段）、重命名实时预览、多图并排对比（同步缩放勾选）、SCUNet 分块推理（24MP 不再 OOM）+ padding 修复、性能实测定案（8 线程 5.83x，不做多进程）、bench 三件套（SSIM/分段计时/临时目录）、双版本 exe（完整版 + lite）、v1.3.2 遗留低危清扫 6 项 |
+| v1.5.0 | i18n + Agent 契约 + 摄影师工作流 | 全量 CLI/GUI 国际化（--language 三平台检测）、JSON 契约 schema_version 版本化 + server 加固（0600/DNS-rebinding/1MB 上限）、MCP 15→18 工具（select/hdr/blurfaces/bench/watch×3）、选片双阈值分拣、HDR 曝光融合（--align）、人脸模糊/马赛克、--preset 一键套用、批量 EXIF GPS、crop-ratio 回归 |
 
 ## 规划中
 
-### v1.5.0（i18n + Agent 契约 + 加固 + 审计遗留 + 摄影师批处理工作流，**开发完成待发布**）
+### v1.5.0（i18n + Agent 契约 + 加固 + 审计遗留 + 摄影师批处理工作流）
 **A. 国际化（i18n）**
 - [x] 新 `photo_s/i18n.py`：CLI `STRINGS` 集中表（279 key × 2，parity 测试强制）、`_t(key, lang, **kwargs)`、三平台检测（macOS AppleLanguages / Windows LCID / Linux env）、`resolve_language` 优先级链（flag > env > config > persisted > 系统 > en）、GUI `~/.photos/language` 持久化、不用 `locale.setlocale`
 - [x] CLI `--language {en,zh,auto}` 全局 flag + 两段式解析、257 条 help + ~190 条运行时消息单一语言、`--json` 键保持英文、config `language` key
@@ -38,7 +39,7 @@
 - [x] 净效果：MCP 工具 11→18、CLI 子命令 19→22、**834 测试全绿**（2026-08-16）
 
 **E. 发布状态**：v1.5.0 为合并版本（i18n + 契约 + 加固 + 审计遗留 + 摄影师工作流）
-- [ ] **待发布**：push → CI 全绿确认 → tag v1.5.0 → PyPI → Release（发布流程见 RELEASE.md / 交接文档 §2）
+- [x] **已发布 2026-08-16**：CI 7 job 全绿 → tag v1.5.0 → PyPI（wheel + sdist）→ GitHub Release（wheel）→ 干净 venv 安装验证
 
 ### v1.5.1+（patch 轨道，随时发）
 - [ ] 依赖升级与平台坑修复（rawpy / Pillow 小版本、Windows/Linux 真机问题）
