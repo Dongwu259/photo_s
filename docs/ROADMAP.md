@@ -14,24 +14,28 @@
 
 ## 规划中
 
-### v1.5.0（i18n，**开发完成待发布**，commit `e1d2395`）
+### v1.5.0（i18n + Agent 契约 + server 加固 + 审计遗留，**开发完成待发布**）
+**A. 国际化（i18n）**
 - [x] 新 `photo_s/i18n.py`：CLI `STRINGS` 集中表（279 key × 2，parity 测试强制）、`_t(key, lang, **kwargs)`、三平台检测（macOS AppleLanguages / Windows LCID / Linux env）、`resolve_language` 优先级链（flag > env > config > persisted > 系统 > en）、GUI `~/.photos/language` 持久化、不用 `locale.setlocale`
 - [x] CLI `--language {en,zh,auto}` 全局 flag + 两段式解析、257 条 help + ~190 条运行时消息单一语言、`--json` 键保持英文、config `language` key
-- [x] GUI 启动自动检测 + 用户选择持久化；766 测试全绿
-- [x] v1.3.2 审计遗留 3 项并入：`min_photo_s_version` 安装时接线（`plugin install` 拒绝核心过旧 + `plugin list` 暴露 `compatible` 键）、`PHOTO_S_TLS` 真 TLS（stdlib ssl 包 socket，缺证书报错不静默）、GUI 预览 drain `rendered` 守卫（同 options 不重渲，`stable` 归零只是延迟不是修复）；787 测试全绿
-- [ ] **未发布**：push + CI + tag + PyPI + Release（发布流程见 RELEASE.md / 交接文档 §2）
+- [x] GUI 启动自动检测 + 用户选择持久化
+
+**B. Agent 契约版本化 + server 安全加固（原 v1.6.0，并入 v1.5.0）**
+- [x] 新 `photo_s/contract.py`：`SCHEMA_VERSION = 1` + `versioned(payload)`（加性顶层键，非信封）；CLI 16 处 `json.dumps` + plugincmd `_json()` + REST `_send_json` 单点 + MCP 11 工具 `@_versioned` 装饰器，全部 JSON 输出带 `schema_version`
+- [x] server 安全加固：ready-file 0600 权限、DNS rebinding Host 白名单 + Origin 对比实际绑定地址、`_read_json` 1MB 上限（413 + 排空连接）
+- [x] AGENT_API.md 契约声明（additive、消费者忽略未知键、breaking 才递增）+ §3.2 安全边界说明
+
+**C. v1.3.2 审计遗留 3 项**
+- [x] `min_photo_s_version` 安装时接线（`plugin install` 拒绝核心过旧 + `plugin list` 暴露 `compatible` 键）、`PHOTO_S_TLS` 真 TLS（stdlib ssl 包 socket，缺证书报错不静默）、GUI 预览 drain `rendered` 守卫（同 options 不重渲，`stable` 归零只是延迟不是修复）
+
+**D. 发布状态**：已 push（2026-08-15，`e1d2395..d2eaa21`）；787 测试全绿
+- [ ] **未 tag / 未发**：CI 全绿确认 → tag v1.5.0 → PyPI → Release（发布流程见 RELEASE.md / 交接文档 §2）
 
 ### v1.5.1+（patch 轨道，随时发）
 - [ ] 依赖升级与平台坑修复（rawpy / Pillow 小版本、Windows/Linux 真机问题）
 - [ ] 文档/示例补全
 
-### v1.6.0（Agent 契约版本化 + server 安全加固，**开发完成待发布**）
-- [x] 新 `photo_s/contract.py`：`SCHEMA_VERSION = 1` + `versioned(payload)`（加性顶层键，非信封）
-- [x] CLI 16 处 `json.dumps` + plugincmd `_json()` + REST `_send_json` 单点 + MCP 11 工具 `@_versioned` 装饰器，全部 JSON 输出带 `schema_version`
-- [x] server 安全加固：ready-file 0600 权限、DNS rebinding Host 白名单 + Origin 对比实际绑定地址、`_read_json` 1MB 上限（413 + 排空连接）
-- [x] AGENT_API.md 契约声明（additive、消费者忽略未知键、breaking 才递增）+ §3.2 安全边界说明
-- [x] tests/test_contract.py（15 项）+ 全量 781 绿
-- [ ] **未发布**：依赖 v1.5.0 先发布（v1.6.0 版本号届时 bump）
+### v1.6.0（下一主题，候选见「候选（未排期）」）
 
 ### v1.4.0 实施记录（2026-08-14，已全部落地）
 **A. 性能实测收尾** —— 真实照片集（29 张交付图）`bench -j 1,2,4,8`：2.62s → 0.45s，
