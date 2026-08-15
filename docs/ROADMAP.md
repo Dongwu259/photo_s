@@ -14,32 +14,31 @@
 
 ## 规划中
 
-### v1.5.0（i18n + Agent 契约 + server 加固 + 审计遗留，**开发完成待发布**）
+### v1.5.0（i18n + Agent 契约 + 加固 + 审计遗留 + 摄影师批处理工作流，**开发完成待发布**）
 **A. 国际化（i18n）**
 - [x] 新 `photo_s/i18n.py`：CLI `STRINGS` 集中表（279 key × 2，parity 测试强制）、`_t(key, lang, **kwargs)`、三平台检测（macOS AppleLanguages / Windows LCID / Linux env）、`resolve_language` 优先级链（flag > env > config > persisted > 系统 > en）、GUI `~/.photos/language` 持久化、不用 `locale.setlocale`
 - [x] CLI `--language {en,zh,auto}` 全局 flag + 两段式解析、257 条 help + ~190 条运行时消息单一语言、`--json` 键保持英文、config `language` key
 - [x] GUI 启动自动检测 + 用户选择持久化
 
-**B. Agent 契约版本化 + server 安全加固（原 v1.6.0，并入 v1.5.0）**
-- [x] 新 `photo_s/contract.py`：`SCHEMA_VERSION = 1` + `versioned(payload)`（加性顶层键，非信封）；CLI 16 处 `json.dumps` + plugincmd `_json()` + REST `_send_json` 单点 + MCP 11 工具 `@_versioned` 装饰器，全部 JSON 输出带 `schema_version`
+**B. Agent 契约版本化 + server 安全加固**
+- [x] 新 `photo_s/contract.py`：`SCHEMA_VERSION = 1` + `versioned(payload)`（加性顶层键，非信封）；CLI 16 处 `json.dumps` + plugincmd `_json()` + REST `_send_json` 单点 + MCP 工具 `@_versioned` 装饰器，全部 JSON 输出带 `schema_version`
 - [x] server 安全加固：ready-file 0600 权限、DNS rebinding Host 白名单 + Origin 对比实际绑定地址、`_read_json` 1MB 上限（413 + 排空连接）
 - [x] AGENT_API.md 契约声明（additive、消费者忽略未知键、breaking 才递增）+ §3.2 安全边界说明
 
 **C. v1.3.2 审计遗留 3 项**
 - [x] `min_photo_s_version` 安装时接线（`plugin install` 拒绝核心过旧 + `plugin list` 暴露 `compatible` 键）、`PHOTO_S_TLS` 真 TLS（stdlib ssl 包 socket，缺证书报错不静默）、GUI 预览 drain `rendered` 守卫（同 options 不重渲，`stable` 归零只是延迟不是修复）
 
-**D. 发布状态**：已 push（2026-08-15，`e1d2395..d2eaa21`）；787 测试全绿
-- [ ] **未 tag / 未发**：CI 全绿确认 → tag v1.5.0 → PyPI → Release（发布流程见 RELEASE.md / 交接文档 §2）
-
-### v1.6.0（摄影师批处理工作流，**开发完成待发布**）
+**D. 摄影师批处理工作流（原 v1.6.0，合并进 v1.5.0 一次发布）**
 - [x] **选片工作流 `select`**：按 EXIF 评分双阈值分拣——rating ≥ keep_min(4) 移精选目录、≤ reject_max(2) 移淘汰目录、3 星/未评分原地；move/copy、dry_run 零写入、basename 平铺防穿越、原子 move（copy2→os.replace→删源）；CLI + MCP `select_tool` + GUI 评审灯箱「移动精选/淘汰」按钮
 - [x] **批量 EXIF GPS + make/model**：`apply_exif_tags` 支持 `gps "lat,lon"`（GPS IFD + N/S/E/W refs，非法值静默跳过）；CLI `exif --gps/--make/--model` 批量写；MCP `exif_tool` `gps` 参数
 - [x] **统一比例裁剪验证**：`--crop-ratio`（16:9/1:1 等）已端到端存在（engine→adjust→CLI→GUI），补方形 + 与 `--crop` 组合回归测试锁定
 - [x] **风格预设一键套用**：CLI `preset save` 改经共享 builder 捕获全选项集（原只 4 字段）；`preset load` 真正可用；batch/compress/convert 新增 `--preset NAME`（优先级：显式 CLI > --preset > config > 默认；jobs/output_dir 不套用）
 - [x] **包围曝光 HDR 合并**：新 `photo_s/hdr.py`（opencv MergeMertens 曝光融合，无需 EV；`--align` AlignMTB 手持对齐，坏 build 抛清晰错误不静默回退）；CLI `hdr` + MCP `hdr_tool` + GUI「更多工具」入口
 - [x] **批量人脸模糊 `blurfaces`**：新 `photo_s/faceblur.py`（opencv Haar cascade 检测 + 高斯模糊/马赛克；cascade 缺失抛清晰 RuntimeError 不静默返原图）；`ProcessOptions.blur_faces/blur_faces_margin` 入管线（watermark 后 EXIF 前，只改像素 .info 保留）；CLI `--blur-faces`（batch）+ 独立 `blurfaces` 子命令 + MCP `blurfaces_tool` + GUI 设置面板
-- [x] 净效果：MCP 工具 15→18、CLI 子命令 19→22、**834 测试全绿**（2026-08-16）
-- [ ] **未 tag / 未发**：与 v1.5.0 一起走发布流程（v1.5.0 tag → PyPI → v1.6.0 或合并发布，用户定）
+- [x] 净效果：MCP 工具 11→18、CLI 子命令 19→22、**834 测试全绿**（2026-08-16）
+
+**E. 发布状态**：v1.5.0 为合并版本（i18n + 契约 + 加固 + 审计遗留 + 摄影师工作流）
+- [ ] **待发布**：push → CI 全绿确认 → tag v1.5.0 → PyPI → Release（发布流程见 RELEASE.md / 交接文档 §2）
 
 ### v1.5.1+（patch 轨道，随时发）
 - [ ] 依赖升级与平台坑修复（rawpy / Pillow 小版本、Windows/Linux 真机问题）
