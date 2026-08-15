@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Dongwu259/photo-s",
   "title": "PhotoS",
-  "description": "Batch photo processing toolbox for AI agents and humans: compress to target size, convert formats (JPEG/PNG/WebP/TIFF/HEIC/AVIF/RAW), read & write EXIF, template rename, perceptual dedup, exposure/sharpness culling, checksum manifests, contact sheets, HTML galleries, folder watch automation and benchmarks.",
+  "description": "Batch photo processing: compress, convert, EXIF, rename, dedup, cull, galleries",
   "repository": {
     "url": "https://github.com/Dongwu259/photo_s",
     "source": "github"
