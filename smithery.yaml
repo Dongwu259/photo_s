@@ -1,0 +1,15 @@
+# Smithery deployment config — https://smithery.ai/docs/build/project-config
+# Builds the repo-root Dockerfile and runs the stdio MCP server
+# (`photo-s mcp`) installed from the PyPI package photo-s-tools[mcp].
+runtime: container
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: []
+    properties: {}
+
+build:
+  dockerfile: "Dockerfile"
+  dockerBuildPath: "."

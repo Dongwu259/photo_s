@@ -1,5 +1,7 @@
 # 📷 PhotoS — Batch Image Compression & Format Conversion
 
+<!-- mcp-name: io.github.Dongwu259/photo-s -->
+
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
