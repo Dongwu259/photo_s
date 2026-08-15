@@ -316,6 +316,22 @@ class TestToneAndComposition:
         assert result.success
         assert result.output_dims == (400, 225)
 
+    def test_crop_ratio_square(self, tmp_path):
+        # 1:1 on a 4:3 image center-crops to a square (300x300)
+        src = _make_image(tmp_path / "cr_sq.jpg", size=(400, 300))
+        result = _process(src, tmp_path / "out", crop_ratio="1:1")
+        assert result.success
+        assert result.output_dims == (300, 300)
+
+    def test_crop_ratio_with_crop(self, tmp_path):
+        # explicit --crop then ratio: ratio applies to the already-cropped
+        # pixels (200x200 stays 200x200 under 1:1) — no conflict
+        src = _make_image(tmp_path / "cr_both.jpg", size=(400, 300))
+        result = _process(src, tmp_path / "out",
+                          crop="200x200+0+0", crop_ratio="1:1")
+        assert result.success
+        assert result.output_dims == (200, 200)
+
     def test_grayscale_output(self, tmp_path):
         src = _make_image(tmp_path / "g.jpg", color=(120, 200, 60))
         result = _process(src, tmp_path / "out", grayscale=True)
