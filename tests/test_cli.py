@@ -434,7 +434,8 @@ class TestBench:
         rc = run_cli(["bench", "--dir", str(tmp_path), "-j", "1,2,2", "--json"])
         assert rc == 0
         d = json.loads(capsys.readouterr().out)
-        assert set(d) == {"dir", "files", "runs", "evaluate"}
+        assert set(d) == {"schema_version", "dir", "files", "runs", "evaluate"}
+        assert d["schema_version"] == 1
         assert [r["jobs"] for r in d["runs"]] == [1, 2]  # dedup, keep order
         assert all(r["speedup"] > 0 for r in d["runs"])
         assert seen == [1, 2]

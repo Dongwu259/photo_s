@@ -48,6 +48,7 @@ from .engine import (
 )
 from . import __version__
 from .i18n import _t  # reads i18n.CURRENT_LANG at call time; set in run_cli
+from .contract import versioned  # additive schema_version on every --json output
 
 
 def _collect_files(patterns: List[str], recursive: bool = False) -> List[str]:
@@ -1418,13 +1419,13 @@ def run_cli(args: List[str] = None) -> int:
 
         if dedup_json:
             import json
-            print(json.dumps({
+            print(json.dumps(versioned({
                 "count": len(dup_groups),
                 "duplicate_count": total_dupes,
                 "savings_bytes": savings,
                 "groups": [{"hash": h, "paths": ps}
                            for h, ps in dup_groups.items()],
-            }, indent=2, ensure_ascii=False))
+            }), indent=2, ensure_ascii=False))
         else:
             if not dup_groups:
                 print(_t("msg_no_dupes"))
@@ -1459,8 +1460,8 @@ def run_cli(args: List[str] = None) -> int:
             kept, removed = handle_duplicates(dup_groups, action=parsed.action,
                                               dry_run=parsed.dry_run)
             if dedup_json:
-                print(json.dumps({"action": parsed.action, "kept": kept,
-                                  "removed": removed},
+                print(json.dumps(versioned({"action": parsed.action, "kept": kept,
+                                  "removed": removed}),
                                  indent=2, ensure_ascii=False))
             else:
                 _will = {
@@ -1630,7 +1631,7 @@ def run_cli(args: List[str] = None) -> int:
                     print(r["path"])
             elif exif_json:
                 import json
-                print(json.dumps({"count": len(results), "results": results},
+                print(json.dumps(versioned({"count": len(results), "results": results}),
                                  indent=2, ensure_ascii=False))
             else:
                 for r in results:
@@ -1709,14 +1710,14 @@ def run_cli(args: List[str] = None) -> int:
 
         if getattr(parsed, 'json', False):
             import json
-            print(json.dumps({
+            print(json.dumps(versioned({
                 "version": __version__,
                 "input_extensions": sorted(ALL_INPUT_EXTENSIONS),
                 "formats": sorted(SUPPORTED_FORMATS),
                 "writable": sorted(PIL_WRITABLE),
                 "optional_features": optional_features(),
                 "plugins": plugins(),
-            }, indent=2, ensure_ascii=False))
+            }), indent=2, ensure_ascii=False))
             return 0
         print(_t("msg_formats_title"))
         print("=" * 50)
@@ -1817,7 +1818,7 @@ def run_cli(args: List[str] = None) -> int:
             if parsed.list_tools:
                 import json
                 from .mcp_server import list_tools_json
-                print(json.dumps({"tools": list_tools_json()},
+                print(json.dumps(versioned({"tools": list_tools_json()}),
                                  indent=2, ensure_ascii=False))
                 return 0
             from .mcp_server import run_stdio
@@ -1858,8 +1859,8 @@ def run_cli(args: List[str] = None) -> int:
         ok = sum(1 for r in results if r["status"] == "ok")
         if rename_json:
             import json
-            print(json.dumps({"total": len(results), "ok": ok,
-                              "results": results},
+            print(json.dumps(versioned({"total": len(results), "ok": ok,
+                              "results": results}),
                              indent=2, ensure_ascii=False))
         else:
             for r in results:
@@ -1887,12 +1888,12 @@ def run_cli(args: List[str] = None) -> int:
 
         if parsed.json:
             import json
-            print(json.dumps({
+            print(json.dumps(versioned({
                 "checked": len(results),
                 "ok": len(results) - len(corrupt),
                 "corrupt": [{"path": r["path"], "error": r["error"]}
                             for r in corrupt],
-            }, indent=2, ensure_ascii=False))
+            }), indent=2, ensure_ascii=False))
         else:
             for r in results:
                 mark = "✅" if r["ok"] else "❌"
@@ -1925,7 +1926,7 @@ def run_cli(args: List[str] = None) -> int:
         )
         if getattr(parsed, 'json', False):
             import json
-            print(json.dumps({"output": out, "count": len(files)},
+            print(json.dumps(versioned({"output": out, "count": len(files)}),
                              indent=2, ensure_ascii=False))
         else:
             print(f"{_t('msg_contact_sheet')}: {out}  "
@@ -1955,8 +1956,8 @@ def run_cli(args: List[str] = None) -> int:
                 print(p)
         elif getattr(parsed, 'json', False):
             import json
-            print(json.dumps({"count": len(results), "kept": len(kept_paths),
-                              "results": results},
+            print(json.dumps(versioned({"count": len(results), "kept": len(kept_paths),
+                              "results": results}),
                              indent=2, ensure_ascii=False))
         else:
             for r in results:
@@ -1978,7 +1979,7 @@ def run_cli(args: List[str] = None) -> int:
         if parsed.verify:
             report = verify_manifest(parsed.verify)
             if parsed.json:
-                print(json.dumps(report, indent=2, ensure_ascii=False))
+                print(json.dumps(versioned(report), indent=2, ensure_ascii=False))
             else:
                 print(f"{_t('msg_manifest')}: {parsed.verify}  ({report['algorithm']})")
                 print(_t("msg_total_ok", total=report["total"], ok=report["ok"]))
@@ -2005,8 +2006,8 @@ def run_cli(args: List[str] = None) -> int:
         out = parsed.output or "manifest.csv"
         write_manifest(out, entries)
         if parsed.json:
-            print(json.dumps({"output": os.path.abspath(out),
-                              "count": len(files)}, indent=2, ensure_ascii=False))
+            print(json.dumps(versioned({"output": os.path.abspath(out),
+                              "count": len(files)}), indent=2, ensure_ascii=False))
         else:
             print(f"{_t('msg_manifest_written')}: {os.path.abspath(out)} "
                   f"({len(files)} 项)")
@@ -2042,7 +2043,7 @@ def run_cli(args: List[str] = None) -> int:
         report = run_benchmark(files, job_list, base, evaluate=parsed.evaluate)
         out = {"dir": parsed.dir, "files": len(files), **report}
         if getattr(parsed, 'json', False):
-            print(_json.dumps(out, indent=2, ensure_ascii=False))
+            print(_json.dumps(versioned(out), indent=2, ensure_ascii=False))
         else:
             print(f"bench: {len(files)} files in {parsed.dir}")
             for r in report["runs"]:
@@ -2074,7 +2075,7 @@ def run_cli(args: List[str] = None) -> int:
                             thumb_size=parsed.thumb)
         if getattr(parsed, 'json', False):
             import json
-            print(json.dumps(res, indent=2, ensure_ascii=False))
+            print(json.dumps(versioned(res), indent=2, ensure_ascii=False))
         else:
             print(f"{_t('msg_gallery')}: {res['output']}  "
                   f"({_t('msg_images_count', n=res['count'])})")
@@ -2213,7 +2214,7 @@ def run_cli(args: List[str] = None) -> int:
     if getattr(parsed, 'dry_run', False):
         if is_json:
             import json
-            print(json.dumps({
+            print(json.dumps(versioned({
                 "dry_run": True,
                 "count": len(files),
                 "files": files,
@@ -2230,7 +2231,7 @@ def run_cli(args: List[str] = None) -> int:
                     "output_dir": options.output_dir,
                     "folder_pattern": options.folder_pattern,
                 },
-            }, indent=2, ensure_ascii=False))
+            }), indent=2, ensure_ascii=False))
             return 0
         print(_t("msg_dry_run_settings"))
         print()
@@ -2317,8 +2318,7 @@ def run_cli(args: List[str] = None) -> int:
 
         if is_json:
             import json
-            print(json.dumps(
-                {"profiles": {n: r.to_dict() for n, r in profile_results.items()}},
+            print(json.dumps(versioned({"profiles": {n: r.to_dict() for n, r in profile_results.items()}}),
                 indent=2, ensure_ascii=False))
         return 0 if failed_total == 0 else 1
 
@@ -2346,7 +2346,7 @@ def run_cli(args: List[str] = None) -> int:
     # ── Print results ───────────────────────────────────────────────────────
     if is_json:
         import json
-        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        print(json.dumps(versioned(result.to_dict()), indent=2, ensure_ascii=False))
     else:
         print()
         for r in result.results:

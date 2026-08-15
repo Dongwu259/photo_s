@@ -25,7 +25,13 @@
 - [ ] v1.3.2 审计剩余低危项（见交接文档清单）
 - [ ] 文档/示例补全
 
-### v1.6.0（主题待定，候选见下）
+### v1.6.0（Agent 契约版本化 + server 安全加固，**开发完成待发布**）
+- [x] 新 `photo_s/contract.py`：`SCHEMA_VERSION = 1` + `versioned(payload)`（加性顶层键，非信封）
+- [x] CLI 16 处 `json.dumps` + plugincmd `_json()` + REST `_send_json` 单点 + MCP 11 工具 `@_versioned` 装饰器，全部 JSON 输出带 `schema_version`
+- [x] server 安全加固：ready-file 0600 权限、DNS rebinding Host 白名单 + Origin 对比实际绑定地址、`_read_json` 1MB 上限（413 + 排空连接）
+- [x] AGENT_API.md 契约声明（additive、消费者忽略未知键、breaking 才递增）+ §3.2 安全边界说明
+- [x] tests/test_contract.py（15 项）+ 全量 781 绿
+- [ ] **未发布**：依赖 v1.5.0 先发布（v1.6.0 版本号届时 bump）
 
 ### v1.4.0 实施记录（2026-08-14，已全部落地）
 **A. 性能实测收尾** —— 真实照片集（29 张交付图）`bench -j 1,2,4,8`：2.62s → 0.45s，

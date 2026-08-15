@@ -52,6 +52,15 @@ from .engine import (
 
 VERSION = __version__
 
+# Max accepted request body for JSON endpoints (guards _read_json against
+# unbounded Content-Length memory exhaustion).
+MAX_BODY_BYTES = 1_000_000
+
+# Hosts accepted when no token is configured. DNS-rebinding attacks make a
+# browser resolve attacker.com → 127.0.0.1 and send Host: attacker.com, so
+# only loopback / the actual bound address may claim the request.
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
+
 
 def _scalar_groups():
     """Derive int/float/str/bool field groups from ProcessOptions annotations.
@@ -261,25 +270,65 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
 
     # ── helpers ──────────────────────────────────────────────────────────
     def _send_json(self, status: int, payload: dict):
-        body = json.dumps(payload).encode("utf-8")
+        from .contract import versioned
+        body = json.dumps(versioned(payload)).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
+    def _request_host(self) -> str:
+        """The Host header's hostname (port stripped), lowercased."""
+        host = (self.headers.get("Host", "") or "").strip().lower()
+        # strip port: IPv6 [::1]:port vs bare host:port
+        if host.startswith("["):
+            host = host.split("]")[0] + "]"
+        elif ":" in host:
+            host = host.rsplit(":", 1)[0]
+        return host
+
+    def _host_allowed(self) -> bool:
+        """Whether the request's Host header matches loopback / the bind address.
+
+        DNS-rebinding: an attacker's page fetches http://attacker.com which
+        the browser resolves to 127.0.0.1, but the Host header stays
+        attacker.com — so requiring Host ∈ {loopback, bound-address} blocks it.
+        """
+        host = self._request_host()
+        if host in _LOOPBACK_HOSTS:
+            return True
+        bound = getattr(self.server, "server_address", None)
+        if bound:
+            bound_host = bound[0]
+            if bound_host in ("", "0.0.0.0", "::"):
+                # wildcard bind: any Host would pass — require a token instead
+                return False
+            if host == bound_host.lower():
+                return True
+        return False
+
     def _authed(self) -> bool:
         if self.token:
             return self.headers.get("Authorization", "") == f"Bearer {self.token}"
         # No token configured: still block browser cross-origin requests
-        # (localhost CSRF drive-by). A malicious page can send a CORS
-        # "simple request" (text/plain JSON, no preflight) to 127.0.0.1 and
-        # it would otherwise be fully processed. Browsers always reveal their
-        # origin on fetch/XHR; CLI/curl/agent clients send no Origin header
-        # and are unaffected.
+        # (localhost CSRF drive-by) AND DNS-rebinding (Host must be loopback /
+        # the actual bound address, not a rebinding hostname). A malicious
+        # page can send a CORS "simple request" (text/plain JSON, no
+        # preflight) to 127.0.0.1 and it would otherwise be fully processed.
+        # Browsers always reveal their origin on fetch/XHR; CLI/curl/agent
+        # clients send no Origin header and are unaffected.
+        if not self._host_allowed():
+            return False
         origin = self.headers.get("Origin")
         if origin:
-            return origin == f"http://{self.headers.get('Host', '')}"
+            bound = getattr(self.server, "server_address", None)
+            bound_host = bound[0] if bound else ""
+            bound_port = bound[1] if bound else None
+            expected = f"http://{bound_host}"
+            if bound_port:
+                expected += f":{bound_port}"
+            return origin == expected
         return True
 
     def _read_json(self) -> dict:
@@ -289,6 +338,22 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
             return {}
         if length <= 0:
             return {}
+        if length > MAX_BODY_BYTES:
+            # Drain (discard) the body so the connection closes cleanly — a
+            # socket closed with unread received data sends RST and the client
+            # loses the 413 response. We stream-and-drop, never buffering.
+            _remaining = length
+            try:
+                while _remaining > 0:
+                    chunk = self.rfile.read(min(_remaining, 65536))
+                    if not chunk:
+                        break
+                    _remaining -= len(chunk)
+            except OSError:
+                pass
+            self.close_connection = True
+            self._send_json(413, {"error": "payload too large"})
+            return None
         try:
             return json.loads(self.rfile.read(length).decode("utf-8"))
         except Exception:
@@ -398,6 +463,8 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
             self._send_json(401, {"error": "unauthorized"})
             return
         data = self._read_json()
+        if data is None:  # payload too large — 413 already sent
+            return
         try:
             self._dispatch_post(data)
         except Exception as e:  # noqa: BLE001 — a bad request must not kill
@@ -595,6 +662,12 @@ def write_ready_file(path: str, port: int, token: Optional[str]) -> None:
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f)
+    try:
+        # The file carries a bearer token — 0600 so other local users can't
+        # read it. Windows os.chmod is a weak no-op; POSIX gets strict perms.
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
     os.replace(tmp, path)  # atomic on Windows and POSIX
 
 

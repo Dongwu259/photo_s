@@ -19,7 +19,21 @@
 
 ## 2. CLI JSON 契约
 
+### 2.0 `schema_version`（所有 JSON 输出的契约版本）
+
+**所有 JSON 输出（CLI `--json`、REST 响应、MCP 工具返回）的顶层都带 `schema_version` 整数键**，
+与业务键**并列（additive），不是信封**——即 `{"schema_version": 1, "summary": {...}, ...}`，
+现有键完全保留，旧消费者照常工作。
+
+契约规则：
+- **新增 key 是 additive**：消费者必须**忽略未知键**（forward-compatible）。
+- PhotoS **只在 breaking 变更**（重命名/删除/改语义的键）时递增 `schema_version`。
+  纯新增 key 不递增。
+- 它是**全局单一整数**（当前 = 1），不与 PhotoS 发布版本号绑定。
+
 ### 2.1 支持 `--json` 的命令与输出 shape
+
+> 以下每行的 shape 均**额外包含 `schema_version` 顶层键**（表格不再逐行重复列出）。
 
 | 命令 | stdout JSON shape | 说明 |
 |---|---|---|
@@ -123,6 +137,10 @@ GET  /health  带 Bearer → {"status": "ok", "version": "..."}
 
 所有端点都需 `Authorization: Bearer <token>`（未设 token 时本机免认证）。请求体为 JSON，`Content-Type: application/json`。
 
+**未设 token 的安全边界**：Host 头必须是回环地址（`127.0.0.1`/`localhost`/`[::1]`）或实际绑定地址，
+否则拒绝（防 DNS rebinding）；绑定非回环（如 `--host 0.0.0.0`）时**必须配 token**。
+请求体上限 1MB，超限返回 413。
+
 ### 3.3 端点总表
 
 | 方法 / 路径 | 请求体 | 响应 |
@@ -200,6 +218,7 @@ curl -X POST .../process -H "Authorization: Bearer $TOKEN" \
 ## 5. Agent 对接 Checklist
 
 - [ ] 解析 stdout JSON，忽略 stderr（进度/诊断都在 stderr）。
+- [ ] 解析前先读顶层 `schema_version`；未知键一律忽略（additive 契约）。
 - [ ] 用退出码判断结果类别（`dedup`/`check` 的 `1` = 发现问题）。
 - [ ] 大 batch 用 `serve --token auto --ready-file` + 握手文件 + 异步任务。
 - [ ] `paths` 里的目录默认只扫一层；需要子目录时传 `recursive: true`。

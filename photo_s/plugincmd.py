@@ -52,7 +52,8 @@ def _installed_plugins():
 
 def _json(obj, use_json: bool) -> None:
     if use_json:
-        print(json.dumps(obj, indent=2, ensure_ascii=False))
+        from .contract import versioned
+        print(json.dumps(versioned(obj), indent=2, ensure_ascii=False))
 
 
 # ── subcommand implementations ─────────────────────────────────────────────

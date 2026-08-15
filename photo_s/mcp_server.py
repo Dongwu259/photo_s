@@ -17,17 +17,33 @@ print-free — diagnostics go to stderr only.
 """
 
 import asyncio
+import functools
 import json
 import os
 import sys
 from typing import List, Optional
 
 from . import __version__
+from .contract import versioned
 from .engine import (ProcessOptions, batch_process, apply_exif_tags,
                      read_exif_metadata)
 
 # Config-file base (set by create_server from --config); tool args win.
 _base_options: ProcessOptions = ProcessOptions()
+
+
+def _versioned(fn):
+    """Attach the additive ``schema_version`` marker to a tool's dict return.
+
+    ``functools.wraps`` preserves the signature and type hints, so FastMCP's
+    inputSchema derivation sees the original tool parameters (verified
+    against mcp 1.28.1).
+    """
+    @functools.wraps(fn)
+    def _wrapper(*args, **kwargs):
+        out = fn(*args, **kwargs)
+        return versioned(out) if isinstance(out, dict) else out
+    return _wrapper
 
 
 def _mcp():
@@ -51,6 +67,7 @@ def _mcp():
 # ── Tool implementations (module-level, individually testable) ──────────────
 
 
+@_versioned
 def process_tool(
     paths: list,
     recursive: bool = False,
@@ -121,6 +138,7 @@ def process_tool(
     return payload
 
 
+@_versioned
 def info_tool() -> dict:
     """Environment probe: version, supported formats, writable formats,
     optional-feature status and installed plugins (same shape as
@@ -137,6 +155,7 @@ def info_tool() -> dict:
     }
 
 
+@_versioned
 def exif_tool(
     action: str = "show",
     paths: Optional[list] = None,
@@ -188,6 +207,7 @@ def exif_tool(
     return {"action": "show", "count": len(results), "results": results}
 
 
+@_versioned
 def dedup_tool(
     paths: list,
     recursive: bool = False,
@@ -227,6 +247,7 @@ def dedup_tool(
             "savings_bytes": savings, "groups": group_list}
 
 
+@_versioned
 def cull_tool(
     paths: list,
     recursive: bool = False,
@@ -279,6 +300,7 @@ def cull_tool(
     return {"count": len(results), "kept": kept, "results": results}
 
 
+@_versioned
 def hash_tool(
     paths: Optional[list] = None,
     recursive: bool = False,
@@ -307,6 +329,7 @@ def hash_tool(
     return {"output": out, "count": len(files), "entries": entries}
 
 
+@_versioned
 def plugin_tool(
     action: str = "list",
     name: Optional[str] = None,
@@ -368,6 +391,7 @@ def plugin_tool(
     return payload
 
 
+@_versioned
 def contact_sheet_tool(
     paths: list,
     output: str,
@@ -400,6 +424,7 @@ def contact_sheet_tool(
     return {"ok": True, "output": out, "count": len(files)}
 
 
+@_versioned
 def gallery_tool(
     paths: list,
     out_dir: str,
@@ -423,6 +448,7 @@ def gallery_tool(
     return res
 
 
+@_versioned
 def watermark_tool(
     paths: list,
     text: str = "",
@@ -460,6 +486,7 @@ def watermark_tool(
     return payload
 
 
+@_versioned
 def preset_tool(
     action: str,
     name: str = "",
