@@ -1117,9 +1117,9 @@ class TestRenamePreview:
 
     def test_preview_marks_in_batch_conflicts(self, tmp_path):
         """EXIF-less files + a constant template all map to one target;
-        rows after the first get the suffix the real run would use —
-        the engine's _unique_target re-suffixes the suffixed name, so
-        the third row is photo_1_2.jpg, not photo_2.jpg."""
+        rows after the first get the suffix the real run would use — a
+        clean counter on the ORIGINAL stem, so the third row is
+        photo_2.jpg (not the old photo_1_2.jpg re-suffix quirk)."""
         root, app = _make_app()
         a = _img(tmp_path / "a.jpg")
         b = _img(tmp_path / "b.jpg", seed=2)
@@ -1128,7 +1128,7 @@ class TestRenamePreview:
         assert [r["status"] for r in rows] == ["ok", "conflict", "conflict"]
         assert rows[0]["output"] == str(tmp_path / "photo.jpg")
         assert rows[1]["output"] == str(tmp_path / "photo_1.jpg")
-        assert rows[2]["output"] == str(tmp_path / "photo_1_2.jpg")
+        assert rows[2]["output"] == str(tmp_path / "photo_2.jpg")
         assert rows[1]["error"] and rows[2]["error"], \
             "conflict rows must explain the auto suffix"
         root.destroy()

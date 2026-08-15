@@ -402,8 +402,9 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
 - 入口：工具行 `rename_btn`；作用于 `_checked_files()`。
 - **同步 helper**：`_rename_preview(paths, pattern, output_dir, overwrite) -> rows`。
   `rename_files(dry_run=True)` + **批内撞名检测**：逐字重放引擎 `_unique_target`
-  循环（含 `photo_1_2.jpg` 式连续加后缀怪癖——预览必须与真实执行逐字节一致，
-  parity 测试钉住），重复目标标 `conflict`。
+  循环（原始 stem 上计 clean counter：`photo.jpg → photo_1.jpg → photo_2.jpg`；
+  v1.5.0 修复了旧的 `photo_1_2.jpg` 连续加后缀怪癖——预览必须与真实执行逐字节
+  一致，parity 测试钉住），重复目标标 `conflict`。
 - UI：模板 Entry（默认取 `rename_pattern` var）/ 就地或复制单选 / overwrite 复选 /
   三列 Treeview（conflict 黄、error 红）；300ms debounce + token 防过期 worker 覆盖。
 - 执行前 `askyesno`（不接 undo 体系）；就地重命名后 `self.files`/`self._checked`

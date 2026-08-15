@@ -69,7 +69,7 @@
 | REST API | — | ✅ | `photo-s serve` for AI agents |
 | Plugin system | — | ✅ | Third-party plugin support |
 | Official plugin manager | — | ✅ | `photo-s plugin list/install/info/fetch` + `pip install photo-s-plugin-scunet` |
-| MCP server | — | ✅ | `photo-s mcp` expose 11 tools to MCP clients (Claude Desktop) |
+| MCP server | — | ✅ | `photo-s mcp` expose 15 tools to MCP clients (Claude Desktop) |
 | Batch benchmark | — | ✅ | `photo-s bench --dir ~/shoot -j 1,2,4,8` measure worker scaling |
 
 > ¹ Denoise / auto-straighten need an optional dependency: `pip install photo-s-tools[enhance]` (opencv-python-headless).
@@ -429,7 +429,7 @@ the optional extra):
 
 ```bash
 pip install "photo-s-tools[mcp]"
-photo-s mcp --list-tools        # inspect the 11 tools + schemas (JSON)
+photo-s mcp --list-tools        # inspect the 15 tools + schemas (JSON)
 photo-s mcp                     # start the stdio MCP server
 ```
 

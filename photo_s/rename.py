@@ -24,13 +24,19 @@ def _load_meta(path: str) -> dict:
 
 
 def _unique_target(target: str, overwrite: bool) -> str:
-    """Return a target path that won't clobber an existing file."""
+    """Return a target path that won't clobber an existing file.
+
+    Collisions append a clean counter to the ORIGINAL stem
+    (photo.jpg → photo_1.jpg → photo_2.jpg) — never re-suffixed onto an
+    already-suffixed name (the old photo_1_2.jpg bug).
+    """
     if overwrite:
         return target
     p = Path(target)
+    base = p
     counter = 1
     while p.exists():
-        p = p.with_name(f"{p.stem}_{counter}{p.suffix}")
+        p = base.with_name(f"{base.stem}_{counter}{base.suffix}")
         counter += 1
     return str(p)
 

@@ -68,7 +68,7 @@
 | REST API | — | ✅ | `photo-s serve` 供 AI agent 使用 |
 | 插件系统 | — | ✅ | 第三方插件支持 |
 | 官方插件管理 | — | ✅ | `photo-s plugin list/install/info/fetch` + `pip install photo-s-plugin-scunet` |
-| MCP server | — | ✅ | `photo-s mcp` 向 MCP 客户端（Claude Desktop）暴露 11 个工具 |
+| MCP server | — | ✅ | `photo-s mcp` 向 MCP 客户端（Claude Desktop）暴露 15 个工具 |
 | 批量基准 | — | ✅ | `photo-s bench --dir ~/shoot -j 1,2,4,8` 实测并发扩展 |
 
 > ¹ 降噪 / 自动扶正需要可选依赖：`pip install photo-s-tools[enhance]`（opencv-python-headless）。
@@ -420,7 +420,7 @@ Desktop / 任意 MCP 客户端直接调用 PhotoS 工具（需要 Python 3.10+ �
 
 ```bash
 pip install "photo-s-tools[mcp]"
-photo-s mcp --list-tools        # 查看 11 个工具及参数 schema（JSON）
+photo-s mcp --list-tools        # 查看 15 个工具及参数 schema（JSON）
 photo-s mcp                     # 启动 stdio MCP server
 ```
 

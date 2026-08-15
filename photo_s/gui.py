@@ -4796,9 +4796,11 @@ class PhotoSApp:
                 taken.add(target)
                 continue
             p = Path(target)
+            base = p
             counter = 1
             while str(p) in taken or p.exists():
-                p = p.with_name("{}_{}{}".format(p.stem, counter, p.suffix))
+                p = base.with_name("{}_{}{}".format(
+                    base.stem, counter, base.suffix))
                 counter += 1
             row["output"] = str(p)
             row["status"] = "conflict"

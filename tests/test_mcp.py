@@ -36,7 +36,8 @@ class TestTools:
         names = {t.name for t in asyncio.run(create_server().list_tools())}
         assert names == {"process", "info", "exif", "dedup", "cull",
                          "hash", "plugin", "contact_sheet", "gallery",
-                         "watermark", "preset"}
+                         "watermark", "preset", "bench",
+                         "watch", "watch_status", "watch_stop"}
 
     def test_server_info_version(self):
         # serverInfo must report the PhotoS version, not the mcp SDK's
@@ -87,6 +88,101 @@ class TestProcessTool:
         r = _call("process", {"paths": [a], "output_dir": str(out),
                               "denoise": 5})
         assert r["ok"] is True
+
+    def test_evaluate_ssim_present(self, tmp_path):
+        a = _img(tmp_path / "a.jpg")
+        b = _img(tmp_path / "b.jpg", color=(1, 2, 3))
+        out = tmp_path / "out"
+        r = _call("process", {"paths": [a, b], "output_dir": str(out),
+                              "evaluate": True})
+        assert r["ok"] is True
+        for res in r["results"]:
+            assert res.get("ssim") is not None, "evaluate=True must add ssim"
+
+    def test_evaluate_off_by_default(self, tmp_path):
+        a = _img(tmp_path / "a.jpg")
+        out = tmp_path / "out"
+        r = _call("process", {"paths": [a], "output_dir": str(out)})
+        assert r["results"][0].get("ssim") is None
+
+
+class TestBenchTool:
+    def test_smoke(self, tmp_path):
+        _img(tmp_path / "a.jpg")
+        _img(tmp_path / "b.jpg", color=(2, 3, 4))
+        r = _call("bench", {"dir": str(tmp_path), "jobs": [1, 2]})
+        assert r["ok"] is True
+        assert r["files"] == 2
+        assert [run["jobs"] for run in r["runs"]] == [1, 2]
+        assert "seconds" in r["runs"][0] and "speedup" in r["runs"][0]
+        assert r["evaluate"] is None
+
+    def test_evaluate(self, tmp_path):
+        _img(tmp_path / "a.jpg")
+        r = _call("bench", {"dir": str(tmp_path), "jobs": [1],
+                            "evaluate": True})
+        assert r["ok"] is True
+        assert r["evaluate"] is not None
+        assert "ssim" in r["evaluate"] and "psnr_db" in r["evaluate"]
+
+    def test_rejects_bad_jobs(self, tmp_path):
+        _img(tmp_path / "a.jpg")
+        r = _call("bench", {"dir": str(tmp_path), "jobs": [0, -1]})
+        assert r["ok"] is False
+
+    def test_missing_dir(self, tmp_path):
+        r = _call("bench", {"dir": str(tmp_path / "nope")})
+        assert r["ok"] is False
+        assert "not a directory" in r["error"]
+
+
+class TestWatchTool:
+    def test_start_status_stop(self, tmp_path):
+        pytest.importorskip("watchdog")
+        out = tmp_path / "out"
+        r = _call("watch", {"dir": str(tmp_path), "output_dir": str(out),
+                            "output_format": "JPEG"})
+        assert r["started"] is True and r["id"]
+        wid = r["id"]
+        try:
+            # watchdog's on_created can race the observer startup, so drop
+            # one file immediately and another after a beat to guarantee at
+            # least one processed event is observed.
+            _img(tmp_path / "a.jpg")
+            import time
+            time.sleep(0.5)
+            _img(tmp_path / "b.jpg", color=(2, 3, 4))
+            deadline = time.time() + 12
+            st = None
+            while time.time() < deadline:
+                st = _call("watch_status", {"id": wid})
+                if st["processed_count"] >= 1:
+                    break
+                time.sleep(0.5)
+            assert st is not None and st["processed_count"] >= 1
+            assert os.path.isfile(st["results"][0]["output"])
+        finally:
+            _call("watch_stop", {"id": wid})
+        # the watcher polls its stop_event on a ~1s tick, so wait for the
+        # daemon thread to actually exit (status then reports running=False)
+        import time
+        deadline = time.time() + 5
+        st = None
+        while time.time() < deadline:
+            st = _call("watch_status", {"id": wid})
+            if not st["running"]:
+                break
+            time.sleep(0.2)
+        assert st is not None and st["running"] is False
+        assert st["stopped"] is True
+
+    def test_missing_dir(self, tmp_path):
+        r = _call("watch", {"dir": str(tmp_path / "nope")})
+        assert r["started"] is False
+
+    def test_status_unknown_id(self):
+        r = _call("watch_status", {"id": "nope"})
+        assert r["ok"] is False
 
 
 class TestInfoTool:
@@ -209,7 +305,7 @@ class TestCliListTools:
         out = capsys.readouterr().out
         assert rc == 0
         data = json.loads(out)
-        assert len(data["tools"]) == 11
+        assert len(data["tools"]) == 15
         for t in data["tools"]:
             assert "input_schema" in t
             assert "properties" in t["input_schema"]
@@ -240,7 +336,8 @@ class TestStdioEndToEnd:
                     assert names == {"process", "info", "exif", "dedup",
                                      "cull", "hash", "plugin",
                                      "contact_sheet", "gallery",
-                                     "watermark", "preset"}
+                                     "watermark", "preset", "bench",
+                                     "watch", "watch_status", "watch_stop"}
                     result = await session.call_tool(
                         "process",
                         {"paths": [img], "output_dir": str(out),

@@ -17,10 +17,14 @@ print-free — diagnostics go to stderr only.
 """
 
 import asyncio
+import contextlib
 import functools
 import json
 import os
+import secrets
 import sys
+import threading
+import time
 from typing import List, Optional
 
 from . import __version__
@@ -30,6 +34,16 @@ from .engine import (ProcessOptions, batch_process, apply_exif_tags,
 
 # Config-file base (set by create_server from --config); tool args win.
 _base_options: ProcessOptions = ProcessOptions()
+
+# ── Background watch state (option A: daemon thread + module-level state) ──
+# Mirrors server._TASKS: MCP tools are short-lived calls, so a long-running
+# watcher lives in a daemon thread and its progress is polled via
+# watch_status / watch_stop. Daemon threads die with the MCP process, so a
+# watch session ends when the MCP session ends.
+_WATCH_LOCK = threading.Lock()
+_WATCHES: dict = {}  # id -> {dir, recursive, timeout, opts, stop_event,
+                     #          results:list, error, started_at, thread, stopped}
+_MAX_WATCHES = 20
 
 
 def _versioned(fn):
@@ -86,12 +100,14 @@ def process_tool(
     auto_straighten: Optional[bool] = None,
     jobs: Optional[int] = None,
     dry_run: bool = False,
+    evaluate: bool = False,
 ) -> dict:
     """Batch process images: quality/format/resize/tone/exposure/denoise.
 
     ``paths`` accepts files, directories or globs (e.g. ["/shoot/*.jpg"]).
     Returns a BatchResult JSON with per-file status (same shape as
-    ``photo-s batch --json``), plus ``ok``.
+    ``photo-s batch --json``), plus ``ok``. With ``evaluate=True`` each
+    result also carries ``ssim`` (input vs output, same as ``--evaluate``).
     """
     from .server import _options_from_dict
     from .cli import _collect_files, _parse_dimensions
@@ -103,6 +119,7 @@ def process_tool(
         "strip_gps": strip_gps, "denoise": denoise, "ev": ev,
         "log_curve": log_curve, "wb_temp": wb_temp,
         "auto_straighten": auto_straighten, "jobs": jobs,
+        "evaluate": evaluate,
     }
     data = {k: v for k, v in data.items() if v is not None}
     if resize:
@@ -136,6 +153,45 @@ def process_tool(
     payload = result.to_dict()
     payload["ok"] = result.fail_count == 0
     return payload
+
+
+@_versioned
+def bench_tool(
+    dir: str,
+    jobs: Optional[list] = None,
+    images: Optional[int] = None,
+    denoise: Optional[float] = None,
+    evaluate: bool = False,
+) -> dict:
+    """Benchmark the pipeline at several worker counts to pick optimal
+    concurrency (mirrors ``photo-s bench``).
+
+    Runs over real images in ``dir`` (temp-dir outputs, sources untouched)
+    and reports wall time, speedup, per-stage breakdown and — with
+    ``evaluate=True`` — PSNR/SSIM of the first run against the sources.
+    """
+    from .cli import _collect_files
+    from .bench import run_benchmark
+    from .engine import ProcessOptions
+
+    if not os.path.isdir(dir):
+        return {"ok": False, "error": f"not a directory: {dir}", "dir": dir}
+    files = _collect_files([dir], recursive=True)
+    if not files:
+        return {"ok": False,
+                "error": f"no supported image files found in {dir}",
+                "dir": dir}
+    if images:
+        files = files[:images]
+    job_list = [int(x) for x in (jobs or [1, 2, 4, 8])]
+    job_list = list(dict.fromkeys(job_list))  # dedupe, keep order
+    if not job_list or any(j < 1 for j in job_list):
+        return {"ok": False, "error": "jobs must be positive integers",
+                "jobs": list(jobs) if jobs else None}
+    base = ProcessOptions(quality=85, output_format="JPEG", denoise=denoise)
+    report = run_benchmark(files, job_list, base, evaluate=evaluate)
+    return {"ok": True, "dir": dir, "files": len(files),
+            "runs": report["runs"], "evaluate": report["evaluate"]}
 
 
 @_versioned
@@ -526,6 +582,133 @@ def preset_tool(
             "actions": ["list", "save", "load", "delete"]}
 
 
+# ── Watch tools (background thread + module-level state) ────────────────────
+
+
+def _prune_watches() -> None:
+    """Drop dead/stopped records beyond the cap (mirrors server._prune_tasks)."""
+    if len(_WATCHES) <= _MAX_WATCHES:
+        return
+    dead = [k for k, v in _WATCHES.items()
+            if not v["thread"].is_alive()
+            and (v["stop_event"].is_set() or v.get("stopped"))]
+    for k in sorted(dead)[: len(_WATCHES) - _MAX_WATCHES]:
+        _WATCHES.pop(k, None)
+
+
+@_versioned
+def watch_tool(
+    dir: str,
+    recursive: bool = False,
+    quality: Optional[int] = None,
+    output_format: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    resize: Optional[str] = None,
+    timeout: Optional[int] = None,
+) -> dict:
+    """Watch a directory and auto-process new images in the background.
+
+    Returns immediately with a watch ``id``; poll ``watch_status`` for
+    progress (per-file results) and call ``watch_stop`` to end it. Needs
+    the optional ``watch`` extra (watchdog).
+    """
+    import importlib.util
+    from .server import _options_from_dict
+    from .cli import _parse_dimensions
+
+    if not os.path.isdir(dir):
+        return {"started": False, "error": f"not a directory: {dir}",
+                "dir": dir}
+    if importlib.util.find_spec("watchdog") is None:
+        # Pre-check so the watcher's stdout "install me" hint never prints.
+        return {"started": False,
+                "error": "watchdog not installed. Run: "
+                         "pip install photo-s-tools[watch]",
+                "install": "pip install photo-s-tools[watch]"}
+    if timeout is not None and timeout <= 0:
+        return {"started": False,
+                "error": "timeout must be a positive number of seconds"}
+
+    data = {"quality": quality, "output_format": output_format,
+            "output_dir": output_dir}
+    data = {k: v for k, v in data.items() if v is not None}
+    if resize:
+        w, h = _parse_dimensions(resize)
+        data["max_width"], data["max_height"] = w, h
+    opts = _options_from_dict(data, base=_base_options)
+
+    wid = secrets.token_urlsafe(8)   # mirrors server start_task ids
+    stop_event = threading.Event()
+    record = {
+        "dir": dir, "recursive": recursive, "timeout": timeout,
+        "opts": opts, "stop_event": stop_event, "results": [],
+        "error": None, "started_at": time.time(), "stopped": False,
+    }
+
+    def runner():
+        from .watcher import start_watching
+        try:
+            # MCP stdio owns stdout (JSON-RPC) — route the watcher's
+            # diagnostics to stderr so frames stay clean.
+            with contextlib.redirect_stdout(sys.stderr):
+                start_watching(
+                    record["dir"], record["opts"],
+                    recursive=record["recursive"],
+                    on_process=lambda r: record["results"].append(r.to_dict()),
+                    stop_event=record["stop_event"],
+                )
+        except Exception as e:
+            record["error"] = str(e)
+
+    record["thread"] = threading.Thread(target=runner, daemon=True)
+    with _WATCH_LOCK:
+        _prune_watches()
+        _WATCHES[wid] = record
+    record["thread"].start()
+    if timeout:
+        threading.Timer(timeout, stop_event.set).start()  # auto-stop safety
+
+    return {
+        "started": True, "id": wid, "dir": dir, "recursive": recursive,
+        "options": {"quality": quality, "output_format": output_format,
+                    "output_dir": output_dir, "resize": resize},
+        "timeout": timeout,
+    }
+
+
+@_versioned
+def watch_status_tool(id: str) -> dict:
+    """Report the state of a background watch (running, processed count,
+    per-file results, error)."""
+    with _WATCH_LOCK:
+        rec = _WATCHES.get(id)
+    if rec is None:
+        return {"ok": False, "error": f"no such watch: {id}"}
+    return {
+        "ok": True, "id": id, "dir": rec["dir"],
+        "recursive": rec["recursive"],
+        "running": rec["thread"].is_alive(),
+        "stopped": rec["stop_event"].is_set() or rec.get("stopped", False),
+        "processed_count": len(rec["results"]),
+        "results": list(rec["results"]),   # shallow copy; append is single-writer
+        "error": rec["error"],
+        "started_at": rec["started_at"],
+    }
+
+
+@_versioned
+def watch_stop_tool(id: str) -> dict:
+    """Stop a background watch; results so far stay visible via watch_status."""
+    with _WATCH_LOCK:
+        rec = _WATCHES.get(id)
+    if rec is None:
+        return {"ok": False, "error": f"no such watch: {id}"}
+    rec["stop_event"].set()
+    rec["stopped"] = True
+    return {"ok": True, "id": id, "stopped": True,
+            "processed_count": len(rec["results"])}
+
+
 # ── Server assembly ─────────────────────────────────────────────────────────
 
 
@@ -584,6 +767,21 @@ def create_server(config_path: Optional[str] = None):
                  description="Manage processing presets: list / save / load "
                              "/ delete. 'load' returns options JSON for "
                              "'process'.")
+    mcp.add_tool(bench_tool, name="bench",
+                 description="Benchmark the pipeline at several worker counts "
+                             "(mirrors 'photo-s bench') to pick optimal "
+                             "concurrency. Temp-dir outputs, sources untouched.")
+    mcp.add_tool(watch_tool, name="watch",
+                 description="Watch a directory and auto-process new images "
+                             "in the background; returns immediately with an "
+                             "id — poll 'watch_status' / stop via "
+                             "'watch_stop'. Needs photo-s-tools[watch].")
+    mcp.add_tool(watch_status_tool, name="watch_status",
+                 description="Report the state of a background watch "
+                             "(running, processed count, per-file results).")
+    mcp.add_tool(watch_stop_tool, name="watch_stop",
+                 description="Stop a background watch; results so far stay "
+                             "visible via 'watch_status'.")
     return mcp
 
 

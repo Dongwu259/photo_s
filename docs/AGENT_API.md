@@ -13,7 +13,7 @@
 | Python 直调 | 宿主是 Python | `from photo_s.engine import ProcessOptions, batch_process` |
 | `photo-s ... --json` | 一次性脚本 / CI | 每次调用有 ~200-300ms 解释器启动开销 |
 | `photo-s serve` | 跨进程 / 长任务 / 需进度与取消 | stdlib HTTP，同步 + 异步任务两种模式 |
-| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，11 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
+| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，15 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
 
 ---
 
@@ -240,7 +240,7 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 }
 ```
 
-`photo-s mcp --list-tools` 返回 11 个工具及 inputSchema（JSON，不启动服务器）。
+`photo-s mcp --list-tools` 返回 15 个工具及 inputSchema（JSON，不启动服务器）。
 
 零安装变体（uvx 自动解析 PyPI 依赖，与官方 MCP Registry
 `io.github.Dongwu259/photo-s` 发布的调用一致）：
@@ -257,7 +257,7 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 
 | 工具 | 关键参数 | 输出 |
 |---|---|---|
-| `process` | `paths[]`, `recursive`, `quality`, `output_format`, `output_dir`, `resize` "WxH", `scale`, `suffix`, `target_size` "500KB", `strip_gps`, `denoise`, `ev`, `log_curve`, `wb_temp`, `auto_straighten`, `jobs`, `dry_run` | `BatchResult` JSON + `ok`；`dry_run` → `{"dry_run", "count", "files", "settings"}` |
+| `process` | `paths[]`, `recursive`, `quality`, `output_format`, `output_dir`, `resize` "WxH", `scale`, `suffix`, `target_size` "500KB", `strip_gps`, `denoise`, `ev`, `log_curve`, `wb_temp`, `auto_straighten`, `jobs`, `dry_run`, `evaluate` | `BatchResult` JSON + `ok`；`dry_run` → `{"dry_run", "count", "files", "settings"}`；`evaluate=true` 时每文件带 `ssim`（同 `--evaluate`） |
 | `info` | — | 同 `photo-s info --json`（含 `optional_features`/`plugins`） |
 | `exif` | `action` "show"\|"write", `paths[]`, `recursive`, `rating_min`, `rating`, `keywords`, `camera`, `tags` {"path": {…}} | show → `{"count", "results": [{path, rating, keywords, …}]}`；write → `{"written", "errors"}` |
 | `dedup` | `paths[]`, `recursive`, `threshold` (默认 5), `action` "report"\|"keep-sharpest", `dry_run` (默认 **True**) | report → `{"count", "duplicate_count", "savings_bytes", "groups"}`；keep-sharpest → `{"kept", "removed", "dry_run"}` |
@@ -268,6 +268,13 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 | `gallery` | `paths[]`, `out_dir`, `recursive`, `title`, `thumb` (默认 360) | `{"ok", "output", "count"}`（同 `photo-s gallery --json`） |
 | `watermark` | `paths[]`, `text`/`image`, `position` (默认 BOTTOM_RIGHT), `opacity`, `output_format`, `quality`, `output_dir` | 走批量管线，返回 `BatchResult` JSON |
 | `preset` | `action` "list"\|"save"\|"load"\|"delete", `name`, `description`, `options{}` | list → 预设清单；load → 可直接喂给 `process` 的 options JSON |
+| `bench` | `dir` (必填), `jobs[]` (默认 [1,2,4,8]), `images`, `denoise`, `evaluate` | `{"ok", "dir", "files", "runs": [{jobs, files, seconds, speedup, errors, stages:{load,process,save}}], "evaluate": {files, psnr_db, ssim}\|null}`（同 `photo-s bench --json`；临时目录输出，源目录不动） |
+| `watch` | `dir` (必填), `recursive`, `quality`, `output_format`, `output_dir`, `resize`, `timeout` | 立即返回 `{"started", "id", "dir", "recursive", "options", "timeout"}`；失败 → `{"started": false, "error"}`。后台线程监视目录自动处理；进度用 `watch_status` 轮询、`watch_stop` 结束。**需 `photo-s-tools[watch]`（watchdog）**；`remove_original` 刻意不支持（agent 驱动的删除太危险） |
+| `watch_status` | `id` | `{"ok", "id", "dir", "recursive", "running", "stopped", "processed_count", "results": [ProcessResult…], "error", "started_at"}` |
+| `watch_stop` | `id` | `{"ok", "id", "stopped", "processed_count"}`（幂等） |
+
+> `watch` 会话与 MCP 会话同生命周期（daemon 线程随进程退出消亡）；`_WATCHES`
+> 上限 20，死线程自动清理。
 
 **破坏性安全**：`dedup keep-sharpest` 默认 `dry_run=True`，删除需显式
 `dry_run=False`；`process` 不覆盖输入（`overwrite` 默认 False）。MCP 模式仅

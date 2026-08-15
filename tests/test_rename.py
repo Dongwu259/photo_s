@@ -114,6 +114,18 @@ class TestCollision:
         # overwrite allows clobber
         assert _unique_target(target, overwrite=True) == target
 
+    def test_unique_target_clean_counter_on_original_stem(self, tmp_path):
+        # regression: a.png AND a_1.png both exist → next is a_2.png,
+        # not a_1_2.png (the old re-suffix-the-suffixed-stem bug)
+        for name in ("a.png", "a_1.png"):
+            Image.new("RGB", (5, 5)).save(tmp_path / name)
+        got = _unique_target(str(tmp_path / "a.png"), overwrite=False)
+        assert got == str(tmp_path / "a_2.png")
+        # and it keeps counting cleanly for a third collision
+        Image.new("RGB", (5, 5)).save(tmp_path / "a_2.png")
+        got2 = _unique_target(str(tmp_path / "a.png"), overwrite=False)
+        assert got2 == str(tmp_path / "a_3.png")
+
     def test_seq_collision_avoids_overwrite(self, tmp_path):
         # two files, same pattern → collision, second gets _1
         paths = _make_images(tmp_path, count=2)
