@@ -72,7 +72,7 @@
 | REST API | — | ✅ | `photo-s serve` 供 AI agent 使用 |
 | 插件系统 | — | ✅ | 第三方插件支持 |
 | 官方插件管理 | — | ✅ | `photo-s plugin list/install/info/fetch` + `pip install photo-s-plugin-scunet` |
-| MCP server | — | ✅ | `photo-s mcp` 向 MCP 客户端（Claude Desktop）暴露 15 个工具 |
+| MCP server | — | ✅ | `photo-s mcp` 向 MCP 客户端（Claude Desktop / Claude Code / 任意 MCP 客户端）暴露 18 个工具 |
 | 批量基准 | — | ✅ | `photo-s bench --dir ~/shoot -j 1,2,4,8` 实测并发扩展 |
 
 > ¹ 降噪 / 自动扶正需要可选依赖：`pip install photo-s-tools[enhance]`（opencv-python-headless）。
@@ -436,16 +436,18 @@ Desktop / 任意 MCP 客户端直接调用 PhotoS 工具（需要 Python 3.10+ �
 
 ```bash
 pip install "photo-s-tools[mcp]"
-photo-s mcp --list-tools        # 查看 15 个工具及参数 schema（JSON）
+photo-s mcp --list-tools        # 查看 18 个工具及参数 schema（JSON）
 photo-s mcp                     # 启动 stdio MCP server
 ```
 
-工具：`process`（批量质量/格式/缩放/影调/降噪）、`info`（环境探测）、
-`exif`（元数据读写/筛选）、`dedup`（感知哈希分组、keep-sharpest）、
-`cull`（曝光/清晰度筛选）、`hash`（SHA-256 清单）、`contact_sheet`（联系表
-网格拼图）、`gallery`（HTML 画廊）、`watermark`（文字/图片水印）、
-`preset`（预设 增删查取）、`plugin`（官方插件管理）。
-输出结构与 CLI `--json` 契约一致。
+工具：`process`（批量质量/格式/缩放/影调/降噪/人脸模糊）、`info`（环境探测）、
+`exif`（元数据读写/筛选，含 GPS）、`dedup`（感知哈希分组、keep-sharpest）、
+`cull`（曝光/清晰度筛选）、`select`（按评分精选/淘汰分拣）、`hdr`（包围曝光
+融合）、`blurfaces`（人脸模糊/马赛克，隐私）、`hash`（SHA-256 清单）、
+`contact_sheet`（联系表网格拼图）、`gallery`（HTML 画廊）、`watermark`
+（文字/图片水印）、`preset`（预设 增删查取）、`bench`（速度基准）、
+`watch` / `watch_status` / `watch_stop`（后台目录监视）、`plugin`（官方插件
+管理）。输出结构与 CLI `--json` 契约一致。
 
 Claude Desktop 配置（`claude_desktop_config.json`）：
 
@@ -476,6 +478,20 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 
 > 破坏性安全：`dedup` 的 `keep-sharpest` 默认 `dry_run=True`（删除需显式
 > `dry_run=False`）；`process` 不覆盖输入文件。
+
+Claude Code 连接方式相同（`claude mcp add photo-s -- photo-s mcp`），见
+[`docs/AGENT_API.md`](AGENT_API.md) §6。
+
+### 5. Agent skill（现成 SKILL.md）
+
+仓库提供现成的 [Claude Code skill](skills/photo-s/SKILL.md)，把 PhotoS 打包成
+skill 给支持 skill 的 agent（Claude Code / Cursor / Cline 等）用——使用说明、
+子命令→场景映射、JSON 约定、安全规则一应俱全。只需核心包，不需要 py3.10+ /
+`[mcp]` extra。安装：
+
+```bash
+mkdir -p ~/.claude/skills && cp -r skills/photo-s ~/.claude/skills/
+```
 
 ### Windows 打包（无 Python/PATH 环境）
 

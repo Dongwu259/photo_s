@@ -58,3 +58,5 @@ python3 -m photo_s.cli mcp --list-tools     # MCP 工具 + schema（需 photo-s-
 - 宿主是 Python → 直接 `from photo_s.engine import batch_process`（推荐）
 - 非 Python / 跨进程 → `photo-s serve --port 0 --token auto --ready-file x.json`，轮询握手文件拿 `{port, token}` 后走 HTTP
 - 一次性脚本 → CLI + `--json`
+- agent skill → 仓库 `skills/photo-s/SKILL.md`（现成 skill 包：`cp -r skills/photo-s ~/.claude/skills/`，零额外依赖）
+- MCP 深度集成 → `pip install "photo-s-tools[mcp]"` + `claude mcp add photo-s -- photo-s mcp`（18 工具，契约见 docs/AGENT_API.md §6）

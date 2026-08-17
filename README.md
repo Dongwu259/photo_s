@@ -73,7 +73,7 @@
 | REST API | — | ✅ | `photo-s serve` for AI agents |
 | Plugin system | — | ✅ | Third-party plugin support |
 | Official plugin manager | — | ✅ | `photo-s plugin list/install/info/fetch` + `pip install photo-s-plugin-scunet` |
-| MCP server | — | ✅ | `photo-s mcp` expose 15 tools to MCP clients (Claude Desktop) |
+| MCP server | — | ✅ | `photo-s mcp` expose 18 tools to MCP clients (Claude Desktop / Claude Code / any MCP client) |
 | Batch benchmark | — | ✅ | `photo-s bench --dir ~/shoot -j 1,2,4,8` measure worker scaling |
 
 > ¹ Denoise / auto-straighten need an optional dependency: `pip install photo-s-tools[enhance]` (opencv-python-headless).
@@ -445,16 +445,19 @@ the optional extra):
 
 ```bash
 pip install "photo-s-tools[mcp]"
-photo-s mcp --list-tools        # inspect the 15 tools + schemas (JSON)
+photo-s mcp --list-tools        # inspect the 18 tools + schemas (JSON)
 photo-s mcp                     # start the stdio MCP server
 ```
 
-Tools: `process` (batch quality/format/resize/tone/denoise), `info` (environment
-probe), `exif` (read/filter/write metadata), `dedup` (perceptual-hash groups,
-keep-sharpest), `cull` (exposure/sharpness filter), `hash` (SHA-256 manifests),
+Tools: `process` (batch quality/format/resize/tone/denoise/face-blur), `info`
+(environment probe), `exif` (read/filter/write metadata incl. GPS), `dedup`
+(perceptual-hash groups, keep-sharpest), `cull` (exposure/sharpness filter),
+`select` (rating-based keep/reject sorting), `hdr` (bracketed exposure fusion),
+`blurfaces` (face blur/pixelate, privacy), `hash` (SHA-256 manifests),
 `contact_sheet` (grid montage), `gallery` (HTML gallery), `watermark` (text/image
-overlay), `preset` (list/save/load/delete), `plugin` (official plugin
-management). Output shapes mirror the CLI `--json` contracts.
+overlay), `preset` (list/save/load/delete), `bench` (speed benchmark),
+`watch` / `watch_status` / `watch_stop` (background folder processing), `plugin`
+(official plugin management). Output shapes mirror the CLI `--json` contracts.
 
 Claude Desktop config (`claude_desktop_config.json`):
 
@@ -487,6 +490,20 @@ as `io.github.Dongwu259/photo-s`):
 > Destructive safety: `dedup` `keep-sharpest` defaults to `dry_run=True`
 > (deletion requires an explicit `dry_run=False`). `process` never overwrites
 > inputs.
+
+Claude Code connects the same way (`claude mcp add photo-s -- photo-s mcp`), see
+[`docs/AGENT_API.md`](docs/AGENT_API.md) §6.
+
+### 5. Agent skill (packaged SKILL.md)
+
+A ready-made [Claude Code skill](skills/photo-s/SKILL.md) packages PhotoS for
+skill-capable agents (Claude Code, Cursor, Cline, …) — usage instructions,
+subcommand→task map, JSON conventions, and safety rules. No Python 3.10+ / MCP
+extra required, just the core package. Install:
+
+```bash
+mkdir -p ~/.claude/skills && cp -r skills/photo-s ~/.claude/skills/
+```
 
 ### Windows packaging (no Python/PATH env)
 

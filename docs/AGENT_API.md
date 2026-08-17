@@ -253,6 +253,19 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 }
 ```
 
+Claude Code 连接（与上面 Claude Desktop 配置等价，经 `claude mcp add` 写入配置）：
+
+```bash
+claude mcp add photo-s -- photo-s mcp                          # 用户级
+claude mcp add photo-s --scope project -- photo-s mcp          # 项目级
+claude mcp add photo-s -- uvx --from "photo-s-tools[mcp]" photo-s mcp   # 零安装变体
+claude mcp list                                                # 验证（应列出 photo-s）
+```
+
+其他 MCP 客户端（Cursor / Cline / Windsurf 等）填入同样的 `mcpServers` 条目即可。
+不想用 MCP 时，agents 也可以直接用 `skills/photo-s/SKILL.md`（skill 包，
+shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
+
 ### 工具表（输出结构与 CLI `--json` 一致）
 
 | 工具 | 关键参数 | 输出 |
