@@ -1,6 +1,6 @@
 # PhotoS 功能清单 — Feature Inventory
 
-> 以代码实际为准（v1.5.0），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
+> 以代码实际为准（v1.5.1），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
 ## 1. CLI 命令（22 个）
