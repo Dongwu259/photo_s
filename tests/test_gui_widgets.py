@@ -21,7 +21,10 @@ from photo_s.gui_widgets import (
 
 @pytest.fixture(scope="module")
 def root():
-    r = tk.Tk()
+    try:
+        r = tk.Tk()
+    except Exception as e:  # headless CI (no DISPLAY) → skip, not crash
+        pytest.skip(f"no display: {e}")
     r.withdraw()
     yield r
     r.destroy()
