@@ -279,11 +279,12 @@ def apply_vibrance(img: Image.Image, amount: float = 0.0) -> Image.Image:
 # ── 3-way color grading ─────────────────────────────────────────────────────
 
 def _parse_color_grading(s: str) -> dict:
-    """Parse ``"zone:hue,sat;zone:hue,sat"`` into ``{zone: (hue, sat)}``.
+    """Parse ``"zone:hue,sat[,lum];zone:..."`` into ``{zone: (hue, sat, lum)}``.
 
     zone ∈ shadows|midtones|highlights; hue ∈ [-180, 180] target hue for the
     zone; sat ∈ [-1, 1] tint strength (sign drives the hue-pull direction,
-    magnitude drives both the pull amount and the saturation shift).
+    magnitude drives both the pull amount and the saturation shift);
+    lum ∈ [-1, 1] optional additive luminance shift for the zone (0 = none).
     """
     zones: dict = {}
     for seg in s.split(";"):
@@ -292,15 +293,18 @@ def _parse_color_grading(s: str) -> dict:
             continue
         if ":" not in seg:
             raise ValueError(
-                f"color_grading segment {seg!r} must be 'zone:hue,sat'")
+                f"color_grading segment {seg!r} must be 'zone:hue,sat[,lum]'")
         zone, rest = seg.split(":", 1)
         zone = zone.strip().lower()
         if zone not in ("shadows", "midtones", "highlights"):
             raise ValueError(
                 f"unknown color grading zone {zone!r} "
                 f"(shadows/midtones/highlights)")
-        h, sat = rest.split(",")
-        zones[zone] = (float(h), float(sat))
+        parts = [p.strip() for p in rest.split(",")]
+        hue = float(parts[0]) if parts[0] else 0.0
+        sat = float(parts[1]) if len(parts) > 1 and parts[1] else 0.0
+        lum = float(parts[2]) if len(parts) > 2 and parts[2] else 0.0
+        zones[zone] = (hue, sat, lum)
     return zones
 
 
@@ -321,12 +325,14 @@ def _smoothstep(e0: float, e1: float, x) -> np.ndarray:
 
 def apply_color_grading(img: Image.Image, shadows=None, midtones=None,
                         highlights=None) -> Image.Image:
-    """3-way color grading: hue-pull + saturation tint per luminance zone.
+    """3-way color grading: hue-pull + saturation + luminance per zone.
 
-    Each zone is ``(hue_deg, sat)``: the zone's hues are pulled toward
-    ``hue_deg`` by ``|sat|`` of the way, and its saturation is shifted by
-    ``sat`` (positive boosts, negative desaturates), all masked by a smooth
-    luminance mask so zone boundaries don't band. ``None`` = zone untouched.
+    Each zone is ``(hue_deg, sat[, lum])``: the zone's hues are pulled
+    toward ``hue_deg`` by ``|sat|`` of the way, its saturation is shifted
+    by ``sat`` (positive boosts, negative desaturates), and its luminance
+    by ``lum`` (additive, 0 = none) — all masked by a smooth luminance mask
+    so zone boundaries don't band. ``None`` = zone untouched. Two-element
+    tuples (no luminance) stay accepted for backward compatibility.
     """
     zones = {"shadows": shadows, "midtones": midtones, "highlights": highlights}
     if not any(z is not None for z in zones.values()):
@@ -335,22 +341,29 @@ def apply_color_grading(img: Image.Image, shadows=None, midtones=None,
     hue, sat, val = _to_hsv(arr)
     hue_shift = np.zeros_like(hue)
     sat_shift = np.zeros_like(sat)
+    lum_shift = np.zeros_like(val)
     for zone, zval in zones.items():
         if zval is None:
             continue
-        hue_deg, sat_strength = zval
+        hue_deg, sat_strength = zval[0], zval[1]
+        lum_strength = zval[2] if len(zval) > 2 else 0.0
         strength = max(-1.0, min(1.0, float(sat_strength)))
-        if abs(strength) < 1e-4:
+        lum_strength = max(-1.0, min(1.0, float(lum_strength)))
+        if abs(strength) < 1e-4 and abs(lum_strength) < 1e-4:
             continue
         target = ((float(hue_deg) % 360.0) / 360.0) % 1.0
         mask = _zone_mask(zone, val)
-        # signed shortest angular distance to the target hue
-        delta = ((target - hue + 0.5) % 1.0) - 0.5
-        hue_shift += delta * abs(strength) * mask
-        sat_shift += strength * mask
+        if abs(strength) >= 1e-4:
+            # signed shortest angular distance to the target hue
+            delta = ((target - hue + 0.5) % 1.0) - 0.5
+            hue_shift += delta * abs(strength) * mask
+            sat_shift += strength * mask
+        if abs(lum_strength) >= 1e-4:
+            lum_shift += lum_strength * mask
     new_hue = np.mod(hue + hue_shift, 1.0)
     new_sat = np.clip(sat + sat_shift, 0.0, 1.0)
-    out_arr = _from_hsv(new_hue, new_sat, val)
+    new_val = np.clip(val + lum_shift, 0.0, 1.0)
+    out_arr = _from_hsv(new_hue, new_sat, new_val)
     return _finish_grade(img, out_arr, alpha)
 
 

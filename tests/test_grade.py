@@ -176,8 +176,20 @@ class TestVibrance:
 class TestColorGrading:
     def test_parse(self):
         got = _parse_color_grading("shadows:10,0.3;highlights:-5,0.2")
-        assert got["shadows"] == (10.0, 0.3)
-        assert got["highlights"] == (-5.0, 0.2)
+        assert got["shadows"] == (10.0, 0.3, 0.0)
+        assert got["highlights"] == (-5.0, 0.2, 0.0)
+
+    def test_parse_with_luminance(self):
+        got = _parse_color_grading("shadows:10,0.3,0.2;midtones:-5,0,0.1")
+        assert got["shadows"] == (10.0, 0.3, 0.2)
+        assert got["midtones"] == (-5.0, 0.0, 0.1)
+
+    def test_luminance_lifts_zone(self):
+        # pure shadow with a strong +lum should get brighter overall
+        im = Image.new("RGB", (16, 16), (20, 20, 20))
+        out = apply_color_grading(im, shadows=(0, 0.0, 0.5))
+        r, g, b = out.getpixel((0, 0))
+        assert r > 20  # luminance lifted the shadows
 
     def test_parse_bad_zone(self):
         with pytest.raises(ValueError):

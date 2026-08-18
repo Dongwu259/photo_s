@@ -44,6 +44,12 @@ class CurveEditor(tk.Canvas):
         self.channel = channel
         self.on_change = on_change
         self._drag_idx = None
+        self._req_w = width
+        self._req_h = height
+        # Re-render once the canvas is actually laid out: winfo_width() is 1
+        # before mapping, so the initial _render would draw at ~10px and the
+        # points would sit where they're not drawn (un-hittable).
+        self.bind("<Configure>", lambda e: self._render())
         self.set_points(points if points is not None else [(0, 0), (255, 255)])
         self.bind("<Button-1>", self._on_press)
         self.bind("<B1-Motion>", self._on_drag)
@@ -53,10 +59,16 @@ class CurveEditor(tk.Canvas):
 
     # -- geometry (plain math, testable) -------------------------------------
     def _px(self):
-        return max(10, (self.winfo_width() or 280) - 2 * self.MARGIN)
+        w = self.winfo_width()
+        if w <= 1:  # not laid out yet → requested size
+            w = self._req_w
+        return max(10, w - 2 * self.MARGIN)
 
     def _py(self):
-        return max(10, (self.winfo_height() or 200) - 2 * self.MARGIN)
+        h = self.winfo_height()
+        if h <= 1:  # not laid out yet → requested size
+            h = self._req_h
+        return max(10, h - 2 * self.MARGIN)
 
     def data_to_canvas(self, x, y):
         return (self.MARGIN + x / 255.0 * self._px(),

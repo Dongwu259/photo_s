@@ -515,6 +515,7 @@ STRINGS = {
         "dlt_hsl": "HSL 分色（点色块，再拖滑块）",
         "ok": "确定",
         "grade_none": "未设置",
+        "grade_lum": "亮度",
         "zone_shadows": "阴影",
         "zone_midtones": "中间调",
         "zone_highlights": "高光",
@@ -1024,6 +1025,7 @@ STRINGS = {
         "dlt_hsl": "HSL split (pick a chip, then drag the sliders)",
         "ok": "OK",
         "grade_none": "not set",
+        "grade_lum": "Lum",
         "zone_shadows": "Shadows",
         "zone_midtones": "Midtones",
         "zone_highlights": "Highlights",
@@ -2840,17 +2842,19 @@ class PhotoSApp:
         win.title(self._t("dlt_curves"))
         win.configure(bg=COLORS["bg"])
         win.transient(self.root)
+        win.geometry("360x300")
         cur = _parse_curves(self.curves.get()) if self.curves.get() else {}
         base = cur.get("rgb")
         nb = ttk.Notebook(win)
-        nb.pack(padx=10, pady=10)
+        nb.pack(fill="both", expand=True, padx=10, pady=10)
         editors = {}
         for ch, chname in (("rgb", "RGB"), ("r", "R"), ("g", "G"), ("b", "B")):
             tab = ttk.Frame(nb)
             nb.add(tab, text=chname)
             pts = cur.get(ch) or base or [(0, 0), (255, 255)]
-            ed = CurveEditor(tab, channel=ch, points=pts)
-            ed.pack(padx=8, pady=8)
+            ed = CurveEditor(tab, channel=ch, points=pts,
+                             width=320, height=210)
+            ed.pack(fill="both", expand=True, padx=8, pady=8)
             editors[ch] = ed
         btns = tk.Frame(win, bg=COLORS["bg"])
         btns.pack(fill="x", padx=10, pady=(0, 10))
@@ -2878,7 +2882,11 @@ class PhotoSApp:
         win.destroy()
 
     def _open_color_wheel_dialog(self):
-        """Three HSV wheels (shadows/midtones/highlights) — LR color grading."""
+        """Three HSV wheels (shadows/midtones/highlights) — LR color grading.
+
+        Each wheel carries a luminance slider (brightness bar): the picked
+        hue/sat tint the zone, the luminance shifts its value.
+        """
         from .gui_widgets import ColorWheel
         from .grade import _parse_color_grading
         if self._dlg_cooldown_active():
@@ -2889,21 +2897,37 @@ class PhotoSApp:
         win.transient(self.root)
         cur = (_parse_color_grading(self.color_grading.get())
                if self.color_grading.get() else {})
-        wheels = {}
+        wheels, lums = {}, {}
         for zone, zkey in (("shadows", "zone_shadows"),
                            ("midtones", "zone_midtones"),
                            ("highlights", "zone_highlights")):
             frame = ttk.LabelFrame(win, text=self._t(zkey))
             frame.pack(side="left", padx=6, pady=8)
-            wheel = ColorWheel(frame, size=160)
-            hue, sat = cur.get(zone, (0.0, 0.0))
+            wheel = ColorWheel(frame, size=150)
+            hue, sat, lum = cur.get(zone, (0.0, 0.0, 0.0))
             wheel.set_value(hue, sat)
-            wheel.pack(padx=6, pady=6)
+            wheel.pack(padx=6, pady=(6, 2))
+            # luminance (brightness) bar under the wheel
+            lum_row = ttk.Frame(frame)
+            lum_row.pack(fill="x", padx=4, pady=(0, 6))
+            lum_var = tk.DoubleVar(value=lum * 100.0)
+            lums[zone] = lum_var
+            ttk.Label(lum_row, text=self._t("grade_lum"),
+                      font=FONT_SMALL).pack(side="left")
+            ttk.Scale(lum_row, from_=-100.0, to=100.0, variable=lum_var,
+                      length=80).pack(side="left", fill="x", expand=True,
+                                      padx=4)
+            lum_lbl = ttk.Label(lum_row, width=5, font=FONT_SMALL)
+            lum_lbl.pack(side="right")
+            lum_var.trace_add("write",
+                              lambda *a, v=lum_var, l=lum_lbl:
+                              l.config(text="{:+.0f}".format(v.get())))
+            lum_lbl.config(text="{:+.0f}".format(lum * 100.0))
             wheels[zone] = wheel
         btns = tk.Frame(win, bg=COLORS["bg"])
         btns.pack(fill="x", padx=10, pady=(0, 10))
         FlatButton(btns, text=self._t("ok"),
-                   command=lambda: self._wheels_ok(win, wheels),
+                   command=lambda: self._wheels_ok(win, wheels, lums),
                    bg=COLORS["bg"], fg=COLORS["text"],
                    hover_bg=COLORS["border"], font=FONT_SMALL,
                    padx=10, pady=3, border_color=COLORS["border"]).pack(
@@ -2914,12 +2938,17 @@ class PhotoSApp:
                    padx=10, pady=3, border_color=COLORS["border"]).pack(
             side="right", padx=(0, 8))
 
-    def _wheels_ok(self, win, wheels):
+    def _wheels_ok(self, win, wheels, lums=None):
         specs = []
         for zone, wheel in wheels.items():
             h, s = wheel.get_value()
-            if s > 0.02:  # centre = no tint
-                specs.append(f"{zone}:{int(round(h))},{s:.2f}")
+            lum = (lums or {}).get(zone, None)
+            lum_val = float(lum.get()) / 100.0 if lum is not None else 0.0
+            if s <= 0.02 and abs(lum_val) < 0.005:
+                continue  # centre + no luminance → untouched
+            base = f"{zone}:{int(round(h))},{s:.2f}"
+            specs.append(base if abs(lum_val) < 0.005
+                         else f"{base},{lum_val:.2f}")
         self.color_grading.set(";".join(specs))
         self._refresh_grade_value_labels()
         win.destroy()

@@ -58,6 +58,14 @@ class TestCurveEditor:
             bx, by = ed.canvas_to_data(cx, cy)
             assert abs(bx - x) < 2 and abs(by - y) < 2
 
+    def test_px_falls_back_before_layout(self, root):
+        # Before the canvas is mapped winfo_width()==1 — the geometry must
+        # fall back to the requested size or the curve is drawn ~10px wide
+        # and the points are un-hittable (the "squeezed curve" bug).
+        ed = CurveEditor(root, width=280, height=200)
+        assert ed._px() == 280 - 2 * ed.MARGIN
+        assert ed._py() == 200 - 2 * ed.MARGIN
+
     def test_engine_accepts_spec(self, root):
         from PIL import Image
         from photo_s.grade import _parse_curves, apply_curves
@@ -166,6 +174,26 @@ class TestDialogSerializers:
         wheels["midtones"].set_value(30, 0.0)   # centre → skipped
         app._wheels_ok(self._stub_win(), wheels)
         assert app.color_grading.get() == "shadows:120,0.50"
+        _r.destroy()
+
+    def test_wheels_ok_with_luminance(self, root):
+        from tests.test_gui_app import _make_app
+        _r, app = _make_app()
+
+        class _V:
+            def __init__(self, v):
+                self._v = v
+            def get(self):
+                return self._v
+
+        wheels, lums = {}, {}
+        for zone in ("shadows", "midtones", "highlights"):
+            wheels[zone] = ColorWheel(root)
+        wheels["shadows"].set_value(120, 0.5)
+        lums["shadows"] = _V(20.0)     # lum +0.20 → 3-value spec
+        lums["midtones"] = _V(0.0)     # zero lum, wheel centre → skipped
+        app._wheels_ok(self._stub_win(), wheels, lums)
+        assert app.color_grading.get() == "shadows:120,0.50,0.20"
         _r.destroy()
 
     def test_hsl_ok_sets_spec(self, root):
