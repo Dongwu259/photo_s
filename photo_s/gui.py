@@ -1565,6 +1565,8 @@ class PhotoSApp:
         self._dims_cache: dict = {}
         self._thumb_cache: dict = {}   # (path, size, mtime) → PIL Image
         self._thumb_size = 48          # file-list thumbnail edge px
+        self._pending_thumbs: list = []   # (label, path, cache_key) queue
+        self._thumbs_after = None      # pending after() id for the queue
         self.filter_var = tk.StringVar(value="")  # file-list filter box
         self.rename_pattern = tk.StringVar(value="")
         self.folder_pattern = tk.StringVar(value="")
@@ -5381,9 +5383,11 @@ class PhotoSApp:
         Checkbox state comes from self._checked — the tk.Variables are
         recreated per build, so language/theme rebuilds keep the checks.
         """
-        # Clear existing rows
+        # Clear existing rows (and the pending thumbnail queue — the old
+        # labels are destroyed with their rows)
         for w in self.file_rows_frame.winfo_children():
             w.destroy()
+        self._pending_thumbs = []
         self._row_vars = {}
         self._row_widgets = {}
 
@@ -5452,6 +5456,7 @@ class PhotoSApp:
                                        "base_bg": base_bg}
 
         self._update_count_label()
+        self._schedule_thumbnails()
 
     def _visible_files(self):
         """Files matching the filter box (display-only view over self.files)."""
@@ -5471,39 +5476,57 @@ class PhotoSApp:
         self._refresh_file_list()
 
     def _make_thumbnail(self, path, cache_key, bg, row):
-        """A row thumbnail Label (cached by path+size+mtime). RAW files use a
-        half-size decode so the list doesn't freeze; failures show a small
-        neutral placeholder instead of aborting the row."""
+        """A row thumbnail Label (cached by path+size+mtime). Decoding is
+        deferred to the event loop (_schedule_thumbnails) so refresh never
+        blocks on image loads — large folders stay responsive and slow CI
+        render-polls aren't starved. A neutral placeholder shows meanwhile;
+        RAW files use a half-size decode."""
         size = self._thumb_size
-        try:
-            img = self._thumb_cache.get(cache_key)
-            if img is None:
-                from PIL import Image
-                if Path(path).suffix.lower() in RAW_EXTENSIONS:
-                    import rawpy
-                    with rawpy.imread(path) as raw:
-                        rgb = raw.postprocess(use_camera_wb=True,
-                                              half_size=True, output_bps=8)
-                        img = Image.fromarray(rgb)
-                else:
-                    with Image.open(path) as im:
-                        img = im.convert("RGB").copy()
-                img.thumbnail((size, size), Image.LANCZOS)
-                self._thumb_cache[cache_key] = img
-            from PIL import ImageTk
-            photo = ImageTk.PhotoImage(img)
-            lbl = tk.Label(row, image=photo, bg=bg, width=size, height=size)
-            lbl._photo_ref = photo
-            return lbl
-        except Exception:
+        lbl = tk.Label(row, text="", bg=bg, width=size // 9,
+                       height=size // 9,
+                       fg=COLORS["text_secondary"],
+                       font=(PLATFORM_FONTS["body"], 18))
+        self._pending_thumbs.append((lbl, path, cache_key))
+        return lbl
+
+    def _schedule_thumbnails(self, batch=4):
+        """Generate queued thumbnails a few per event-loop tick."""
+        if self._pending_thumbs and not self._thumbs_after:
+            self._thumbs_after = self.root.after(30, self._drain_thumbnails,
+                                                 batch)
+
+    def _drain_thumbnails(self, batch):
+        self._thumbs_after = None
+        size = self._thumb_size
+        done = 0
+        while self._pending_thumbs and done < batch:
+            lbl, path, cache_key = self._pending_thumbs.pop(0)
             try:
-                lbl = tk.Label(row, text="▦", bg=bg, width=size // 9,
-                               height=size // 9,
-                               fg=COLORS["text_secondary"],
-                               font=(PLATFORM_FONTS["body"], 18))
-                return lbl
+                img = self._thumb_cache.get(cache_key)
+                if img is None:
+                    from PIL import Image
+                    if Path(path).suffix.lower() in RAW_EXTENSIONS:
+                        import rawpy
+                        with rawpy.imread(path) as raw:
+                            rgb = raw.postprocess(use_camera_wb=True,
+                                                  half_size=True, output_bps=8)
+                            img = Image.fromarray(rgb)
+                    else:
+                        with Image.open(path) as im:
+                            img = im.convert("RGB").copy()
+                    img.thumbnail((size, size), Image.LANCZOS)
+                    self._thumb_cache[cache_key] = img
+                from PIL import ImageTk
+                photo = ImageTk.PhotoImage(img)
+                lbl.configure(image=photo)
+                lbl._photo_ref = photo
+                lbl.configure(width=size // 9, height=size // 9, text="")
             except Exception:
-                return None
+                lbl.configure(text="▦")
+            done += 1
+        if self._pending_thumbs:
+            self._thumbs_after = self.root.after(30, self._drain_thumbnails,
+                                                 batch)
 
     def _browse_output_dir(self):
         """Browse for output directory."""

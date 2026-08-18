@@ -19,8 +19,10 @@ from photo_s.gui_widgets import (
 )
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def root():
+    # function-scoped: a fresh Tk per test so PhotoImage names never leak
+    # across tests (a GC'd wheel would leave a freed "pyimageN" behind)
     try:
         r = tk.Tk()
     except Exception as e:  # headless CI (no DISPLAY) → skip, not crash
