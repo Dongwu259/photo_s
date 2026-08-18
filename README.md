@@ -48,6 +48,12 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | Visual preview | ✅ | — | Live original↔processed preview rendered through the real pipeline |
 | Tone & color | ✅ | ✅ | Brightness/contrast/saturation/gamma/sharpen, B&W, sepia |
 | White balance | ✅ | ✅ | Kelvin temperature or gray-card sampling |
+| WB tint axis | ✅ | ✅ | Green(-)/magenta(+) G-M axis |
+| Point curves / levels | ✅ | ✅ | PCHIP point curves, manual black/white/gamma |
+| 3-way color grading | ✅ | ✅ | Shadows/midtones/highlights hue + sat zones |
+| HSL split | ✅ | ✅ | 8 color domains, hue/sat/lum shifts |
+| Vibrance / clarity / texture | ✅ | ✅ | Natural saturation, local contrast |
+| Dehaze / vignette / grain | ✅ | ✅ | Dark-channel dehaze, radial vignette, film grain |
 | Exposure | ✅ | ✅ | Stops adjustment or normalize-to-target auto exposure |
 | Auto levels | ✅ | ✅ | 2% clip histogram stretch |
 | LOG recovery | ✅ | ✅ | SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG (1D LUT, no deps) |

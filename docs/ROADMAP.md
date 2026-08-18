@@ -21,37 +21,41 @@
 > 需求来源：商业软件 LensPilot 以 photo_s 为底层图像管线，功能摸底（2026-08-18）指出
 > 向 Lightroom 方向增强调色能力。定位约束不变：**批量/交付导向管线，不做交互式局部修图**。
 > 全部 P0/P1 为**单图全局调整算法，纯 numpy/PIL 可实现，零新依赖**（打包环境已有 numpy/cv2/onnxruntime）。
+> **实施（2026-08-18，已 push 未发版）**：P0+P1 全部落地进 `photo_s/grade.py`（11 函数）+ 3 个 bug 修复 + 四层接线（CLI 11 flag / REST 自动 / MCP 33 参数 / GUI 11 控件），899 测试全绿。
+> **关键设计决策**：ROADMAP 原议 `curves/color_grading/hsl` 用 dict 字段——实施时改**紧凑字符串**（如 `curves="r:0,0;128,140;255,255"`、`color_grading="shadows:120,0.3"`），
+> 与现有 `crop/pad/print_size` 同形态：REST `_scalar_groups` / preset `asdict` **零手工接线**（已验证）。
 
-**P0 — LR 核心旋钮**（新函数进 `photo_s/adjust.py` 或新 `photo_s/curves.py`，各配 `ProcessOptions` 字段 + CLI flag + GUI 设置面板 + REST/MCP 自动继承）：
+**P0 — LR 核心旋钮**（`photo_s/grade.py`，`ProcessOptions` 字段 + CLI flag + GUI 设置面板 + REST/MCP 自动继承）：
 
-- [ ] 点曲线 `apply_curves(img, points, channel="rgb")`：控制点 PCHIP 单调样条 → 256 项 LUT；`curves: dict`；channel ∈ rgb/r/g/b
-- [ ] 手动色阶 `apply_levels(img, black=0, white=255, gamma=1.0)`：黑场/白场/中间调三点重映射；`levels`
-- [ ] 自然饱和度 `apply_vibrance(img, amount)`：HSV 空间按当前饱和度反向加权提升（保护肤色/已饱和区，与全局饱和度互补）；`vibrance: float`
-- [ ] 三向颜色分级 `apply_color_grading(img, shadows, midtones, highlights)`：各档 (hue_deg, saturation) + 亮度掩膜平滑过渡叠加着色；`color_grading: dict`
-- [ ] WB tint 轴 `wb_tint`：现有 Kelvin 冷暖轴（wb_temp）加 G/M 品红-绿轴（小矩阵）；`wb_tint: float`
+- [x] 点曲线 `apply_curves(img, channel_points)`：控制点 PCHIP 单调样条 → 256 项 LUT；`curves: str`；channel ∈ rgb/r/g/b
+- [x] 手动色阶 `apply_levels(img, black, white, gamma)`：黑场/白场/中间调三点重映射；`levels: str`
+- [x] 自然饱和度 `apply_vibrance(img, amount)`：HSV 空间按当前饱和度反向加权提升（保护肤色/已饱和区，与全局饱和度互补）；`vibrance: float`
+- [x] 三向颜色分级 `apply_color_grading(img, shadows, midtones, highlights)`：各档 (hue_deg, saturation) + 亮度掩膜平滑过渡叠加着色；`color_grading: str`
+- [x] WB tint 轴 `wb_tint`：`apply_white_balance` 扩 G/M 品红-绿轴（小矩阵）；`wb_tint: float`
 
 **P1 — 风格化常用**：
 
-- [ ] HSL 分色 `apply_hsl(img, adjustments)`：8 色域（red/orange/yellow/green/aqua/blue/purple/magenta）×（hue/sat/lum 偏移），hue 分段软过渡；`hsl: dict`
-- [ ] 清晰度/纹理 `apply_clarity(amount, radius=60)` / `apply_texture(amount)`：亮度通道 USM 局部对比，clarity 大半径 / texture 小半径；`clarity` / `texture`
-- [ ] 去雾 `apply_dehaze(img, amount)`：暗通道先验 + 导向滤波（cv2）；`dehaze: float`
-- [ ] 暗角 `apply_vignette(img, amount, midpoint=0.5, feather=0.5)`：径向渐变掩膜乘法；`vignette: dict`
-- [ ] 颗粒 `apply_grain(img, amount, size=1.0)`：亮度加权单色斑点噪声（胶片感）；`grain: dict`
+- [x] HSL 分色 `apply_hsl(img, adjustments)`：8 色域（red/orange/yellow/green/aqua/blue/purple/magenta）×（hue/sat/lum 偏移），高斯软过渡；`hsl: str`
+- [x] 清晰度/纹理 `apply_clarity(amount, radius=60)` / `apply_texture(amount, radius=4)`：亮度通道 USM 局部对比，clarity 大半径 / texture 小半径；`clarity` / `texture: float`
+- [x] 去雾 `apply_dehaze(img, amount)`：暗通道先验 + 高斯模糊透射率估计（批量级，无 opencv 依赖）；`dehaze: float`
+- [x] 暗角 `apply_vignette(img, amount, midpoint, feather)`：径向渐变掩膜乘法；`vignette: str`
+- [x] 颗粒 `apply_grain(img, amount, size)`：亮度加权单色斑点噪声（胶片感）；`grain: str`
 
 **Bug 修复（P0，摸底发现，必修）**：
 
-- [ ] **3D/1D LUT 后 EXIF 丢失**（`photo_s/lut.py:158`）：三线性路径新建 Image 未拷贝 `img.info`，经 `grade_keepers` 交付的照片丢版权/拍摄参数
-- [ ] `apply_lut` 输出固定 RGB，RGBA 输入丢 alpha/mode（3D 路径）
-- [ ] MCP `process` 工具 schema 未暴露 `lut_file/brightness/contrast/saturation`（mcp_server.py:86-156）——数字员工无法自然语言调色，只能绕 `preset` 工具；补 schema 字段即可
+- [x] **3D/1D LUT 后 EXIF 丢失**：`apply_lut` 出口统一 `out.info = img.info.copy()`（1D/3D 两条路径），端到端测试锁定
+- [x] `apply_lut` 3D 路径 RGBA 丢 alpha：先拆 alpha 再重挂（1D 路径原本已处理）
+- [x] MCP `process` 工具 schema 未暴露 `lut_file/brightness/contrast/saturation`：补参数（+v1.6.0 全部调色参数，共 33 个）
 
-**管线顺序约定（新功能插入点，LR 处理顺序参考 + 现有引擎兼容）**：
+**管线顺序（实际实施，向后兼容——现有 tone/LUT 原位保留，新调色块插入）**：
 
 ```
 auto_rotate → auto_straighten → log_curve → 色彩管理
-→ WB(temp+tint) → 曝光 → 对比 → levels → curves
-→ clarity/texture/dehaze → vibrance/saturation → HSL → color_grading
-→ tone 倍率(向后兼容保留) → LUT → 降噪 → auto_levels
-→ 锐化 → vignette/grain → 几何/缩放 → 水印 → 保存
+→ tone(倍率，原位) → LUT → WB(temp+tint) → 曝光
+→ levels → curves → clarity → texture → dehaze
+→ vibrance → hsl → color_grading        ← 新调色块
+→ denoise → auto_levels → vignette → grain
+→ crop/rotate/flip → resize → pad → print → watermark → blur_faces → EXIF → save
 ```
 
 **远期（不在 v1.6）**：渐变蒙版（线性/径向 + 羽化 + 全局调整子集，唯一适合批量的局部形态，参数可序列化进 ProcessOptions）；XMP `crs:` 编辑参数读写（LensPilot LR 桥接从「读回结果」升级为「双向 interchange」——我方调整可被 LR 直接打开续修，LR 修完的参数我方复现）。

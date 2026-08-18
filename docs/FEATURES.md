@@ -36,9 +36,11 @@
 
 **并发调优（v1.4.0 实测定案）**：真实交付集（29 张 24MP）`-j 1,2,4,8` 实测 2.62s→0.45s，8 线程 **5.83x**，线程远未饱和——重活（解码/缩放/编码/降噪推理）都在 Pillow/numpy/onnxruntime 里释放 GIL，纯 Python 段占比小，**多进程是负优化**（降噪场景内存翻倍）。调优旋钮：`-j` 提并发；SCUNet 降噪时可用 `OMP_NUM_THREADS` / onnxruntime intra-op 控制单算子线程数，避免与外层 `-j` 超额订阅。机器不同结论可能不同，用 `bench` 实测。
 
-## 2. 引擎处理能力（ProcessOptions 61 字段）
+## 2. 引擎处理能力（ProcessOptions 75 字段）
 
-**管线顺序**：open → 插件 pre_process → auto_rotate → auto_straighten → log_curve → 色彩管理 → 影调 → **LUT 调色（`--lut` .cube/预设，plugin provider 优先否则内置三线性）** → 白平衡 → 曝光 → denoise → 自动色阶 → crop/rotate/flip → resize → pad → 打印尺寸 → watermark → save
+**管线顺序**：open → 插件 pre_process → auto_rotate → auto_straighten → log_curve → 色彩管理 → 影调 → **LUT 调色（`--lut` .cube/预设，plugin provider 优先否则内置三线性）** → 白平衡(temp+tint) → 曝光 → **LR 调色块（v1.6.0：`--levels` → `--curves` → `--clarity` → `--texture` → `--dehaze` → `--vibrance` → `--hsl` → `--color-grading`）** → denoise → 自动色阶 → **暗角/颗粒（`--vignette`/`--grain`）** → crop/rotate/flip → resize → pad → 打印尺寸 → watermark → save
+
+**LR 方向调色（v1.6.0，`photo_s/grade.py` 纯 numpy/PIL 零依赖）**：点曲线 `--curves "0,0;128,140;255,255"`（PCHIP 单调样条，支持 rgb/r/g/b 分通道）· 手动色阶 `--levels "80,200,1.1"` · 自然饱和度 `--vibrance` · 三向颜色分级 `--color-grading "shadows:120,0.3"` · WB tint `--wb-tint`（G/M 轴）· HSL 分色 `--hsl "green:10,0.2,0.1"`（8 色域软过渡）· 清晰度/纹理 `--clarity`/`--texture`（USM 局部对比）· 去雾 `--dehaze`（暗通道先验）· 暗角 `--vignette "0.5,0.4,0.4"` · 颗粒 `--grain "0.15,1.5"`
 
 | 类别 | 能力 |
 |---|---|
@@ -108,4 +110,4 @@
 ## 9. 平台 / 验证
 
 - macOS / Linux / Windows（CI 7 jobs：py3.9-3.12 全量 + Windows 真实 Tk + SCUNet 真推理 + exe 打包双版本：完整版 + lite 无 GUI 精简版）
-- 测试 834 个全绿
+- 测试 899 个全绿
