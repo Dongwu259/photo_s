@@ -506,6 +506,12 @@ STRINGS = {
         "vignette_hint": "amount[,mid[,feather]]；空 = 关闭",
         "grain": "颗粒",
         "grain_hint": "amount[,size]；空 = 关闭",
+        # settings category tabs (v1.6.1)
+        "tab_output": "输出",
+        "tab_adjust": "调整",
+        "tab_fx": "效果",
+        "tab_metadata": "元数据",
+        "tab_options": "选项",
         # interactive editors (v1.6.x)
         "edit_curves": "编辑曲线…",
         "edit_wheels": "色轮…",
@@ -1017,6 +1023,12 @@ STRINGS = {
         "vignette_hint": "amount[,mid[,feather]]; blank = off",
         "grain": "Grain",
         "grain_hint": "amount[,size]; blank = off",
+        # settings category tabs (v1.6.1)
+        "tab_output": "Output",
+        "tab_adjust": "Adjust",
+        "tab_fx": "Effects",
+        "tab_metadata": "Metadata",
+        "tab_options": "Options",
         # interactive editors (v1.6.x)
         "edit_curves": "Edit curves…",
         "edit_wheels": "Color wheels…",
@@ -1862,7 +1874,7 @@ class PhotoSApp:
         remove_btn = FlatButton(
             toolbar, text=self._t("remove"), command=self._remove_selected,
             bg=COLORS["card"], fg=COLORS["danger"], hover_bg=COLORS["bg"],
-            border_color=COLORS["border"],
+            border_color=COLORS["danger"],
         )
         remove_btn.pack(side="left", padx=(8, 0))
 
@@ -1873,19 +1885,10 @@ class PhotoSApp:
             border_color=COLORS["border"], font=FONT_SMALL,
         ).pack(side="left", padx=(8, 0))
 
-        clear_btn = FlatButton(
-            toolbar, text=self._t("clear"), command=self._clear_files,
-            bg=COLORS["card"], fg=COLORS["text_secondary"], hover_bg=COLORS["bg"],
-            border_color=COLORS["border"],
-        )
-        clear_btn.pack(side="right")
-
-        analyze_btn = FlatButton(
-            toolbar, text=self._t("analyze"), command=self._show_analysis,
-            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
-            border_color=COLORS["border"],
-        )
-        analyze_btn.pack(side="left", padx=(8, 0))
+        # Group separator: file-management (left) vs the rest.
+        # 分析 / 清空 live in the "更多工具" menu (decluttered toolbar).
+        sep = tk.Frame(toolbar, bg=COLORS["divider"], width=1)
+        sep.pack(side="left", fill="y", padx=10)
 
         # Workflow toolbar (review / dedup / gallery). Gallery is exempted
         # from the processing lockout (read-only export); review/dedup are
@@ -1928,6 +1931,10 @@ class PhotoSApp:
             border_color=COLORS["border"], font=FONT_SMALL,
         )
         self.compare_btn.pack(side="left", padx=(8, 0))
+
+        # Group separator: workflow actions (left) vs undo / more (right)
+        sep2 = tk.Frame(wf, bg=COLORS["divider"], width=1)
+        sep2.pack(side="left", fill="y", padx=10)
 
         self.undo_btn = FlatButton(
             wf, text=self._t("undo"), command=self._undo,
@@ -2047,78 +2054,80 @@ class PhotoSApp:
         card = tk.Frame(parent, bg=COLORS["card"], bd=0, highlightthickness=0)
         card.pack(fill="both", expand=True)
 
-        # Scrollable settings area
-        canvas = tk.Canvas(card, bg=COLORS["card"], highlightthickness=0, bd=0)
-        scrollbar = ttk.Scrollbar(card, orient="vertical", command=canvas.yview)
-        settings_frame = tk.Frame(canvas, bg=COLORS["card"])
-        settings_frame.columnconfigure(0, weight=1)
+        # Category tabs (Lightroom-style): each tab is its own scroll area.
+        nb = ttk.Notebook(card)
+        nb.pack(fill="both", expand=True)
 
-        canvas_window = canvas.create_window((0, 0), window=settings_frame, anchor="nw")
+        def _make_tab_scroll(tab):
+            """Scrollable canvas+inner-frame for one category tab."""
+            canvas = tk.Canvas(tab, bg=COLORS["card"], highlightthickness=0, bd=0)
+            scrollbar = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
+            inner = tk.Frame(canvas, bg=COLORS["card"])
+            inner.columnconfigure(0, weight=1)
+            canvas_window = canvas.create_window((0, 0), window=inner, anchor="nw")
 
-        def _on_frame_configure(_event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
+            def _on_frame_configure(_event):
+                canvas.configure(scrollregion=canvas.bbox("all"))
 
-        def _on_canvas_configure(event):
-            # Keep the inner frame exactly as wide as the visible canvas so
-            # settings are never clipped on the right edge
-            canvas.itemconfigure(canvas_window, width=event.width)
+            def _on_canvas_configure(event):
+                # Keep the inner frame as wide as the visible canvas so
+                # settings are never clipped on the right edge
+                canvas.itemconfigure(canvas_window, width=event.width)
 
-        settings_frame.bind("<Configure>", _on_frame_configure)
-        canvas.bind("<Configure>", _on_canvas_configure)
-        canvas.configure(yscrollcommand=scrollbar.set)
+            inner.bind("<Configure>", _on_frame_configure)
+            canvas.bind("<Configure>", _on_canvas_configure)
+            canvas.configure(yscrollcommand=scrollbar.set)
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
 
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+            # Mousewheel scrolling (bind on the tab so the handler stays alive
+            # over child widgets; clamp + re-snap so trackpad momentum can't
+            # wobble the view off the edge).
+            _last_boundary = [0.0]
 
-        # Mousewheel scrolling: active while the pointer is anywhere over the
-        # settings CARD (canvas, scrollbar, or any widget inside the panel).
-        # Binding on the card instead of the canvas keeps the handler alive
-        # over child widgets — the old canvas-only Enter/Leave unbound on
-        # every child crossing, so scrolling stuttered/jumped near the bottom
-        # where the pointer sits between widgets. The handler clamps at the
-        # boundaries and re-snaps for a beat after hitting one, so trackpad
-        # momentum — which can reverse direction for a few frames — can't
-        # wobble the view off the edge.
-        _last_boundary = [0.0]
-
-        def _on_mousewheel(event):
-            # macOS: event.delta is ±1; Windows/Linux: event.delta is ±120
-            delta = event.delta
-            amount = -delta if abs(delta) < 10 else -delta / 120
-            if time.monotonic() - _last_boundary[0] < 0.15:
-                return  # momentum tail right after a boundary hit — drop it
-            top, bottom = canvas.yview()
-            if amount > 0:
-                if bottom >= 1.0 - 1e-9:
-                    _last_boundary[0] = time.monotonic()
-                    canvas.yview_moveto(1.0)  # snap exactly to the bottom
+            def _on_mousewheel(event):
+                delta = event.delta
+                amount = -delta if abs(delta) < 10 else -delta / 120
+                if time.monotonic() - _last_boundary[0] < 0.15:
                     return
-            elif amount < 0:
-                if top <= 1e-9:
-                    _last_boundary[0] = time.monotonic()
-                    canvas.yview_moveto(0.0)
-                    return
-            # Pass the raw (possibly fractional) amount through so Windows
-            # high-resolution wheels (delta=±30/±60) scroll smoothly too.
-            canvas.yview_scroll(amount, "units")
+                top, bottom = canvas.yview()
+                if amount > 0:
+                    if bottom >= 1.0 - 1e-9:
+                        _last_boundary[0] = time.monotonic()
+                        canvas.yview_moveto(1.0)
+                        return
+                elif amount < 0:
+                    if top <= 1e-9:
+                        _last_boundary[0] = time.monotonic()
+                        canvas.yview_moveto(0.0)
+                        return
+                canvas.yview_scroll(amount, "units")
 
-        def _bind_scroll(event):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            def _bind_scroll(event):
+                canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
-        def _unbind_scroll(event):
-            canvas.unbind_all("<MouseWheel>")
+            def _unbind_scroll(event):
+                canvas.unbind_all("<MouseWheel>")
 
-        card.bind("<Enter>", _bind_scroll)
-        card.bind("<Leave>", _unbind_scroll)
+            tab.bind("<Enter>", _bind_scroll)
+            tab.bind("<Leave>", _unbind_scroll)
+            return inner
+
+        def _add_tab(key):
+            tab = ttk.Frame(nb)
+            nb.add(tab, text=self._t(key))
+            return _make_tab_scroll(tab)
+
+        OUT = _add_tab("tab_output")      # format/mode/resize/output/sizes/naming/subfolder
+        ADJ = _add_tab("tab_adjust")      # tone / composition / correction (+ LR grading)
+        FX = _add_tab("tab_fx")           # watermark
+        META = _add_tab("tab_metadata")   # EXIF date / GPX / privacy / face blur
+        OPT = _add_tab("tab_options")     # preserve/overwrite/jobs/…
 
         pad = {"padx": 18, "pady": 4}
 
         # ── Output Format ────────────────────────────────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_format"), row=0)
-
-        fmt_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        fmt_frame.grid(row=1, sticky="ew", **pad)
-        fmt_frame.columnconfigure(0, weight=1)
+        fmt_frame = self._add_collapsible_section(OUT, "sec_format")
 
         self.format_combo = ttk.Combobox(
             fmt_frame, textvariable=self.output_format,
@@ -2128,11 +2137,8 @@ class PhotoSApp:
         self.format_combo.pack(fill="x")
 
         # ── Quality / Target Size ────────────────────────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_mode"), row=2)
-
         # Mode toggle: radio buttons
-        mode_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        mode_frame.grid(row=4, sticky="ew", **pad)
+        mode_frame = self._add_collapsible_section(OUT, "sec_mode")
 
         self.manual_radio = ttk.Radiobutton(
             mode_frame, text=self._t("manual_quality"), variable=self.target_size_mode,
@@ -2147,8 +2153,8 @@ class PhotoSApp:
         self.target_radio.pack(anchor="w", pady=(4, 0))
 
         # ── Quality slider (shown in manual mode; ceiling in target mode) ────
-        self.quality_section_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        self.quality_section_frame.grid(row=5, sticky="ew", **pad)
+        self.quality_section_frame = tk.Frame(mode_frame, bg=COLORS["card"])
+        self.quality_section_frame.pack(fill="x", pady=(6, 0))
 
         self.quality_section_label = tk.Label(
             self.quality_section_frame, text=self._t("quality"),
@@ -2173,8 +2179,8 @@ class PhotoSApp:
         self.quality_slider.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         # ── Target size input (shown in target mode) ─────────────────────────
-        self.target_section_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        self.target_section_frame.grid(row=6, sticky="ew", **pad)
+        self.target_section_frame = tk.Frame(mode_frame, bg=COLORS["card"])
+        self.target_section_frame.pack(fill="x", pady=(6, 0))
 
         tk.Label(self.target_section_frame, text=self._t("target_size"),
                  font=FONT_SMALL, fg=COLORS["text_secondary"],
@@ -2201,13 +2207,10 @@ class PhotoSApp:
                  bg=COLORS["card"]).pack(side="left", padx=(8, 0))
 
         # Hide target section initially (manual mode default)
-        self.target_section_frame.grid_remove()
+        self.target_section_frame.pack_forget()
 
         # ── Resize ──────────────────────────────────────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_resize"), row=7)
-
-        resize_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        resize_frame.grid(row=9, sticky="ew", **pad)
+        resize_frame = self._add_collapsible_section(OUT, "sec_resize")
         resize_frame.columnconfigure(1, weight=1)
         resize_frame.columnconfigure(3, weight=1)
 
@@ -2242,8 +2245,8 @@ class PhotoSApp:
             row=3, column=0, columnspan=4, sticky="w", pady=(2, 0))
 
         # Scale percentage
-        scale_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        scale_frame.grid(row=10, sticky="ew", **pad)
+        scale_frame = tk.Frame(resize_frame, bg=COLORS["card"])
+        scale_frame.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(8, 0))
 
         tk.Label(scale_frame, text=self._t("scale"), font=FONT_SMALL,
                  fg=COLORS["text_secondary"], bg=COLORS["card"]).pack(side="left")
@@ -2253,10 +2256,7 @@ class PhotoSApp:
         scale_entry.pack(side="left", padx=(8, 0))
 
         # ── Output Location ─────────────────────────────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_output"), row=11)
-
-        out_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        out_frame.grid(row=13, sticky="ew", **pad)
+        out_frame = self._add_collapsible_section(OUT, "sec_output")
         out_frame.columnconfigure(0, weight=1)
 
         out_entry = ttk.Entry(out_frame, textvariable=self.output_dir,
@@ -2283,10 +2283,7 @@ class PhotoSApp:
             row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         # ── Naming ──────────────────────────────────────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_naming"), row=14)
-
-        naming_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        naming_frame.grid(row=16, sticky="ew", **pad)
+        naming_frame = self._add_collapsible_section(OUT, "sec_naming")
 
         tk.Label(naming_frame, text=self._t("prefix"), font=FONT_SMALL,
                  fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
@@ -2319,10 +2316,7 @@ class PhotoSApp:
         naming_frame.columnconfigure(1, weight=1)
 
         # ── Folder Organization ─────────────────────────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_subfolder"), row=17)
-
-        folder_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        folder_frame.grid(row=19, sticky="ew", **pad)
+        folder_frame = self._add_collapsible_section(OUT, "sec_subfolder")
         folder_frame.columnconfigure(1, weight=1)
 
         tk.Label(folder_frame, text=self._t("template"), font=FONT_SMALL,
@@ -2362,10 +2356,7 @@ class PhotoSApp:
             row=2, column=0, columnspan=2, sticky="w", pady=(2, 0), padx=(0, 8))
 
         # ── Options ─────────────────────────────────────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_options"), row=20)
-
-        opts_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        opts_frame.grid(row=22, sticky="ew", **pad)
+        opts_frame = self._add_collapsible_section(OPT, "sec_options")
 
         self._add_checkbox(opts_frame, self._t("preserve_exif"),
                            self.preserve_exif, row=0)
@@ -2396,14 +2387,8 @@ class PhotoSApp:
                                font=FONT_BODY, width=5)
         jobs_entry.grid(row=10, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
 
-        # Spacer
-        spacer = tk.Frame(settings_frame, bg=COLORS["card"], height=16)
-        spacer.grid(row=23, sticky="ew")
-
         # ── Watermark ────────────────────────────────────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_watermark"), row=24)
-        wm_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        wm_frame.grid(row=26, sticky="ew", **pad)
+        wm_frame = self._add_collapsible_section(FX, "sec_watermark")
         wm_frame.columnconfigure(1, weight=1)
 
         tk.Label(wm_frame, text=self._t("wm_text"), font=FONT_SMALL,
@@ -2451,9 +2436,7 @@ class PhotoSApp:
         wm_opacity_lbl.grid(row=3, column=2, sticky="e", pady=(8, 0))
 
         # ── Multi-size output ─────────────────────────────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_sizes"), row=27)
-        sizes_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        sizes_frame.grid(row=29, sticky="ew", **pad)
+        sizes_frame = self._add_collapsible_section(OUT, "sec_sizes")
         sizes_frame.columnconfigure(0, weight=1)
 
         sizes_entry = ttk.Entry(sizes_frame, textvariable=self.output_sizes,
@@ -2465,9 +2448,7 @@ class PhotoSApp:
             row=1, column=0, sticky="w", pady=(4, 0))
 
         # ── Adjust (tone & color) ────────────────────────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_adjust"), row=30)
-        adj_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        adj_frame.grid(row=32, sticky="ew", **pad)
+        adj_frame = self._add_collapsible_section(ADJ, "sec_adjust")
         adj_frame.columnconfigure(1, weight=1)
 
         adj_specs = [
@@ -2496,10 +2477,7 @@ class PhotoSApp:
                            self.sepia, row=6)
 
         # ── Composition (crop / rotate / flip / pad) ─────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_composition"),
-                                row=33)
-        comp_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        comp_frame.grid(row=35, sticky="ew", **pad)
+        comp_frame = self._add_collapsible_section(ADJ, "sec_composition")
         comp_frame.columnconfigure(1, weight=1)
 
         comp_specs = [
@@ -2535,10 +2513,7 @@ class PhotoSApp:
             row=8, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         # ── Correction (exposure / LOG / denoise / straighten) ───────────────
-        self._add_section_label(settings_frame, self._t("sec_correction"),
-                                row=36)
-        corr_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        corr_frame.grid(row=38, sticky="ew", **pad)
+        corr_frame = self._add_collapsible_section(ADJ, "sec_correction")
         corr_frame.columnconfigure(1, weight=1)
 
         # EV exposure slider (-2..+2 stops)
@@ -2733,9 +2708,7 @@ class PhotoSApp:
         self._refresh_grade_value_labels()
 
         # ── Metadata section ──────────────────────────────────────────────────
-        self._add_section_label(settings_frame, self._t("sec_metadata"), row=39)
-        meta_frame = tk.Frame(settings_frame, bg=COLORS["card"])
-        meta_frame.grid(row=41, sticky="ew", **pad)
+        meta_frame = self._add_collapsible_section(META, "sec_metadata")
         meta_frame.columnconfigure(1, weight=1)
 
         # EXIF date shift (blank = off)
@@ -3087,19 +3060,37 @@ class PhotoSApp:
 
     # ── UI Helper Methods ────────────────────────────────────────────────────
 
-    def _add_section_label(self, parent, text, row):
-        """Add a section header label."""
-        # Thin separator
-        if row > 0:
-            sep = tk.Frame(parent, bg=COLORS["divider"], height=1)
-            sep.grid(row=row, sticky="ew", padx=18, pady=(12, 8), columnspan=2)
+    def _add_collapsible_section(self, parent, title_key, default_open=True):
+        """A clickable section header that toggles its content frame open/
+        closed (Lightroom-style). Returns the content frame — the caller
+        grids/packs its widgets into it.
 
-        label = tk.Label(
-            parent, text=text, font=FONT_SECTION,
-            fg=COLORS["text"], bg=COLORS["card"], anchor="w",
+        Sections are packed into the tab's inner frame, so collapsing one
+        (pack_forget) shifts the rest up with no row bookkeeping.
+        """
+        title = self._t(title_key)
+        content = tk.Frame(parent, bg=COLORS["card"])
+        state = {"open": bool(default_open)}
+
+        def _toggle():
+            state["open"] = not state["open"]
+            if state["open"]:
+                content.pack(fill="x", padx=18, pady=(2, 4))
+                header.configure(text="▾ " + title)
+            else:
+                content.pack_forget()
+                header.configure(text="▸ " + title)
+
+        header = FlatButton(
+            parent, text=("▾ " if default_open else "▸ ") + title,
+            command=_toggle,
+            bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
+            font=FONT_SECTION, padx=10, pady=3, border_color=COLORS["divider"],
         )
-        label.grid(row=row + (1 if row > 0 else 0), sticky="ew", padx=18,
-                   pady=(14 if row == 0 else 0, 4))
+        header.pack(fill="x", pady=(8, 0))
+        if default_open:
+            content.pack(fill="x", padx=18, pady=(2, 4))
+        return content
 
     def _add_checkbox(self, parent, text, variable, row):
         """Add a native-styled checkbox."""
@@ -3115,7 +3106,7 @@ class PhotoSApp:
         if self.target_size_mode.get():
             # Target size mode: quality becomes ceiling
             self.quality_section_label.config(text=self._t("max_quality"))
-            self.target_section_frame.grid()
+            self.target_section_frame.pack()
             # Default to 95 as ceiling in target mode
             if self.quality.get() == 85:
                 self.quality.set(95)
@@ -3123,7 +3114,7 @@ class PhotoSApp:
         else:
             # Manual quality mode
             self.quality_section_label.config(text=self._t("quality"))
-            self.target_section_frame.grid_remove()
+            self.target_section_frame.pack_forget()
 
     # ── About ───────────────────────────────────────────────────────────────
 
@@ -4371,6 +4362,11 @@ class PhotoSApp:
                          command=self._show_hdr)
         menu.add_command(label=self._t("more_presets"),
                          command=self._show_presets)
+        menu.add_separator()
+        menu.add_command(label=self._t("analyze"),
+                         command=self._show_analysis)
+        menu.add_command(label=self._t("clear"),
+                         command=self._clear_files)
         try:
             menu.tk_popup(self.more_btn.winfo_rootx(),
                           self.more_btn.winfo_rooty()
