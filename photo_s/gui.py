@@ -198,6 +198,8 @@ STRINGS = {
         "undo": "撤销",
         "undo_none": "没有可撤销的操作",
         "undo_failed": "撤销失败: {err}",
+        "redo": "重做",
+        "redo_none": "没有可重做的操作",
         "undo_removed": "撤销移除 {n} 张",
         "undo_dedup": "撤销去重移动 {n} 张",
         "undo_tag": "撤销打标: {name}",
@@ -537,6 +539,11 @@ STRINGS = {
         "hsl_hue": "色相",
         "hsl_sat": "饱和",
         "hsl_lum": "明度",
+        "thumb_size_lbl": "缩略图",
+        "thumb_small": "小",
+        "thumb_medium": "中",
+        "thumb_large": "大",
+        "filter_lbl": "筛选",
         "auto_levels": "自动色阶（直方图拉伸）",
         "srgb": "转 sRGB 色彩空间",
         "flatten_cmyk": "CMYK 转 RGB",
@@ -715,6 +722,8 @@ STRINGS = {
         "undo": "Undo",
         "undo_none": "Nothing to undo",
         "undo_failed": "Undo failed: {err}",
+        "redo": "Redo",
+        "redo_none": "Nothing to redo",
         "undo_removed": "Undo removal of {n}",
         "undo_dedup": "Undo dedup move of {n}",
         "undo_tag": "Undo tagging: {name}",
@@ -1054,6 +1063,11 @@ STRINGS = {
         "hsl_hue": "Hue",
         "hsl_sat": "Sat",
         "hsl_lum": "Lum",
+        "thumb_size_lbl": "Thumb",
+        "thumb_small": "S",
+        "thumb_medium": "M",
+        "thumb_large": "L",
+        "filter_lbl": "Filter",
         "auto_levels": "Auto levels (histogram stretch)",
         "srgb": "Convert to sRGB",
         "flatten_cmyk": "Flatten CMYK → RGB",
@@ -1434,9 +1448,11 @@ class PhotoSApp:
         # THIS instance's dark_mode.
         _apply_palette(self.dark_mode)
         self.root.title(self._t("window_title"))
-        self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
+        _saved_geom = self._load_gui_state().get("geometry")
+        self.root.geometry(_saved_geom or f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         self.root.minsize(MIN_WIDTH, MIN_HEIGHT)
         self.root.configure(bg=COLORS["bg"])
+        self.root.protocol("WM_DELETE_WINDOW", self._on_main_close)
 
         # State
         self.files: List[str] = []
@@ -1456,6 +1472,7 @@ class PhotoSApp:
         # writes. Capped; the toolbar Undo button / ⌘Z pops the latest.
         self._undo_stack: list = []
         self._undo_max = 10
+        self._redo_stack: list = []
         self.processing = False
         self.cancel_requested = False
         self.output_dir = tk.StringVar(value="")
@@ -1546,6 +1563,9 @@ class PhotoSApp:
         # (path, size, mtime) -> "WxH" cache for the file list; opening every
         # image on each refresh freezes the UI on RAW files
         self._dims_cache: dict = {}
+        self._thumb_cache: dict = {}   # (path, size, mtime) → PIL Image
+        self._thumb_size = 48          # file-list thumbnail edge px
+        self.filter_var = tk.StringVar(value="")  # file-list filter box
         self.rename_pattern = tk.StringVar(value="")
         self.folder_pattern = tk.StringVar(value="")
         self.jobs = tk.StringVar(value=str(auto_jobs()))  # parallel workers
@@ -1562,6 +1582,7 @@ class PhotoSApp:
         self._progress_total = 0
         self._progress_path = ""
         self._progress_status = ""
+        self._progress_started = None  # ETA baseline
         self._batch_result = None
         self._batch_error = None
         self._after_id = None
@@ -1650,6 +1671,8 @@ class PhotoSApp:
             ("<Control-g>", self._show_gallery_export, False),
             ("<Command-z>", self._undo, False),
             ("<Control-z>", self._undo, False),
+            ("<Command-Z>", self._redo, False),
+            ("<Control-Z>", self._redo, False),
         ]
         for seq, fn, allow in binds:
             self.root.bind(seq, wrap(fn, allow))
@@ -1680,6 +1703,44 @@ class PhotoSApp:
         if not self.processing:
             self.progress_label.config(
                 text=self._t("ready"), fg=COLORS["text_secondary"])
+
+    # ── Layout memory (~/.photos/gui_state.json) ─────────────────────────────
+
+    @staticmethod
+    def _state_file():
+        from pathlib import Path
+        return Path.home() / ".photos" / "gui_state.json"
+
+    def _load_gui_state(self) -> dict:
+        """Restore window geometry / thumbnail size across restarts."""
+        try:
+            import json
+            with open(self._state_file(), encoding="utf-8") as f:
+                state = json.load(f)
+            self._thumb_size = int(state.get("thumb_size", self._thumb_size))
+            if self._thumb_size not in (32, 48, 64):
+                self._thumb_size = 48
+            return state
+        except Exception:
+            return {}
+
+    def _save_gui_state(self):
+        """Persist window geometry + thumbnail size; never crashes on save."""
+        try:
+            import json
+            state = {
+                "geometry": self.root.geometry(),
+                "thumb_size": self._thumb_size,
+            }
+            p = self._state_file()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(state), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _on_main_close(self):
+        self._save_gui_state()
+        self.root.destroy()
 
     def _on_language_selected(self, _event=None):
         display = self.lang_combo.get()
@@ -1944,12 +2005,34 @@ class PhotoSApp:
         self.undo_btn.pack(side="left", padx=(8, 0))
         self._sync_undo_btn()
 
+        self.redo_btn = FlatButton(
+            wf, text=self._t("redo"), command=self._redo,
+            bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+        )
+        self.redo_btn.pack(side="left", padx=(8, 0))
+        self._sync_redo_btn()
+
         self.more_btn = FlatButton(
             wf, text=self._t("more_btn"), command=self._post_more_menu,
             bg=COLORS["card"], fg=COLORS["text"], hover_bg=COLORS["bg"],
             border_color=COLORS["border"], font=FONT_SMALL,
         )
         self.more_btn.pack(side="left", padx=(8, 0))
+
+        # File-list thumbnail size selector (small/medium/large)
+        tk.Label(toolbar, text=self._t("thumb_size_lbl"),
+                 font=FONT_SMALL, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).pack(side="right")
+        self.thumb_size_combo = ttk.Combobox(
+            toolbar, state="readonly", width=5, font=FONT_SMALL,
+            values=[self._t("thumb_small"), self._t("thumb_medium"),
+                    self._t("thumb_large")],
+        )
+        _thumb_idx = {32: 0, 48: 1, 64: 2}.get(self._thumb_size, 1)
+        self.thumb_size_combo.current(_thumb_idx)
+        self.thumb_size_combo.bind("<<ComboboxSelected>>", self._on_thumb_size)
+        self.thumb_size_combo.pack(side="right", padx=(4, 8))
 
         self.file_count_label = tk.Label(
             toolbar, text=self._t("files_count", n=0), font=FONT_SMALL,
@@ -1961,6 +2044,23 @@ class PhotoSApp:
         # same widget as the settings panel. (Treeview cells cannot host
         # widgets, and its per-item image column proved unreliable, so
         # the list is a canvas of row frames instead.)
+        # Filter box above the list (display-only view over self.files)
+        filter_row = tk.Frame(card, bg=COLORS["card"])
+        filter_row.pack(fill="x", padx=14, pady=(12, 0))
+        tk.Label(filter_row, text=self._t("filter_lbl"),
+                 font=FONT_SMALL, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).pack(side="left")
+        self.filter_entry = ttk.Entry(filter_row, textvariable=self.filter_var,
+                                      font=FONT_SMALL)
+        self.filter_entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        self.filter_entry.bind("<KeyRelease>",
+                               lambda e: self._apply_filter())
+        FlatButton(filter_row, text="×", command=self._clear_filter,
+                   bg=COLORS["card"], fg=COLORS["text_secondary"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=6, pady=1, border_color=COLORS["border"]).pack(
+            side="right")
+
         list_frame = tk.Frame(card, bg=COLORS["card"])
         list_frame.pack(fill="both", expand=True, padx=14, pady=12)
 
@@ -4989,6 +5089,16 @@ class PhotoSApp:
         """Checked files in list order (the set all workflow actions use)."""
         return [p for p in self.files if p in self._checked]
 
+    def _on_thumb_size(self, _event=None):
+        """Rebuild the file list at a new thumbnail size (cache keyed on
+        size via the row rebuild; cached PIL images are re-fitted)."""
+        idx = self.thumb_size_combo.current()
+        new = {0: 32, 1: 48, 2: 64}.get(idx, 48)
+        if new != self._thumb_size:
+            self._thumb_size = new
+            self._thumb_cache.clear()  # re-fit to the new size
+            self._refresh_file_list()
+
     def _update_count_label(self):
         """File-count label in the toolbar (shows the checked subset
         when only some files are checked)."""
@@ -5025,11 +5135,12 @@ class PhotoSApp:
             var.set(path in self._checked)
         self._update_count_label()
 
-    def _push_undo(self, label, run):
+    def _push_undo(self, label, run, redo=None):
         """Record a reversible action (label for display, run restores
-        the previous state). Returns the entry so callers can remove it
-        from the stack again (e.g. in-lightbox undo)."""
-        entry = {"label": label, "run": run}
+        the previous state, optional redo re-applies it). Returns the
+        entry so callers can remove it from the stack again (e.g.
+        in-lightbox undo)."""
+        entry = {"label": label, "run": run, "redo": redo}
         self._undo_stack.append(entry)
         if len(self._undo_stack) > self._undo_max:
             self._undo_stack.pop(0)
@@ -5044,17 +5155,59 @@ class PhotoSApp:
             btn.configure(state=state)
 
     def _undo(self):
-        """Pop and run the latest undo entry."""
+        """Pop and run the latest undo entry; push its redo counterpart."""
         if not self._undo_stack:
             messagebox.showinfo(self._t("undo"), self._t("undo_none"))
             return
         entry = self._undo_stack.pop()
+        if entry.get("redo"):
+            self._redo_stack.append(
+                {"label": entry["label"], "run": entry["redo"]})
+            if len(self._redo_stack) > self._undo_max:
+                self._redo_stack.pop(0)
         try:
             entry["run"]()
         except Exception as e:
             messagebox.showerror(self._t("undo"),
                                  self._t("undo_failed", err=str(e)))
         self._sync_undo_btn()
+        self._sync_redo_btn()
+
+    def _redo(self):
+        """Re-apply the most recently undone action (when a redo closure
+        was recorded)."""
+        if not self._redo_stack:
+            messagebox.showinfo(self._t("redo"), self._t("redo_none"))
+            return
+        entry = self._redo_stack.pop()
+        self._undo_stack.append(entry)
+        try:
+            entry["run"]()
+        except Exception as e:
+            messagebox.showerror(self._t("redo"),
+                                 self._t("undo_failed", err=str(e)))
+        self._sync_undo_btn()
+        self._sync_redo_btn()
+
+    def _redo_remove(self, paths, checked):
+        """Re-apply a list removal (redo of _remove_selected / cull)."""
+        ps = set(p for _i, p in paths)
+        self.files = [f for f in self.files if f not in ps]
+        self._checked -= checked
+        self._refresh_file_list()
+        self._update_stats()
+
+    def _sync_redo_btn(self):
+        btn = getattr(self, "redo_btn", None)
+        if btn is None:
+            return
+        try:
+            if self._redo_stack:
+                btn.configure(state="normal")
+            else:
+                btn.configure(state="disabled")
+        except tk.TclError:
+            pass
 
     def _restore_removed(self, pairs, checked):
         """Undo a list removal: re-insert the rows at their original
@@ -5132,7 +5285,8 @@ class PhotoSApp:
         self._update_stats()
         self._push_undo(
             self._t("undo_removed", n=len(removed)),
-            lambda: self._restore_removed(list(removed), set(was_checked)))
+            lambda: self._restore_removed(list(removed), set(was_checked)),
+            lambda: self._redo_remove(list(removed), set(was_checked)))
 
     def _count_unsupported(self, directory) -> int:
         """Count non-hidden files under ``directory`` that PhotoS cannot
@@ -5233,7 +5387,7 @@ class PhotoSApp:
         self._row_vars = {}
         self._row_widgets = {}
 
-        for i, path in enumerate(self.files):
+        for i, path in enumerate(self._visible_files()):
             name = os.path.basename(path)
             try:
                 st = os.stat(path)
@@ -5270,6 +5424,10 @@ class PhotoSApp:
                                  command=self._make_check_cb(path))
             cb.pack(side="left", padx=(10, 8), pady=3)
 
+            thumb = self._make_thumbnail(path, cache_key, base_bg, row)
+            if thumb is not None:
+                thumb.pack(side="left", padx=(0, 8))
+
             name_lbl = tk.Label(row, text=name, anchor="w", font=FONT_BODY,
                                 fg=COLORS["text"], bg=base_bg)
             name_lbl.pack(side="left", fill="x", expand=True)
@@ -5294,6 +5452,58 @@ class PhotoSApp:
                                        "base_bg": base_bg}
 
         self._update_count_label()
+
+    def _visible_files(self):
+        """Files matching the filter box (display-only view over self.files)."""
+        q = self.filter_var.get().strip().lower()
+        if not q:
+            return list(self.files)
+        return [p for p in self.files
+                if q in os.path.basename(p).lower()
+                or q in Path(p).suffix.lower().lstrip(".")]
+
+    def _apply_filter(self, _event=None):
+        """Rebuild the list for the current filter query."""
+        self._refresh_file_list()
+
+    def _clear_filter(self):
+        self.filter_var.set("")
+        self._refresh_file_list()
+
+    def _make_thumbnail(self, path, cache_key, bg, row):
+        """A row thumbnail Label (cached by path+size+mtime). RAW files use a
+        half-size decode so the list doesn't freeze; failures show a small
+        neutral placeholder instead of aborting the row."""
+        size = self._thumb_size
+        try:
+            img = self._thumb_cache.get(cache_key)
+            if img is None:
+                from PIL import Image
+                if Path(path).suffix.lower() in RAW_EXTENSIONS:
+                    import rawpy
+                    with rawpy.imread(path) as raw:
+                        rgb = raw.postprocess(use_camera_wb=True,
+                                              half_size=True, output_bps=8)
+                        img = Image.fromarray(rgb)
+                else:
+                    with Image.open(path) as im:
+                        img = im.convert("RGB").copy()
+                img.thumbnail((size, size), Image.LANCZOS)
+                self._thumb_cache[cache_key] = img
+            from PIL import ImageTk
+            photo = ImageTk.PhotoImage(img)
+            lbl = tk.Label(row, image=photo, bg=bg, width=size, height=size)
+            lbl._photo_ref = photo
+            return lbl
+        except Exception:
+            try:
+                lbl = tk.Label(row, text="▦", bg=bg, width=size // 9,
+                               height=size // 9,
+                               fg=COLORS["text_secondary"],
+                               font=(PLATFORM_FONTS["body"], 18))
+                return lbl
+            except Exception:
+                return None
 
     def _browse_output_dir(self):
         """Browse for output directory."""
@@ -6373,7 +6583,9 @@ class PhotoSApp:
             self._update_stats()
             self._push_undo(self._t("undo_cull", n=len(removed)),
                             lambda: self._restore_removed(list(removed),
-                                                          set(was_checked)))
+                                                          set(was_checked)),
+                            lambda: self._redo_remove(list(removed),
+                                                      set(was_checked)))
             status.configure(text=self._t("cull_kept", kept=len(kept),
                                           total=len(self.files)),
                              fg=COLORS["success"])
@@ -6922,6 +7134,7 @@ class PhotoSApp:
         self.cancel_requested = False
         self._batch_result = None
         self._batch_error = None
+        self._progress_started = None  # ETA baseline
 
         # Update UI to processing state
         self.start_btn.pack_forget()
@@ -6998,13 +7211,35 @@ class PhotoSApp:
             if path:
                 name = os.path.basename(path) if path else ""
                 action = self._t("tuning") if status == "tuning" else ""
+                eta = self._eta_text(current, total)
                 self.progress_label.config(
                     text=self._t("processing_item", cur=current, total=total, name=name)
                          + ("  " + action if action else "")
+                         + (eta if eta else "")
                 )
 
         # Schedule next poll
         self._after_id = self.root.after(100, self._poll_progress)
+
+    def _eta_text(self, current, total):
+        """Estimated remaining time for the running batch ("" when unsure)."""
+        if not current:
+            return ""
+        now = time.monotonic()
+        if self._progress_started is None:
+            self._progress_started = now
+        elapsed = now - self._progress_started
+        rate = current / elapsed if elapsed > 0 else 0.0
+        if rate <= 0:
+            return ""
+        remain = (total - current) / rate
+        if remain <= 0:
+            return ""
+        m, s = divmod(int(remain), 60)
+        if m >= 60:
+            h, m = divmod(m, 60)
+            return f"  · {h}:{m:02d}:{s:02d}"
+        return f"  · {m}:{s:02d} 剩余"
 
     def _on_processing_done(self, result: BatchResult):
         """Handle processing completion."""
