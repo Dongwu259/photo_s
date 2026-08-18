@@ -14,6 +14,7 @@
 | v1.5.0 | i18n + Agent 契约 + 摄影师工作流 | 全量 CLI/GUI 国际化（--language 三平台检测）、JSON 契约 schema_version 版本化 + server 加固（0600/DNS-rebinding/1MB 上限）、MCP 15→18 工具（select/hdr/blurfaces/bench/watch×3）、选片双阈值分拣、HDR 曝光融合（--align）、人脸模糊/马赛克、--preset 一键套用、批量 EXIF GPS、crop-ratio 回归 |
 | v1.5.1 | Agent 接入便利化 | 现成 SKILL.md skill 包（cp -r 即用，仅核心包）、AGENT_API.md 补 Claude Code `claude mcp add` 连接（用户/项目/uvx 变体）、README 工具数 15→18 修正 + 新工具列表补全 |
 | v1.6.0 | LR 方向调色 | `photo_s/grade.py` 11 算法（点曲线 PCHIP/手动色阶/自然饱和度/三向颜色分级/WB tint/HSL 分色/清晰度·纹理/去雾/暗角/颗粒，纯 numpy+PIL 零依赖）+ 3 个 LUT/MCP bug 修复 + 四层接线（CLI 11 flag/REST 自动/MCP 33 参数/GUI 11 控件）+ 紧凑字符串建模（REST/preset 零胶水）|
+| v1.6.1 | GUI 大增强 | Lightroom 式调色编辑器（可拖拽曲线 RGB+R/G/B/复位、3 色轮+亮度条、HSL 编辑器）+ 设置面板分类 Tab（输出/调整/效果/元数据/选项）+ 区块折叠 + 工具栏分组瘦身 + 缩略图（异步懒加载）/布局记忆/过滤框/进度 ETA/重做；color_grading 支持每区亮度 |
 
 ## 规划中
 
