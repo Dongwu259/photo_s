@@ -246,6 +246,57 @@ def _add_transform_args(parser):
         "--auto-exposure", type=float, default=argparse.SUPPRESS, metavar="0-1",
         help=_t('help___auto_exposure'),
     )
+    # Lightroom-direction grading (v1.6.0)
+    parser.add_argument(
+        "--wb-tint", type=float, default=argparse.SUPPRESS, metavar="-100-100",
+        help=_t('help___wb_tint'),
+    )
+    parser.add_argument(
+        "--levels", type=str, default=argparse.SUPPRESS,
+        metavar="BLACK,WHITE[,GAMMA]",
+        help=_t('help___levels'),
+    )
+    parser.add_argument(
+        "--curves", type=str, default=argparse.SUPPRESS,
+        metavar="CH:X,Y;X,Y[|CH:...]",
+        help=_t('help___curves'),
+    )
+    parser.add_argument(
+        "--vibrance", type=float, default=argparse.SUPPRESS, metavar="-1-1",
+        help=_t('help___vibrance'),
+    )
+    parser.add_argument(
+        "--color-grading", type=str, default=argparse.SUPPRESS,
+        metavar="ZONE:HUE,SAT;...",
+        help=_t('help___color_grading'),
+    )
+    parser.add_argument(
+        "--hsl", type=str, default=argparse.SUPPRESS,
+        metavar="COLOR:H,S,L;...",
+        help=_t('help___hsl'),
+    )
+    parser.add_argument(
+        "--clarity", type=float, default=argparse.SUPPRESS, metavar="-1-1",
+        help=_t('help___clarity'),
+    )
+    parser.add_argument(
+        "--texture", type=float, default=argparse.SUPPRESS, metavar="-1-1",
+        help=_t('help___texture'),
+    )
+    parser.add_argument(
+        "--dehaze", type=float, default=argparse.SUPPRESS, metavar="-1-1",
+        help=_t('help___dehaze'),
+    )
+    parser.add_argument(
+        "--vignette", type=str, default=argparse.SUPPRESS,
+        metavar="AMOUNT[,MID[,FEATHER]]",
+        help=_t('help___vignette'),
+    )
+    parser.add_argument(
+        "--grain", type=str, default=argparse.SUPPRESS,
+        metavar="AMOUNT[,SIZE]",
+        help=_t('help___grain'),
+    )
     parser.add_argument(
         "--log-curve", type=str, default=argparse.SUPPRESS, metavar="NAME",
         choices=["SLOG3", "CLOG3", "LOGC3", "DLOG", "VLOG", "HLG"],
@@ -510,6 +561,18 @@ def _build_process_options(parsed) -> ProcessOptions:
         gpx_trace=getattr(parsed, 'gpx_trace', None),
         blur_faces=getattr(parsed, 'blur_faces', None),
         blur_faces_margin=getattr(parsed, 'blur_faces_margin', None),
+        # Lightroom-direction grading (v1.6.0)
+        wb_tint=getattr(parsed, 'wb_tint', 0.0),
+        levels=getattr(parsed, 'levels', ""),
+        curves=getattr(parsed, 'curves', ""),
+        vibrance=getattr(parsed, 'vibrance', 0.0),
+        color_grading=getattr(parsed, 'color_grading', ""),
+        hsl=getattr(parsed, 'hsl', ""),
+        clarity=getattr(parsed, 'clarity', 0.0),
+        texture=getattr(parsed, 'texture', 0.0),
+        dehaze=getattr(parsed, 'dehaze', 0.0),
+        vignette=getattr(parsed, 'vignette', ""),
+        grain=getattr(parsed, 'grain', ""),
         jobs=_jobs,
     )
 

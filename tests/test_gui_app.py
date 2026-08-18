@@ -113,6 +113,42 @@ class TestBuildOptions:
         assert opts.auto_exposure is None and opts.gpx_trace is None
         root.destroy()
 
+    def test_grading_fields_roundtrip(self):
+        """v1.6.0 LR-grading tk.Variables map to ProcessOptions and back."""
+        root, app = _make_app()
+        app.wb_tint.set("15")
+        app.levels.set("80,200,1.1")
+        app.curves.set("0,0;128,140;255,255")
+        app.vibrance.set("0.4")
+        app.color_grading.set("shadows:120,0.3")
+        app.hsl.set("green:10,0.2,0.1")
+        app.clarity.set("0.3")
+        app.texture.set("0.2")
+        app.dehaze.set("0.5")
+        app.vignette.set("0.4,0.4,0.4")
+        app.grain.set("0.1,1.5")
+        opts = app._build_options()
+        assert opts.wb_tint == 15.0
+        assert opts.levels == "80,200,1.1"
+        assert opts.curves == "0,0;128,140;255,255"
+        assert opts.vibrance == 0.4
+        assert opts.color_grading == "shadows:120,0.3"
+        assert opts.hsl == "green:10,0.2,0.1"
+        assert opts.clarity == 0.3 and opts.texture == 0.2
+        assert opts.dehaze == 0.5
+        assert opts.vignette == "0.4,0.4,0.4"
+        assert opts.grain == "0.1,1.5"
+        # a fresh app keeps the new fields off by default
+        app2 = _make_app()[1]
+        assert app2._build_options().wb_tint == 0.0
+        assert app2._build_options().levels == ""
+        # options → UI (preset load path)
+        app2._apply_options_to_ui(opts)
+        assert app2.curves.get() == "0,0;128,140;255,255"
+        assert app2.vibrance.get() == "0.4"
+        assert app2.color_grading.get() == "shadows:120,0.3"
+        root.destroy()
+
 
 class TestFileList:
     def test_dims_cached_across_refreshes(self):

@@ -482,6 +482,30 @@ STRINGS = {
         "wb_reference": "白平衡参考图",
         "wb_reference_hint": "灰卡图路径；空 = 不采样",
         "browse_ref": "浏览…",
+        # Lightroom-direction grading (v1.6.0)
+        "sec_grading": "调色（LR 方向）",
+        "wb_tint": "白平衡 tint (绿-/品红+)",
+        "wb_tint_hint": "-100~100；空 = 关闭",
+        "levels": "手动色阶",
+        "levels_hint": "黑,白[,伽马] 如 80,200,1.1；空 = 关闭",
+        "curves": "点曲线",
+        "curves_hint": "每通道控制点 ch:x,y;x,y 如 0,0;128,140;255,255；空 = 关闭",
+        "vibrance": "自然饱和度",
+        "vibrance_hint": "-1~1；空 = 关闭",
+        "color_grading": "三向颜色分级",
+        "color_grading_hint": "zone:hue,sat 如 shadows:120,0.3；空 = 关闭",
+        "hsl": "HSL 分色",
+        "hsl_hint": "color:h,s,l 如 green:10,0.2,0.1；空 = 关闭",
+        "clarity": "清晰度",
+        "clarity_hint": "-1~1；空 = 关闭",
+        "texture": "纹理",
+        "texture_hint": "-1~1；空 = 关闭",
+        "dehaze": "去雾",
+        "dehaze_hint": "-1~1（负 = 加雾）；空 = 关闭",
+        "vignette": "暗角",
+        "vignette_hint": "amount[,mid[,feather]]；空 = 关闭",
+        "grain": "颗粒",
+        "grain_hint": "amount[,size]；空 = 关闭",
         "auto_levels": "自动色阶（直方图拉伸）",
         "srgb": "转 sRGB 色彩空间",
         "flatten_cmyk": "CMYK 转 RGB",
@@ -944,6 +968,30 @@ STRINGS = {
         "wb_reference": "WB reference image",
         "wb_reference_hint": "gray-card path; blank = no sampling",
         "browse_ref": "Browse…",
+        # Lightroom-direction grading (v1.6.0)
+        "sec_grading": "Grading (LR-direction)",
+        "wb_tint": "WB tint (green-/magenta+)",
+        "wb_tint_hint": "-100~100; blank = off",
+        "levels": "Manual levels",
+        "levels_hint": "black,white[,gamma] e.g. 80,200,1.1; blank = off",
+        "curves": "Point curves",
+        "curves_hint": "per-channel points ch:x,y;x,y e.g. 0,0;128,140;255,255; blank = off",
+        "vibrance": "Vibrance",
+        "vibrance_hint": "-1~1; blank = off",
+        "color_grading": "3-way color grading",
+        "color_grading_hint": "zone:hue,sat e.g. shadows:120,0.3; blank = off",
+        "hsl": "HSL split",
+        "hsl_hint": "color:h,s,l e.g. green:10,0.2,0.1; blank = off",
+        "clarity": "Clarity",
+        "clarity_hint": "-1~1; blank = off",
+        "texture": "Texture",
+        "texture_hint": "-1~1; blank = off",
+        "dehaze": "Dehaze",
+        "dehaze_hint": "-1~1 (negative adds haze); blank = off",
+        "vignette": "Vignette",
+        "vignette_hint": "amount[,mid[,feather]]; blank = off",
+        "grain": "Grain",
+        "grain_hint": "amount[,size]; blank = off",
         "auto_levels": "Auto levels (histogram stretch)",
         "srgb": "Convert to sRGB",
         "flatten_cmyk": "Flatten CMYK → RGB",
@@ -1396,6 +1444,18 @@ class PhotoSApp:
         # White balance / color / evaluation
         self.wb_temp = tk.StringVar(value="")
         self.wb_reference = tk.StringVar(value="")
+        # Lightroom-direction grading (v1.6.0) — blank = off
+        self.wb_tint = tk.StringVar(value="")
+        self.levels = tk.StringVar(value="")
+        self.curves = tk.StringVar(value="")
+        self.vibrance = tk.StringVar(value="")
+        self.color_grading = tk.StringVar(value="")
+        self.hsl = tk.StringVar(value="")
+        self.clarity = tk.StringVar(value="")
+        self.texture = tk.StringVar(value="")
+        self.dehaze = tk.StringVar(value="")
+        self.vignette = tk.StringVar(value="")
+        self.grain = tk.StringVar(value="")
         self.auto_levels = tk.BooleanVar(value=False)
         self.srgb = tk.BooleanVar(value=False)
         self.flatten_cmyk = tk.BooleanVar(value=False)
@@ -2560,6 +2620,38 @@ class PhotoSApp:
         self._add_checkbox(corr_frame, self._t("resume"),
                            self.resume, row=19)
 
+        # ── LR-direction grading (v1.6.0) — blank = off ──────────────────────
+        tk.Label(corr_frame, text=self._t("sec_grading"),
+                 font=FONT_SECTION, fg=COLORS["text"],
+                 bg=COLORS["card"]).grid(
+            row=20, column=0, columnspan=3, sticky="w", pady=(14, 2))
+
+        _grade_widgets = [
+            ("wb_tint", "wb_tint_hint"),
+            ("levels", "levels_hint"),
+            ("curves", "curves_hint"),
+            ("vibrance", "vibrance_hint"),
+            ("color_grading", "color_grading_hint"),
+            ("hsl", "hsl_hint"),
+            ("clarity", "clarity_hint"),
+            ("texture", "texture_hint"),
+            ("dehaze", "dehaze_hint"),
+            ("vignette", "vignette_hint"),
+            ("grain", "grain_hint"),
+        ]
+        for off, (var_key, hint_key) in enumerate(_grade_widgets):
+            r = 21 + off * 2
+            tk.Label(corr_frame, text=self._t(var_key), font=FONT_SMALL,
+                     fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+                row=r, column=0, sticky="w")
+            ttk.Entry(corr_frame, textvariable=getattr(self, var_key),
+                      font=FONT_BODY, width=8).grid(
+                row=r, column=1, sticky="w", padx=(8, 0))
+            tk.Label(corr_frame, text=self._t(hint_key),
+                     font=FONT_TINY, fg=COLORS["text_secondary"],
+                     bg=COLORS["card"]).grid(
+                row=r + 1, column=0, columnspan=3, sticky="w", pady=(0, 4))
+
         # ── Metadata section ──────────────────────────────────────────────────
         self._add_section_label(settings_frame, self._t("sec_metadata"), row=39)
         meta_frame = tk.Frame(settings_frame, bg=COLORS["card"])
@@ -3380,7 +3472,8 @@ class PhotoSApp:
             _set(getattr(self, name), getattr(opts, name), bool)
         # floats / sliders
         for name in ("brightness", "contrast", "saturation", "gamma",
-                     "sharpen", "ev"):
+                     "sharpen", "ev", "wb_tint", "vibrance", "clarity",
+                     "texture", "dehaze"):
             _set(getattr(self, name), getattr(opts, name), float)
         # strings (None → "")
         for name in ("output_dir", "prefix", "suffix", "scale_percent",
@@ -3389,7 +3482,9 @@ class PhotoSApp:
                      "log_curve", "denoise", "lut_file", "max_straighten_angle",
                      "wb_temp", "wb_reference", "print_size", "crop",
                      "crop_ratio", "rotate_bg", "flip", "pad_ratio",
-                     "pad_bg", "rename_pattern", "folder_pattern"):
+                     "pad_bg", "rename_pattern", "folder_pattern",
+                     "levels", "curves", "color_grading", "hsl",
+                     "vignette", "grain"):
             _set(getattr(self, name), getattr(opts, name), str)
         # face blur combobox stores localized labels, options store
         # "blur"/"pixelate"/None
@@ -5389,6 +5484,22 @@ class PhotoSApp:
             wb_temp=_to_float(self.wb_temp.get(), 0.0)
             if self.wb_temp.get().strip() else None,
             wb_reference=self.wb_reference.get().strip() or None,
+            wb_tint=_to_float(self.wb_tint.get(), 0.0)
+            if self.wb_tint.get().strip() else 0.0,
+            levels=self.levels.get().strip(),
+            curves=self.curves.get().strip(),
+            vibrance=_to_float(self.vibrance.get(), 0.0)
+            if self.vibrance.get().strip() else 0.0,
+            color_grading=self.color_grading.get().strip(),
+            hsl=self.hsl.get().strip(),
+            clarity=_to_float(self.clarity.get(), 0.0)
+            if self.clarity.get().strip() else 0.0,
+            texture=_to_float(self.texture.get(), 0.0)
+            if self.texture.get().strip() else 0.0,
+            dehaze=_to_float(self.dehaze.get(), 0.0)
+            if self.dehaze.get().strip() else 0.0,
+            vignette=self.vignette.get().strip(),
+            grain=self.grain.get().strip(),
             auto_levels=self.auto_levels.get(),
             srgb=self.srgb.get(),
             flatten_cmyk=self.flatten_cmyk.get(),

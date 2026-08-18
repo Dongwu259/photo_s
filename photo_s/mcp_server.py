@@ -103,6 +103,18 @@ def process_tool(
     contrast: Optional[float] = None,
     saturation: Optional[float] = None,
     auto_straighten: Optional[bool] = None,
+    # Lightroom-direction grading (v1.6.0)
+    wb_tint: Optional[float] = None,
+    levels: Optional[str] = None,
+    curves: Optional[str] = None,
+    vibrance: Optional[float] = None,
+    color_grading: Optional[str] = None,
+    hsl: Optional[str] = None,
+    clarity: Optional[float] = None,
+    texture: Optional[float] = None,
+    dehaze: Optional[float] = None,
+    vignette: Optional[str] = None,
+    grain: Optional[str] = None,
     jobs: Optional[int] = None,
     dry_run: bool = False,
     evaluate: bool = False,
@@ -127,6 +139,10 @@ def process_tool(
         "contrast": contrast, "saturation": saturation,
         "auto_straighten": auto_straighten, "jobs": jobs,
         "evaluate": evaluate,
+        "wb_tint": wb_tint, "levels": levels, "curves": curves,
+        "vibrance": vibrance, "color_grading": color_grading,
+        "hsl": hsl, "clarity": clarity, "texture": texture,
+        "dehaze": dehaze, "vignette": vignette, "grain": grain,
     }
     data = {k: v for k, v in data.items() if v is not None}
     if resize:
