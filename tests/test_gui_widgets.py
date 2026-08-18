@@ -58,6 +58,25 @@ class TestCurveEditor:
             bx, by = ed.canvas_to_data(cx, cy)
             assert abs(bx - x) < 2 and abs(by - y) < 2
 
+    def test_click_on_curve_adds_point_and_drags(self, root):
+        # Lightroom interaction: clicking the curve (not a control point)
+        # inserts a point on the curve and starts dragging it.
+        ed = CurveEditor(root)
+        assert len(ed.get_points()) == 2
+        cx, cy = ed.data_to_canvas(100, 100)  # middle of the diagonal
+        ed._on_press(type("E", (), {"x": cx, "y": cy})())
+        pts = ed.get_points()
+        assert len(pts) == 3
+        # the new point sits on the curve (diagonal → x == y) and is grabbed
+        added = [p for p in pts if 99 < p[0] < 101]
+        assert added and abs(added[0][0] - added[0][1]) < 0.5
+        assert ed._drag_idx is not None
+        # drag it off the diagonal
+        nx, ny = ed.data_to_canvas(150, 60)
+        ed._on_drag(type("E", (), {"x": nx, "y": ny})())
+        moved = [p for p in ed.get_points() if 149 < p[0] < 151]
+        assert moved and moved[0][1] < 100  # pulled off the line
+
     def test_px_falls_back_before_layout(self, root):
         # Before the canvas is mapped winfo_width()==1 — the geometry must
         # fall back to the requested size or the curve is drawn ~10px wide
@@ -147,6 +166,19 @@ class TestDialogSerializers:
             def destroy(self):
                 pass
         return _W()
+
+    def test_curve_reset_restores_identity(self, root):
+        from tests.test_gui_app import _make_app
+        _r, app = _make_app()
+        editors = {}
+        for ch in ("rgb", "r", "g", "b"):
+            ed = CurveEditor(root, channel=ch)
+            ed.set_points([(0, 0), (128, 140), (255, 255)])
+            editors[ch] = ed
+        app._reset_curves(editors)
+        for ed in editors.values():
+            assert CurveEditor.is_identity(ed.get_points())
+        _r.destroy()
 
     def test_curve_ok_sets_spec(self, root):
         from tests.test_gui_app import _make_app

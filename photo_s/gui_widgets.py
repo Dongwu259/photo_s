@@ -54,7 +54,6 @@ class CurveEditor(tk.Canvas):
         self.bind("<Button-1>", self._on_press)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
-        self.bind("<Double-Button-1>", self._on_double)
         self.bind("<Button-3>", self._on_right)
 
     # -- geometry (plain math, testable) -------------------------------------
@@ -150,7 +149,31 @@ class CurveEditor(tk.Canvas):
         return None
 
     def _on_press(self, e):
-        self._drag_idx = self._hit_index(e.x, e.y)
+        idx = self._hit_index(e.x, e.y)
+        if idx is not None:
+            self._drag_idx = idx
+            return
+        # Clicking the curve (not on a control point) adds a point there and
+        # immediately starts dragging it — the Lightroom interaction. The
+        # point snaps onto the curve at the clicked x so adding is a no-op
+        # until the user drags.
+        x, y = self.canvas_to_data(e.x, e.y)
+        x = max(1.0, min(254.0, x))
+        xs = [p[0] for p in self._points]
+        ys = [p[1] for p in self._points]
+        y = float(_monotone_cubic(xs, ys, [x])[0])
+        import bisect
+        i = bisect.bisect_left(xs, x)
+        pts = self._points
+        lo = pts[i - 1][0] + 1.0 if i > 0 else 0.0
+        hi = pts[i][0] - 1.0 if i < len(pts) else 255.0
+        x = max(lo, min(hi, x))
+        pts.insert(i, (x, y))
+        self._points = pts
+        self._drag_idx = i
+        self._render()
+        if self.on_change:
+            self.on_change(self)
 
     def _on_drag(self, e):
         if self._drag_idx is None:
@@ -172,21 +195,6 @@ class CurveEditor(tk.Canvas):
 
     def _on_release(self, e):
         self._drag_idx = None
-
-    def _on_double(self, e):
-        x, y = self.canvas_to_data(e.x, e.y)
-        for i, (px, _py) in enumerate(self._points):
-            if abs(px - x) <= 4.0:
-                self._points[i] = (px, y)
-                self._render()
-                if self.on_change:
-                    self.on_change(self)
-                return
-        self._points.append((x, y))
-        self._points.sort(key=lambda p: p[0])
-        self._render()
-        if self.on_change:
-            self.on_change(self)
 
     def _on_right(self, e):
         idx = self._hit_index(e.x, e.y)

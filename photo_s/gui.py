@@ -516,6 +516,7 @@ STRINGS = {
         "ok": "确定",
         "grade_none": "未设置",
         "grade_lum": "亮度",
+        "reset": "复位",
         "zone_shadows": "阴影",
         "zone_midtones": "中间调",
         "zone_highlights": "高光",
@@ -1026,6 +1027,7 @@ STRINGS = {
         "ok": "OK",
         "grade_none": "not set",
         "grade_lum": "Lum",
+        "reset": "Reset",
         "zone_shadows": "Shadows",
         "zone_midtones": "Midtones",
         "zone_highlights": "Highlights",
@@ -2869,6 +2871,17 @@ class PhotoSApp:
                    hover_bg=COLORS["border"], font=FONT_SMALL,
                    padx=10, pady=3, border_color=COLORS["border"]).pack(
             side="right", padx=(0, 8))
+        FlatButton(btns, text=self._t("reset"),
+                   command=lambda: self._reset_curves(editors),
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="left")
+
+    def _reset_curves(self, editors):
+        """Restore every curve channel to identity (0,0)→(255,255)."""
+        for ed in editors.values():
+            ed.set_points([(0, 0), (255, 255)])
 
     def _curve_editor_ok(self, win, editors):
         from .gui_widgets import CurveEditor
