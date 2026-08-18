@@ -227,13 +227,18 @@ def _apply_gains(img: Image.Image, gains) -> Image.Image:
 
 
 def apply_white_balance(img: Image.Image, temp: Optional[float] = None,
-                        reference: Optional[str] = None) -> Image.Image:
+                        reference: Optional[str] = None,
+                        tint: float = 0.0) -> Image.Image:
     """Correct white balance from a Kelvin temperature or a reference image.
 
     ``temp`` (Kelvin) shifts R/B so the scene light is corrected back toward
     neutral 6500K. ``reference`` (path) samples a neutral-gray area and
-    equalizes the channels. Neither → unchanged; non-RGB/L modes unchanged.
+    equalizes the channels. ``tint`` (range ~[-100, 100], 0 = none) adds a
+    green(-) / magenta(+) tilt on the G/M axis, applied on top of the temp/
+    reference gains (or alone). Neither temp nor reference nor tint →
+    unchanged; non-RGB/L modes unchanged.
     """
+    gains = None
     if reference:
         try:
             gains = _reference_gains(reference)
@@ -244,7 +249,14 @@ def apply_white_balance(img: Image.Image, temp: Optional[float] = None,
             gains = _temperature_gains(float(temp))
         except (TypeError, ValueError):
             return img
-    else:
+    if tint:
+        t = max(-1.0, min(1.0, float(tint) / 100.0))
+        gr, gg, gb = gains if gains is not None else (1.0, 1.0, 1.0)
+        # magenta(+t): R/B up, G down; green(-t): the reverse
+        gains = (gr * (1.0 + 0.35 * t),
+                 gg * (1.0 - 0.35 * t),
+                 gb * (1.0 + 0.35 * t))
+    if gains is None:
         return img
     return _apply_gains(img, gains)
 

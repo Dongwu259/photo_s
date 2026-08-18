@@ -1,0 +1,271 @@
+"""Color grading primitives (v1.6.0): levels / curves / vibrance / grading."""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import numpy as np
+import pytest
+from PIL import Image
+
+from photo_s.grade import (
+    _build_curve_lut,
+    _monotone_cubic,
+    _parse_color_grading,
+    _parse_curves,
+    _parse_levels,
+    apply_color_grading,
+    apply_curves,
+    apply_levels,
+    apply_vibrance,
+)
+
+
+class TestParseLevels:
+    def test_full(self):
+        assert _parse_levels("10,240,1.1") == (10.0, 240.0, 1.1)
+
+    def test_partial(self):
+        assert _parse_levels("10") == (10.0, 255.0, 1.0)
+        assert _parse_levels("10,240") == (10.0, 240.0, 1.0)
+
+    def test_clamping(self):
+        black, white, gamma = _parse_levels("-5,300,0.5")
+        assert black == 0.0 and white == 255.0 and gamma == 0.5
+        black, white, _ = _parse_levels("50,50,1")
+        assert white > black  # white point forced above black
+
+
+class TestApplyLevels:
+    def test_identity_is_noop(self):
+        im = Image.new("RGB", (4, 4), (100, 100, 100))
+        assert apply_levels(im) is im
+
+    def test_black_point_raises_floors(self):
+        # black=128 → anything below 128 goes to 0
+        im = Image.new("RGB", (4, 4), (64, 64, 64))
+        out = apply_levels(im, black=128)
+        assert out.getpixel((0, 0)) == (0, 0, 0)
+
+    def test_white_point_raises_ceiling(self):
+        im = Image.new("RGB", (4, 4), (192, 192, 192))
+        out = apply_levels(im, white=128)
+        assert out.getpixel((0, 0)) == (255, 255, 255)
+
+    def test_gamma_midpoint(self):
+        im = Image.new("RGB", (4, 4), (128, 128, 128))
+        # convention matches _final_tone: out = in**(1/gamma) → gamma<1 darkens
+        out = apply_levels(im, gamma=0.5)
+        assert out.getpixel((0, 0))[0] < 128
+
+    def test_alpha_preserved(self):
+        im = Image.new("RGBA", (4, 4), (100, 100, 100, 200))
+        out = apply_levels(im, black=64)
+        assert out.mode == "RGBA"
+        assert out.getpixel((0, 0))[3] == 200
+
+    def test_info_preserved(self):
+        im = Image.new("RGB", (4, 4), (100, 100, 100))
+        im.info["exif"] = b"mock"
+        out = apply_levels(im, gamma=1.2)
+        assert out.info.get("exif") == b"mock"
+
+
+class TestCurves:
+    def test_parse_rgb_default(self):
+        assert _parse_curves("0,0;128,140;255,255") == {
+            "rgb": [(0.0, 0.0), (128.0, 140.0), (255.0, 255.0)]}
+
+    def test_parse_channels(self):
+        got = _parse_curves("r:0,0;255,255|g:0,0;128,120;255,255")
+        assert set(got) == {"r", "g"}
+
+    def test_parse_bad_channel(self):
+        with pytest.raises(ValueError):
+            _parse_curves("x:0,0;255,255")
+
+    def test_monotone_cubic_is_monotone(self):
+        xs = [0, 64, 128, 192, 255]
+        ys = [0, 60, 130, 200, 255]
+        xq = np.linspace(0, 255, 300)
+        out = _monotone_cubic(xs, ys, xq)
+        assert np.all(np.diff(out) >= -1e-6)  # never decreases
+
+    def test_build_lut_endpoints(self):
+        lut = _build_curve_lut([(0, 0), (255, 255)])
+        assert lut[0] == 0 and lut[255] == 255
+        assert lut == list(range(256))  # identity
+
+    def test_apply_darkens(self):
+        im = Image.new("RGB", (8, 8), (200, 200, 200))
+        # a curve pulling the top of the range down
+        out = apply_curves(im, {"rgb": [(0, 0), (128, 128), (255, 160)]})
+        px = out.getpixel((0, 0))
+        assert 128 < px[0] < 200  # darkened, and monotone (below the endpoint)
+
+    def test_apply_per_channel(self):
+        im = Image.new("RGB", (8, 8), (100, 200, 100))
+        # only R: linear inverse (0,255)→(255,0) maps 100 → 155; G/B identity
+        out = apply_curves(im, {"r": [(0, 255), (255, 0)]})
+        r, g, b = out.getpixel((0, 0))
+        assert r == 155 and g == 200 and b == 100
+
+    def test_alpha_preserved(self):
+        im = Image.new("RGBA", (8, 8), (100, 200, 100, 180))
+        out = apply_curves(im, {"r": [(0, 255), (255, 0)]})
+        assert out.mode == "RGBA"
+        assert out.getpixel((0, 0))[3] == 180
+
+    def test_info_preserved(self):
+        im = Image.new("RGB", (8, 8), (100, 200, 100))
+        im.info["icc_profile"] = b"mock"
+        out = apply_curves(im, {"r": [(0, 255), (255, 0)]})
+        assert out.info.get("icc_profile") == b"mock"
+
+    def test_empty_is_noop(self):
+        im = Image.new("RGB", (4, 4), (50, 100, 150))
+        assert apply_curves(im, {}) is im
+
+
+class TestVibrance:
+    def test_zero_noop(self):
+        im = Image.new("RGB", (4, 4), (50, 100, 150))
+        assert apply_vibrance(im, 0.0) is im
+
+    def test_boost_muted_more_than_saturated(self):
+        muted = np.zeros((1, 1, 3), dtype=np.float32)
+        muted[0, 0] = (0.5, 0.5, 0.6)      # low saturation
+        saturated = np.zeros((1, 1, 3), dtype=np.float32)
+        saturated[0, 0] = (0.2, 0.1, 0.9)  # high saturation
+        _sat = lambda arr: (arr.max() - arr.min()) / max(arr.max(), 1e-9)
+        im_m = Image.fromarray((muted * 255).astype(np.uint8), "RGB")
+        im_s = Image.fromarray((saturated * 255).astype(np.uint8), "RGB")
+        m_out = apply_vibrance(im_m, 0.8)
+        s_out = apply_vibrance(im_s, 0.8)
+        m_arr = np.asarray(m_out, dtype=np.float32) / 255.0
+        s_arr = np.asarray(s_out, dtype=np.float32) / 255.0
+        # muted pixel gains relatively more saturation than the saturated one
+        assert (_sat(m_arr[0, 0]) - _sat(muted[0, 0])) > (
+            _sat(s_arr[0, 0]) - _sat(saturated[0, 0]))
+
+    def test_negative_softens(self):
+        im = Image.new("RGB", (4, 4), (200, 50, 50))
+        out = apply_vibrance(im, -0.5)
+        r, g, b = out.getpixel((0, 0))
+        # desaturated → channels closer together
+        assert (r - g) < 150
+
+    def test_alpha_and_info(self):
+        im = Image.new("RGBA", (8, 8), (200, 50, 50, 160))
+        im.info["exif"] = b"mock"
+        out = apply_vibrance(im, 0.5)
+        assert out.mode == "RGBA"
+        assert out.getpixel((0, 0))[3] == 160
+        assert out.info.get("exif") == b"mock"
+
+
+class TestColorGrading:
+    def test_parse(self):
+        got = _parse_color_grading("shadows:10,0.3;highlights:-5,0.2")
+        assert got["shadows"] == (10.0, 0.3)
+        assert got["highlights"] == (-5.0, 0.2)
+
+    def test_parse_bad_zone(self):
+        with pytest.raises(ValueError):
+            _parse_color_grading("mids:10,0.3")
+
+    def test_none_noop(self):
+        im = Image.new("RGB", (4, 4), (100, 100, 100))
+        assert apply_color_grading(im) is im
+
+    def test_shadow_tint_pulls_dark_pixels(self):
+        # dark neutral gray — hue 0; target hue 120 (green) with strength 1
+        im = Image.new("RGB", (8, 8), (40, 40, 40))
+        out = apply_color_grading(im, shadows=(120, 1.0))
+        r, g, b = out.getpixel((0, 0))
+        # green channel should dominate after a strong green pull
+        assert g > r and g > b
+
+    def test_highlight_tint_leaves_shadows(self):
+        im = Image.new("RGB", (8, 8), (10, 10, 10))  # pure shadow
+        out = apply_color_grading(im, highlights=(0, 0.8))  # red pull
+        r, g, b = out.getpixel((0, 0))
+        # shadows masked ~0 → pixels barely change
+        assert abs(r - 10) <= 12 and abs(g - 10) <= 12
+
+    def test_alpha_and_info(self):
+        im = Image.new("RGBA", (8, 8), (40, 40, 40, 150))
+        im.info["icc_profile"] = b"mock"
+        out = apply_color_grading(im, shadows=(120, 0.5))
+        assert out.mode == "RGBA"
+        assert out.getpixel((0, 0))[3] == 150
+        assert out.info.get("icc_profile") == b"mock"
+
+
+class TestEngineSlot:
+    """New grading options flow through the pipeline and keep EXIF."""
+
+    def _run(self, tmp_path, **kwargs):
+        from photo_s.engine import ProcessOptions, batch_process
+        src = tmp_path / "in.jpg"
+        Image.new("RGB", (16, 16), (120, 80, 40)).save(src)
+        out = tmp_path / "out"
+        opts = ProcessOptions(
+            output_dir=str(out), overwrite=True, output_format="JPEG",
+            suffix="", quality=90, **kwargs)
+        return batch_process([str(src)], opts), out
+
+    def test_levels(self, tmp_path):
+        r, out = self._run(tmp_path, levels="80,200,1.0")
+        assert r.success_count == 1 and (out / "in.jpg").exists()
+
+    def test_curves(self, tmp_path):
+        r, out = self._run(tmp_path, curves="0,0;128,140;255,255")
+        assert r.success_count == 1 and (out / "in.jpg").exists()
+
+    def test_vibrance(self, tmp_path):
+        r, out = self._run(tmp_path, vibrance=0.5)
+        assert r.success_count == 1 and (out / "in.jpg").exists()
+
+    def test_wb_tint(self, tmp_path):
+        r, out = self._run(tmp_path, wb_temp=6500, wb_tint=20)
+        assert r.success_count == 1 and (out / "in.jpg").exists()
+
+    def test_color_grading(self, tmp_path):
+        r, out = self._run(tmp_path, color_grading="shadows:120,0.4;highlights:-10,0.2")
+        assert r.success_count == 1 and (out / "in.jpg").exists()
+
+    def test_keeps_exif_through_grading(self, tmp_path):
+        import piexif
+        from photo_s.engine import (ProcessOptions, apply_exif_tags,
+                                    batch_process)
+        src = tmp_path / "in.jpg"
+        Image.new("RGB", (16, 16), (120, 80, 40)).save(src)
+        assert apply_exif_tags(str(src), {"artist": "Me"})
+        out = tmp_path / "out"
+        r = batch_process(
+            [str(src)],
+            ProcessOptions(output_dir=str(out), overwrite=True,
+                           output_format="JPEG", suffix="", quality=90,
+                           levels="80,200,1.0", vibrance=0.4,
+                           color_grading="shadows:120,0.3"),
+        )
+        assert r.success_count == 1
+        exif = piexif.load(str(out / "in.jpg"))
+        artist = exif.get("0th", {}).get(piexif.ImageIFD.Artist)
+        assert artist is not None and artist.decode(errors="replace") == "Me"
+
+    def test_bad_curves_is_per_file_error(self, tmp_path):
+        from photo_s.engine import ProcessOptions, batch_process
+        src = tmp_path / "in.jpg"
+        Image.new("RGB", (8, 8), (50, 100, 150)).save(src)
+        r = batch_process(
+            [str(src)],
+            ProcessOptions(output_dir=str(tmp_path / "o"), overwrite=True,
+                           output_format="JPEG", suffix="",
+                           curves="x:0,0;255,255"),
+        )
+        # invalid spec must not abort the batch; the file fails per-file
+        assert r.fail_count == 1
+        assert r.results[0].success is False
+        assert "curve" in r.results[0].error.lower()

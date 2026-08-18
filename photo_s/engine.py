@@ -176,6 +176,13 @@ class ProcessOptions:
     auto_levels: bool = False      # auto histogram stretch (2% clip)
     ev: Optional[float] = None     # exposure compensation in stops (2^EV gain)
     auto_exposure: Optional[float] = None  # normalize mean luminance to target (0-1)
+    # Lightroom-direction grading (v1.6.0). Compact string/scalar fields so
+    # REST (_scalar_groups) / MCP / CLI / preset inherit them without glue.
+    wb_tint: float = 0.0        # green(-)/magenta(+) G-M axis, ~[-100, 100]
+    levels: str = ""            # manual levels "black,white[,gamma]"
+    curves: str = ""            # point curves "ch:x,y;x,y|ch:..."
+    vibrance: float = 0.0       # natural saturation [-1, 1], 0 = off
+    color_grading: str = ""     # 3-way "zone:hue,sat;zone:hue,sat"
     lut_file: Optional[str] = None  # .cube 3D/1D LUT color grade (provider or built-in)
     log_curve: Optional[str] = None  # LOG recovery curve name (SLOG3, CLOG3, ...)
     denoise: Optional[float] = None  # denoise strength; SCUNet plugin provider
@@ -1034,13 +1041,34 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
                 from .lut import apply_lut
                 img = apply_lut(img, options.lut_file)
 
-        # ── White balance (Kelvin or reference image) ────────────────────────
+        # ── White balance (Kelvin / reference image / G-M tint) ─────────────
         img = apply_white_balance(
-            img, temp=options.wb_temp, reference=options.wb_reference)
+            img, temp=options.wb_temp, reference=options.wb_reference,
+            tint=options.wb_tint)
 
         # ── Exposure: EV compensation + auto-exposure normalization ─────────
         img = apply_exposure(img, ev=options.ev,
                              auto_exposure=options.auto_exposure)
+
+        # ── Lightroom-direction grading (v1.6.0) ────────────────────────────
+        # Manual levels → point curves → vibrance → 3-way color grading,
+        # inserted after WB/exposure (LR reference order) and before denoise.
+        # The existing tone/LUT steps stay in place (backward compatibility).
+        if options.levels:
+            from .grade import apply_levels, _parse_levels
+            img = apply_levels(img, *_parse_levels(options.levels))
+        if options.curves:
+            from .grade import apply_curves, _parse_curves
+            img = apply_curves(img, _parse_curves(options.curves))
+        if options.vibrance:
+            from .grade import apply_vibrance
+            img = apply_vibrance(img, options.vibrance)
+        if options.color_grading:
+            from .grade import apply_color_grading, _parse_color_grading
+            z = _parse_color_grading(options.color_grading)
+            img = apply_color_grading(
+                img, shadows=z.get("shadows"), midtones=z.get("midtones"),
+                highlights=z.get("highlights"))
 
         # ── Denoise (SCUNet plugin provider preferred, else opencv NLM) ─────
         if options.denoise:

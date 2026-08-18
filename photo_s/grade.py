@@ -1,0 +1,349 @@
+"""Color grading primitives (Lightroom-direction batch adjustments).
+
+P0 set from the LensPilot backend survey: manual levels, point curves,
+vibrance, and 3-way color grading. Pure numpy + PIL — no optional deps.
+
+Conventions (match ``adjust.py`` / ``lut.py``):
+* every function returns a new Image and never mutates the input;
+* ``img.info`` (EXIF/ICC/DPI) is copied onto the result — the fromarray /
+  merge / point paths build fresh images that would otherwise drop metadata
+  (same regression class as the LUT info bug);
+* alpha is preserved on RGBA inputs;
+* the engine-facing options are compact strings (``levels="10,240,1.1"``),
+  parsed here by the ``_parse_*`` helpers so REST/MCP/CLI/preset inherit the
+  fields with zero hand-wired glue.
+"""
+
+import numpy as np
+from PIL import Image
+
+__all__ = [
+    "_parse_levels", "apply_levels",
+    "_parse_curves", "apply_curves",
+    "apply_vibrance",
+    "_parse_color_grading", "apply_color_grading",
+]
+
+
+# ── Manual levels ────────────────────────────────────────────────────────────
+
+def _parse_levels(s: str):
+    """Parse ``"black,white[,gamma]"`` (e.g. ``"10,240,1.1"``).
+
+    Missing fields fall back to identity (0 / 255 / 1.0). Returns
+    ``(black, white, gamma)`` floats in 0..255 / 0..255 / >0.
+    """
+    parts = [p.strip() for p in s.split(",")]
+    black = float(parts[0]) if len(parts) > 0 and parts[0] else 0.0
+    white = float(parts[1]) if len(parts) > 1 and parts[1] else 255.0
+    gamma = float(parts[2]) if len(parts) > 2 and parts[2] else 1.0
+    black = max(0.0, min(255.0, black))
+    white = max(black + 1.0, min(255.0, white))
+    gamma = max(0.1, min(8.0, gamma)) if gamma else 1.0
+    return black, white, gamma
+
+
+def apply_levels(img: Image.Image, black: float = 0.0, white: float = 255.0,
+                 gamma: float = 1.0) -> Image.Image:
+    """Manual levels: black/white-point remap + midtone gamma (three-point).
+
+    ``out = ((in - black) / (white - black)) ** (1/gamma) * 255``, clipped.
+    Built as a 256-entry LUT so it is one pass per band and keeps alpha.
+    """
+    if (black <= 0.0 and white >= 255.0 and gamma == 1.0):
+        return img
+    if img.mode not in ("RGB", "RGBA", "L"):
+        img = img.convert("RGBA")
+    black, white, gamma = _parse_levels(f"{black},{white},{gamma}")
+    span = white - black
+    inv = 1.0 / gamma
+    table = []
+    for v in range(256):
+        t = 0.0 if v <= black else (1.0 if v >= white
+                                    else (v - black) / span)
+        table.append(int(round(255 * (t ** inv))))
+    if img.mode == "RGBA":
+        out = img.point(table * 3 + list(range(256)))  # alpha untouched
+    elif img.mode == "L":
+        out = img.point(table)
+    else:
+        out = img.point(table * 3)
+    out.info = img.info.copy()
+    return out
+
+
+# ── Point curves (PCHIP monotone cubic) ─────────────────────────────────────
+
+def _monotone_cubic(xs, ys, xq):
+    """Monotone cubic Hermite (PCHIP / Fritsch–Carlson) interpolation.
+
+    Returns y at query points ``xq``. ``xs`` must be strictly increasing,
+    len >= 2; the interpolant is monotone between the control points, so a
+    user curve can never overshoot (unlike a plain cubic or B-spline).
+    """
+    xs = np.asarray(xs, dtype=np.float64)
+    ys = np.asarray(ys, dtype=np.float64)
+    xq = np.asarray(xq, dtype=np.float64)
+    n = len(xs)
+    dx = np.diff(xs)
+    dy = np.diff(ys)
+    m = np.zeros(n)
+    if n == 2:  # linear
+        slope = dy[0] / dx[0]
+        m[:] = slope
+    else:
+        m[1:-1] = 0.5 * (dy[:-1] / dx[:-1] + dy[1:] / dx[1:])
+        for i in range(1, n - 1):  # enforce monotonicity
+            if dy[i - 1] * dy[i] <= 0:
+                m[i] = 0.0
+            else:
+                a, b = dy[i - 1] / dx[i - 1], dy[i] / dx[i]
+                w1, w2 = 2.0 * dx[i] + dx[i - 1], dx[i] + 2.0 * dx[i - 1]
+                denom = w1 / a + w2 / b
+                m[i] = (w1 + w2) / denom if denom else 0.0
+        m[0] = dy[0] / dx[0]
+        m[-1] = dy[-1] / dx[-1]
+    xq_c = np.clip(xq, xs[0], xs[-1])
+    out = np.empty_like(xq_c)
+    idxs = np.clip(np.searchsorted(xs, xq_c) - 1, 0, n - 2)
+    for k in range(len(xq_c)):
+        i = int(idxs[k])
+        h = dx[i]
+        t = (xq_c[k] - xs[i]) / h
+        h00 = (1.0 + 2.0 * t) * (1.0 - t) ** 2
+        h10 = t * (1.0 - t) ** 2
+        h01 = t * t * (3.0 - 2.0 * t)
+        h11 = t * t * (t - 1.0)
+        out[k] = (h00 * ys[i] + h10 * h * m[i]
+                  + h01 * ys[i + 1] + h11 * h * m[i + 1])
+    return np.clip(out, 0.0, 255.0)
+
+
+def _build_curve_lut(points) -> list:
+    """256-entry LUT from control points ``[(x, y), ...]`` (x, y in 0..255)."""
+    pts = sorted((float(x), float(y)) for x, y in points)
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    if xs[0] > 0.0:  # pad to the full 0..255 domain
+        xs = [0.0] + xs
+        ys = [ys[0]] + ys
+    if xs[-1] < 255.0:
+        xs = xs + [255.0]
+        ys = ys + [ys[-1]]
+    xq = np.linspace(0.0, 255.0, 256)
+    return [int(round(v)) for v in _monotone_cubic(xs, ys, xq)]
+
+
+def _parse_curves(s: str) -> dict:
+    """Parse a curves spec into ``{channel: [(x, y), ...]}``.
+
+    Format: pipe-separated channel segments, each ``channel:x,y;x,y;...``
+    with channel ∈ ``rgb|r|g|b``. The first segment may omit the channel
+    prefix (defaults to ``rgb``). Example:
+    ``"0,0;128,140;255,255"`` or ``"r:0,0;128,140;255,255|b:0,0;128,120;255,255"``.
+    """
+    out: dict = {}
+    for seg in s.split("|"):
+        seg = seg.strip()
+        if not seg:
+            continue
+        if ":" in seg:
+            ch, pts = seg.split(":", 1)
+            ch = ch.strip().lower()
+        else:
+            ch, pts = "rgb", seg
+        if ch not in ("rgb", "r", "g", "b"):
+            raise ValueError(
+                f"unknown curve channel {ch!r} (expected rgb/r/g/b)")
+        points = []
+        for tok in pts.split(";"):
+            tok = tok.strip()
+            if not tok:
+                continue
+            x, y = tok.split(",")
+            points.append((float(x), float(y)))
+        if len(points) >= 2:
+            out[ch] = points
+    return out
+
+
+def apply_curves(img: Image.Image, channel_points: dict) -> Image.Image:
+    """Apply per-channel point curves (PCHIP monotone spline → 256 LUT).
+
+    ``channel_points`` maps ``"rgb"|"r"|"g"|"b"`` → control points. An
+    ``"rgb"`` entry sets the base curve for all bands; per-channel entries
+    override that band. Unlisted bands stay identity.
+    """
+    if not channel_points:
+        return img
+    if img.mode not in ("RGB", "RGBA", "L"):
+        img = img.convert("RGBA")
+    luts = {"r": list(range(256)), "g": list(range(256)), "b": list(range(256))}
+    if "rgb" in channel_points:
+        base = _build_curve_lut(channel_points["rgb"])
+        luts = {"r": base, "g": base, "b": base}
+    for ch in ("r", "g", "b"):
+        if ch in channel_points:
+            luts[ch] = _build_curve_lut(channel_points[ch])
+    if img.mode == "L":
+        out = img.point(luts["r"])  # single band → the rgb/base curve
+    else:
+        alpha = img.getchannel("A") if img.mode == "RGBA" else None
+        r, g, b = img.convert("RGB").split()
+        out = Image.merge("RGB", (r.point(luts["r"]), g.point(luts["g"]),
+                                  b.point(luts["b"])))
+        if alpha is not None:
+            out.putalpha(alpha)
+    out.info = img.info.copy()
+    return out
+
+
+# ── Vibrance (natural saturation) ───────────────────────────────────────────
+
+def _to_hsv(rgb: np.ndarray):
+    """RGB float [0,1] array → (hue[0,1), sat[0,1], val[0,1]) arrays."""
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    mx = np.maximum(np.maximum(r, g), b)
+    mn = np.minimum(np.minimum(r, g), b)
+    delta = mx - mn
+    sat = np.where(mx > 0, delta / np.maximum(mx, 1e-9), 0.0)
+    d = np.maximum(delta, 1e-9)
+    hue = np.zeros_like(mx)
+    sel = mx == r
+    hue[sel] = np.mod((g - b) / d, 6.0)[sel]
+    sel = mx == g
+    hue[sel] = ((b - r) / d + 2.0)[sel]
+    sel = mx == b
+    hue[sel] = ((r - g) / d + 4.0)[sel]
+    hue = np.mod(hue, 6.0) / 6.0
+    return hue, sat, mx  # mx == value
+
+
+def _from_hsv(hue, sat, val) -> np.ndarray:
+    """HSV arrays → RGB float [0,1] array."""
+    h6 = hue * 6.0
+    sector = np.floor(h6).astype(np.int32)
+    f = h6 - sector
+    c = val * sat
+    x = c * (1.0 - np.abs(np.mod(sector.astype(np.float64), 2.0) + f - 1.0))
+    m = val - c
+    z = np.zeros_like(c)
+    R = np.choose(sector, [c, x, z, z, x, c]) + m
+    G = np.choose(sector, [x, c, c, x, z, z]) + m
+    B = np.choose(sector, [z, z, x, c, c, x]) + m
+    return np.stack([R, G, B], axis=-1)
+
+
+def _normalize_grade_input(img: Image.Image):
+    """→ (rgb_float_array, alpha_or_None). Never mutates the input."""
+    if img.mode not in ("RGB", "RGBA", "L"):
+        img = img.convert("RGBA")
+    alpha = img.getchannel("A") if img.mode == "RGBA" else None
+    arr = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
+    return arr, alpha
+
+
+def _finish_grade(img: Image.Image, arr, alpha):
+    """Float [0,1] RGB array → new RGB(A) image with info + alpha preserved."""
+    out = Image.fromarray(np.clip(arr * 255.0, 0, 255).astype(np.uint8), "RGB")
+    if alpha is not None:
+        out.putalpha(alpha)
+    out.info = img.info.copy()
+    return out
+
+
+def apply_vibrance(img: Image.Image, amount: float = 0.0) -> Image.Image:
+    """Natural saturation: boost/soften inversely weighted by current sat.
+
+    Muted colors get the most change; deep/skin colors are left alone —
+    unlike a global saturation multiply. ``amount > 0`` boosts (→1),
+    ``amount < 0`` softens (× (1+amount)), 0 = no change. Clamped to [-1, 1].
+    """
+    amount = max(-1.0, min(1.0, float(amount or 0.0)))
+    if abs(amount) < 1e-4:
+        return img
+    arr, alpha = _normalize_grade_input(img)
+    hue, sat, val = _to_hsv(arr)
+    new_sat = sat + (1.0 - sat) * amount if amount > 0 \
+        else sat * (1.0 + amount)
+    new_sat = np.clip(new_sat, 0.0, 1.0)
+    out_arr = _from_hsv(hue, new_sat, val)
+    return _finish_grade(img, out_arr, alpha)
+
+
+# ── 3-way color grading ─────────────────────────────────────────────────────
+
+def _parse_color_grading(s: str) -> dict:
+    """Parse ``"zone:hue,sat;zone:hue,sat"`` into ``{zone: (hue, sat)}``.
+
+    zone ∈ shadows|midtones|highlights; hue ∈ [-180, 180] target hue for the
+    zone; sat ∈ [-1, 1] tint strength (sign drives the hue-pull direction,
+    magnitude drives both the pull amount and the saturation shift).
+    """
+    zones: dict = {}
+    for seg in s.split(";"):
+        seg = seg.strip()
+        if not seg:
+            continue
+        if ":" not in seg:
+            raise ValueError(
+                f"color_grading segment {seg!r} must be 'zone:hue,sat'")
+        zone, rest = seg.split(":", 1)
+        zone = zone.strip().lower()
+        if zone not in ("shadows", "midtones", "highlights"):
+            raise ValueError(
+                f"unknown color grading zone {zone!r} "
+                f"(shadows/midtones/highlights)")
+        h, sat = rest.split(",")
+        zones[zone] = (float(h), float(sat))
+    return zones
+
+
+def _zone_mask(zone: str, val: np.ndarray) -> np.ndarray:
+    """Smooth luminance mask for a zone (smoothstep edges, no banding)."""
+    if zone == "shadows":
+        return 1.0 - _smoothstep(0.25, 0.5, val)
+    if zone == "highlights":
+        return _smoothstep(0.5, 0.75, val)
+    # midtones: bell centred on 0.5
+    return np.exp(-((val - 0.5) ** 2) / (2.0 * 0.18 ** 2))
+
+
+def _smoothstep(e0: float, e1: float, x) -> np.ndarray:
+    t = np.clip((x - e0) / (e1 - e0), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def apply_color_grading(img: Image.Image, shadows=None, midtones=None,
+                        highlights=None) -> Image.Image:
+    """3-way color grading: hue-pull + saturation tint per luminance zone.
+
+    Each zone is ``(hue_deg, sat)``: the zone's hues are pulled toward
+    ``hue_deg`` by ``|sat|`` of the way, and its saturation is shifted by
+    ``sat`` (positive boosts, negative desaturates), all masked by a smooth
+    luminance mask so zone boundaries don't band. ``None`` = zone untouched.
+    """
+    zones = {"shadows": shadows, "midtones": midtones, "highlights": highlights}
+    if not any(z is not None for z in zones.values()):
+        return img
+    arr, alpha = _normalize_grade_input(img)
+    hue, sat, val = _to_hsv(arr)
+    hue_shift = np.zeros_like(hue)
+    sat_shift = np.zeros_like(sat)
+    for zone, zval in zones.items():
+        if zval is None:
+            continue
+        hue_deg, sat_strength = zval
+        strength = max(-1.0, min(1.0, float(sat_strength)))
+        if abs(strength) < 1e-4:
+            continue
+        target = ((float(hue_deg) % 360.0) / 360.0) % 1.0
+        mask = _zone_mask(zone, val)
+        # signed shortest angular distance to the target hue
+        delta = ((target - hue + 0.5) % 1.0) - 0.5
+        hue_shift += delta * abs(strength) * mask
+        sat_shift += strength * mask
+    new_hue = np.mod(hue + hue_shift, 1.0)
+    new_sat = np.clip(sat + sat_shift, 0.0, 1.0)
+    out_arr = _from_hsv(new_hue, new_sat, val)
+    return _finish_grade(img, out_arr, alpha)
