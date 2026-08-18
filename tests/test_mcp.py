@@ -66,6 +66,24 @@ class TestProcessTool:
                               "output_dir": str(out)})
         assert r["results"][0]["output_dims"] == [4, 4]
 
+    def test_tone_and_lut_params(self, tmp_path):
+        # Regression: process_tool's hand-maintained param list was missing
+        # lut_file/brightness/contrast/saturation, so agents couldn't grade
+        # via natural language (v1.6.0 bug fix).
+        a = _img(tmp_path / "a.jpg")
+        out = tmp_path / "out"
+        cube = tmp_path / "id.cube"
+        cube.write_text(
+            "LUT_3D_SIZE 2\n"
+            "0 0 0\n0 0 0\n0 0 0\n0 0 0\n"
+            "0 0 0\n0 0 0\n0 0 0\n1 1 1\n")
+        r = _call("process", {"paths": [a], "output_dir": str(out),
+                              "brightness": 1.2, "contrast": 1.1,
+                              "saturation": 1.3, "lut_file": str(cube)})
+        assert r["ok"] is True
+        assert r["summary"]["success"] == 1
+        assert os.path.isfile(r["results"][0]["output"])
+
     def test_dry_run_no_output(self, tmp_path):
         a = _img(tmp_path / "a.jpg")
         out = tmp_path / "out"

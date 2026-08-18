@@ -166,3 +166,63 @@ class TestApply1dMultiMode:
         for mode, color in [("I;16", 1000), ("F", 0.5), ("1", 1)]:
             out = apply_lut(Image.new(mode, (8, 8), color), cube)
             assert out.mode == "RGB"
+
+
+class TestMetadataPreservation:
+    """Regression: LUT-applied deliveries must keep img.info (EXIF/ICC/DPI).
+
+    The 1D and 3D apply paths build fresh images (merge/point/fromarray)
+    which drop img.info — so --lut output lost copyright/shooting EXIF
+    (v1.6.0 bug fix: apply_lut re-attaches img.info on the result).
+    """
+
+    def test_3d_preserves_info(self, tmp_path):
+        p = tmp_path / "id.cube"
+        _write_cube(p, size=17)
+        im = Image.new("RGB", (8, 8), (100, 150, 200))
+        im.info["exif"] = b"mock-exif-bytes"
+        im.info["dpi"] = (300, 300)
+        out = apply_lut(im, str(p))
+        assert out.info.get("exif") == b"mock-exif-bytes"
+        assert out.info.get("dpi") == (300, 300)
+
+    def test_1d_preserves_info(self, tmp_path):
+        p = tmp_path / "d.cube"
+        _write_cube_1d(p)
+        im = Image.new("RGB", (4, 4), (100, 100, 100))
+        im.info["icc_profile"] = b"mock-icc"
+        out = apply_lut(im, str(p))
+        assert out.info.get("icc_profile") == b"mock-icc"
+
+    def test_3d_preserves_alpha(self, tmp_path):
+        # 1D RGBA is covered by test_rgba_keeps_alpha; the 3D path converted
+        # to RGB and silently dropped alpha (v1.6.0 bug fix).
+        p = tmp_path / "id.cube"
+        _write_cube(p, size=17)
+        im = Image.new("RGBA", (8, 8), (100, 150, 200, 200))
+        out = apply_lut(im, str(p))
+        assert out.mode == "RGBA"
+        assert out.getpixel((0, 0))[3] == 200
+
+    def test_engine_keeps_exif_through_lut(self, tmp_path):
+        # End-to-end: a --lut batch output must still carry the EXIF the
+        # engine writes (regression for grade_keepers deliveries — LUT used
+        # to drop img.info, so copyright/shooting EXIF vanished).
+        import piexif
+        from photo_s.engine import ProcessOptions, apply_exif_tags, batch_process
+        p = tmp_path / "id.cube"
+        _write_cube(p, size=17)
+        src = tmp_path / "in.jpg"
+        Image.new("RGB", (16, 16), (120, 80, 40)).save(src)
+        assert apply_exif_tags(str(src), {"artist": "Me"})
+        out_dir = tmp_path / "out"
+        result = batch_process(
+            [str(src)],
+            ProcessOptions(output_dir=str(out_dir), overwrite=True,
+                           output_format="JPEG", lut_file=str(p), suffix="",
+                           quality=90),
+        )
+        assert result.success_count == 1
+        out_exif = piexif.load(str(out_dir / "in.jpg"))
+        artist = out_exif.get("0th", {}).get(piexif.ImageIFD.Artist)
+        assert artist is not None and artist.decode(errors="replace") == "Me"

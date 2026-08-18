@@ -122,6 +122,10 @@ def _apply_1d(img, table):
 def _apply_3d(img, table):
     """Apply a 3D LUT with trilinear interpolation, chunked by rows."""
     n = table.shape[0]
+    alpha = None
+    if img.mode == "RGBA":
+        alpha = img.getchannel("A")
+        img = img.convert("RGB")
     arr = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
     h, w = arr.shape[:2]
 
@@ -155,16 +159,27 @@ def _apply_3d(img, table):
     for start in range(0, h, _CHUNK_ROWS):
         end = min(start + _CHUNK_ROWS, h)
         out[start:end] = np.clip(_apply_chunk(arr[start:end]), 0.0, 1.0)
-    return Image.fromarray((out * 255).astype(np.uint8), "RGB")
+    result = Image.fromarray((out * 255).astype(np.uint8), "RGB")
+    if alpha is not None:
+        result.putalpha(alpha)
+    return result
 
 
 def apply_lut(img, path):
     """Load a .cube LUT from ``path`` and apply it to ``img``.
 
-    Returns a new RGB image. Raises ``LutError`` for unreadable/malformed
+    Returns a new RGB(A) image. Raises ``LutError`` for unreadable/malformed
     files (handled by the engine as a per-file error).
+
+    ``img.info`` (EXIF / ICC / DPI) is copied onto the result: the trilinear
+    and 1D paths build fresh images via fromarray/merge/point, which would
+    otherwise drop metadata and LUT-graded deliveries would lose copyright /
+    shooting EXIF (v1.6.0 regression fix).
     """
     kind, _size, table = load_cube(path)
     if kind == "1d":
-        return _apply_1d(img, table)
-    return _apply_3d(img, table)
+        out = _apply_1d(img, table)
+    else:
+        out = _apply_3d(img, table)
+    out.info = img.info.copy()
+    return out
