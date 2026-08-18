@@ -506,6 +506,29 @@ STRINGS = {
         "vignette_hint": "amount[,mid[,feather]]；空 = 关闭",
         "grain": "颗粒",
         "grain_hint": "amount[,size]；空 = 关闭",
+        # interactive editors (v1.6.x)
+        "edit_curves": "编辑曲线…",
+        "edit_wheels": "色轮…",
+        "edit_hsl": "HSL…",
+        "dlt_curves": "曲线编辑器（拖拽控制点，双击加点，右键删点）",
+        "dlt_wheels": "颜色分级（点击/拖拽选色）",
+        "dlt_hsl": "HSL 分色（点色块，再拖滑块）",
+        "ok": "确定",
+        "grade_none": "未设置",
+        "zone_shadows": "阴影",
+        "zone_midtones": "中间调",
+        "zone_highlights": "高光",
+        "hsl_red": "红色",
+        "hsl_orange": "橙色",
+        "hsl_yellow": "黄色",
+        "hsl_green": "绿色",
+        "hsl_aqua": "青色",
+        "hsl_blue": "蓝色",
+        "hsl_purple": "紫色",
+        "hsl_magenta": "品红",
+        "hsl_hue": "色相",
+        "hsl_sat": "饱和",
+        "hsl_lum": "明度",
         "auto_levels": "自动色阶（直方图拉伸）",
         "srgb": "转 sRGB 色彩空间",
         "flatten_cmyk": "CMYK 转 RGB",
@@ -992,6 +1015,29 @@ STRINGS = {
         "vignette_hint": "amount[,mid[,feather]]; blank = off",
         "grain": "Grain",
         "grain_hint": "amount[,size]; blank = off",
+        # interactive editors (v1.6.x)
+        "edit_curves": "Edit curves…",
+        "edit_wheels": "Color wheels…",
+        "edit_hsl": "HSL…",
+        "dlt_curves": "Curve editor (drag points, double-click to add, right-click to remove)",
+        "dlt_wheels": "Color grading (click / drag to pick)",
+        "dlt_hsl": "HSL split (pick a chip, then drag the sliders)",
+        "ok": "OK",
+        "grade_none": "not set",
+        "zone_shadows": "Shadows",
+        "zone_midtones": "Midtones",
+        "zone_highlights": "Highlights",
+        "hsl_red": "Red",
+        "hsl_orange": "Orange",
+        "hsl_yellow": "Yellow",
+        "hsl_green": "Green",
+        "hsl_aqua": "Aqua",
+        "hsl_blue": "Blue",
+        "hsl_purple": "Purple",
+        "hsl_magenta": "Magenta",
+        "hsl_hue": "Hue",
+        "hsl_sat": "Sat",
+        "hsl_lum": "Lum",
         "auto_levels": "Auto levels (histogram stretch)",
         "srgb": "Convert to sRGB",
         "flatten_cmyk": "Flatten CMYK → RGB",
@@ -2626,18 +2672,25 @@ class PhotoSApp:
                  bg=COLORS["card"]).grid(
             row=20, column=0, columnspan=3, sticky="w", pady=(14, 2))
 
+        # entries for the scalar/compact specs; the three interactive
+        # editors (curves / color-grading / hsl) get an "edit…" button
         _grade_widgets = [
             ("wb_tint", "wb_tint_hint"),
             ("levels", "levels_hint"),
-            ("curves", "curves_hint"),
             ("vibrance", "vibrance_hint"),
-            ("color_grading", "color_grading_hint"),
-            ("hsl", "hsl_hint"),
             ("clarity", "clarity_hint"),
             ("texture", "texture_hint"),
             ("dehaze", "dehaze_hint"),
             ("vignette", "vignette_hint"),
             ("grain", "grain_hint"),
+        ]
+        _grade_editors = [
+            ("curves", "curves_hint", "edit_curves", "_open_curve_editor",
+             "grade_curves_val"),
+            ("color_grading", "color_grading_hint", "edit_wheels",
+             "_open_color_wheel_dialog", "grade_wheels_val"),
+            ("hsl", "hsl_hint", "edit_hsl", "_open_hsl_dialog",
+             "grade_hsl_val"),
         ]
         for off, (var_key, hint_key) in enumerate(_grade_widgets):
             r = 21 + off * 2
@@ -2651,6 +2704,29 @@ class PhotoSApp:
                      font=FONT_TINY, fg=COLORS["text_secondary"],
                      bg=COLORS["card"]).grid(
                 row=r + 1, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        for off, (var_key, hint_key, btn_key, method, val_attr) in \
+                enumerate(_grade_editors):
+            r = 21 + (len(_grade_widgets) + off) * 2
+            tk.Label(corr_frame, text=self._t(var_key), font=FONT_SMALL,
+                     fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+                row=r, column=0, sticky="w")
+            FlatButton(corr_frame, text=self._t(btn_key),
+                       command=getattr(self, method),
+                       bg=COLORS["bg"], fg=COLORS["text"],
+                       hover_bg=COLORS["border"], font=FONT_SMALL,
+                       padx=8, pady=2, border_color=COLORS["border"]).grid(
+                row=r, column=1, sticky="w", padx=(8, 0))
+            val_lbl = tk.Label(corr_frame, text="", font=FONT_TINY,
+                               fg=COLORS["text_secondary"],
+                               bg=COLORS["card"], anchor="w")
+            val_lbl.grid(row=r, column=2, sticky="ew", padx=(4, 0))
+            corr_frame.columnconfigure(2, weight=1)
+            setattr(self, val_attr, val_lbl)
+            tk.Label(corr_frame, text=self._t(hint_key),
+                     font=FONT_TINY, fg=COLORS["text_secondary"],
+                     bg=COLORS["card"]).grid(
+                row=r + 1, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        self._refresh_grade_value_labels()
 
         # ── Metadata section ──────────────────────────────────────────────────
         self._add_section_label(settings_frame, self._t("sec_metadata"), row=39)
@@ -2738,6 +2814,150 @@ class PhotoSApp:
         self._after_file_dialog()
         if path:
             self.lut_file.set(path)
+
+    def _refresh_grade_value_labels(self):
+        """Show the current curves / color-grading / hsl specs under buttons."""
+        for var_key, attr in (("curves", "grade_curves_val"),
+                              ("color_grading", "grade_wheels_val"),
+                              ("hsl", "grade_hsl_val")):
+            lbl = getattr(self, attr, None)
+            if lbl is None:
+                continue
+            text = getattr(self, var_key).get()
+            if not text:
+                text = self._t("grade_none")
+            elif len(text) > 34:
+                text = text[:33] + "…"
+            lbl.config(text=text)
+
+    def _open_curve_editor(self):
+        """Draggable point-curve editor: RGB master + R/G/B tabs."""
+        from .gui_widgets import CurveEditor
+        from .grade import _parse_curves
+        if self._dlg_cooldown_active():
+            return
+        win = tk.Toplevel(self.root)
+        win.title(self._t("dlt_curves"))
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+        cur = _parse_curves(self.curves.get()) if self.curves.get() else {}
+        base = cur.get("rgb")
+        nb = ttk.Notebook(win)
+        nb.pack(padx=10, pady=10)
+        editors = {}
+        for ch, chname in (("rgb", "RGB"), ("r", "R"), ("g", "G"), ("b", "B")):
+            tab = ttk.Frame(nb)
+            nb.add(tab, text=chname)
+            pts = cur.get(ch) or base or [(0, 0), (255, 255)]
+            ed = CurveEditor(tab, channel=ch, points=pts)
+            ed.pack(padx=8, pady=8)
+            editors[ch] = ed
+        btns = tk.Frame(win, bg=COLORS["bg"])
+        btns.pack(fill="x", padx=10, pady=(0, 10))
+        FlatButton(btns, text=self._t("ok"),
+                   command=lambda: self._curve_editor_ok(win, editors),
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right")
+        FlatButton(btns, text=self._t("cancel"), command=win.destroy,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right", padx=(0, 8))
+
+    def _curve_editor_ok(self, win, editors):
+        from .gui_widgets import CurveEditor
+        specs = []
+        for ch, ed in editors.items():
+            if CurveEditor.is_identity(ed.get_points()):
+                continue
+            specs.append(ed.to_spec(ch))
+        self.curves.set("|".join(specs))
+        self._refresh_grade_value_labels()
+        win.destroy()
+
+    def _open_color_wheel_dialog(self):
+        """Three HSV wheels (shadows/midtones/highlights) — LR color grading."""
+        from .gui_widgets import ColorWheel
+        from .grade import _parse_color_grading
+        if self._dlg_cooldown_active():
+            return
+        win = tk.Toplevel(self.root)
+        win.title(self._t("dlt_wheels"))
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+        cur = (_parse_color_grading(self.color_grading.get())
+               if self.color_grading.get() else {})
+        wheels = {}
+        for zone, zkey in (("shadows", "zone_shadows"),
+                           ("midtones", "zone_midtones"),
+                           ("highlights", "zone_highlights")):
+            frame = ttk.LabelFrame(win, text=self._t(zkey))
+            frame.pack(side="left", padx=6, pady=8)
+            wheel = ColorWheel(frame, size=160)
+            hue, sat = cur.get(zone, (0.0, 0.0))
+            wheel.set_value(hue, sat)
+            wheel.pack(padx=6, pady=6)
+            wheels[zone] = wheel
+        btns = tk.Frame(win, bg=COLORS["bg"])
+        btns.pack(fill="x", padx=10, pady=(0, 10))
+        FlatButton(btns, text=self._t("ok"),
+                   command=lambda: self._wheels_ok(win, wheels),
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right")
+        FlatButton(btns, text=self._t("cancel"), command=win.destroy,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right", padx=(0, 8))
+
+    def _wheels_ok(self, win, wheels):
+        specs = []
+        for zone, wheel in wheels.items():
+            h, s = wheel.get_value()
+            if s > 0.02:  # centre = no tint
+                specs.append(f"{zone}:{int(round(h))},{s:.2f}")
+        self.color_grading.set(";".join(specs))
+        self._refresh_grade_value_labels()
+        win.destroy()
+
+    def _open_hsl_dialog(self):
+        """8-color HSL split editor (click a chip, drive h/s/l sliders)."""
+        from .gui_widgets import HSLPanel, HSL_COLORS
+        if self._dlg_cooldown_active():
+            return
+        win = tk.Toplevel(self.root)
+        win.title(self._t("dlt_hsl"))
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+        labels = {name: self._t(f"hsl_{name}") for name, _ in HSL_COLORS}
+        labels.update({"hue": self._t("hsl_hue"),
+                       "sat": self._t("hsl_sat"),
+                       "lum": self._t("hsl_lum")})
+        panel = HSLPanel(win, labels=labels)
+        panel.load(self.hsl.get())
+        panel.pack(padx=12, pady=12)
+        btns = tk.Frame(win, bg=COLORS["bg"])
+        btns.pack(fill="x", padx=12, pady=(0, 12))
+        FlatButton(btns, text=self._t("ok"),
+                   command=lambda: self._hsl_ok(win, panel),
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right")
+        FlatButton(btns, text=self._t("cancel"), command=win.destroy,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right", padx=(0, 8))
+
+    def _hsl_ok(self, win, panel):
+        self.hsl.set(panel.dump())
+        self._refresh_grade_value_labels()
+        win.destroy()
 
     def _browse_gpx(self):
         """Pick a GPX track file."""
@@ -3530,6 +3750,7 @@ class PhotoSApp:
                     for label, w, h in sizes))
         except Exception:
             pass
+        self._refresh_grade_value_labels()
 
     def _show_gallery_export(self):
         """Gallery export dialog: title + thumb size + output dir, then
