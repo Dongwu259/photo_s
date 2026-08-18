@@ -16,6 +16,48 @@
 
 ## 规划中
 
+### v1.6.0（LR 方向调色增强 —— 主题：专业调色）
+
+> 需求来源：商业软件 LensPilot 以 photo_s 为底层图像管线，功能摸底（2026-08-18）指出
+> 向 Lightroom 方向增强调色能力。定位约束不变：**批量/交付导向管线，不做交互式局部修图**。
+> 全部 P0/P1 为**单图全局调整算法，纯 numpy/PIL 可实现，零新依赖**（打包环境已有 numpy/cv2/onnxruntime）。
+
+**P0 — LR 核心旋钮**（新函数进 `photo_s/adjust.py` 或新 `photo_s/curves.py`，各配 `ProcessOptions` 字段 + CLI flag + GUI 设置面板 + REST/MCP 自动继承）：
+
+- [ ] 点曲线 `apply_curves(img, points, channel="rgb")`：控制点 PCHIP 单调样条 → 256 项 LUT；`curves: dict`；channel ∈ rgb/r/g/b
+- [ ] 手动色阶 `apply_levels(img, black=0, white=255, gamma=1.0)`：黑场/白场/中间调三点重映射；`levels`
+- [ ] 自然饱和度 `apply_vibrance(img, amount)`：HSV 空间按当前饱和度反向加权提升（保护肤色/已饱和区，与全局饱和度互补）；`vibrance: float`
+- [ ] 三向颜色分级 `apply_color_grading(img, shadows, midtones, highlights)`：各档 (hue_deg, saturation) + 亮度掩膜平滑过渡叠加着色；`color_grading: dict`
+- [ ] WB tint 轴 `wb_tint`：现有 Kelvin 冷暖轴（wb_temp）加 G/M 品红-绿轴（小矩阵）；`wb_tint: float`
+
+**P1 — 风格化常用**：
+
+- [ ] HSL 分色 `apply_hsl(img, adjustments)`：8 色域（red/orange/yellow/green/aqua/blue/purple/magenta）×（hue/sat/lum 偏移），hue 分段软过渡；`hsl: dict`
+- [ ] 清晰度/纹理 `apply_clarity(amount, radius=60)` / `apply_texture(amount)`：亮度通道 USM 局部对比，clarity 大半径 / texture 小半径；`clarity` / `texture`
+- [ ] 去雾 `apply_dehaze(img, amount)`：暗通道先验 + 导向滤波（cv2）；`dehaze: float`
+- [ ] 暗角 `apply_vignette(img, amount, midpoint=0.5, feather=0.5)`：径向渐变掩膜乘法；`vignette: dict`
+- [ ] 颗粒 `apply_grain(img, amount, size=1.0)`：亮度加权单色斑点噪声（胶片感）；`grain: dict`
+
+**Bug 修复（P0，摸底发现，必修）**：
+
+- [ ] **3D/1D LUT 后 EXIF 丢失**（`photo_s/lut.py:158`）：三线性路径新建 Image 未拷贝 `img.info`，经 `grade_keepers` 交付的照片丢版权/拍摄参数
+- [ ] `apply_lut` 输出固定 RGB，RGBA 输入丢 alpha/mode（3D 路径）
+- [ ] MCP `process` 工具 schema 未暴露 `lut_file/brightness/contrast/saturation`（mcp_server.py:86-156）——数字员工无法自然语言调色，只能绕 `preset` 工具；补 schema 字段即可
+
+**管线顺序约定（新功能插入点，LR 处理顺序参考 + 现有引擎兼容）**：
+
+```
+auto_rotate → auto_straighten → log_curve → 色彩管理
+→ WB(temp+tint) → 曝光 → 对比 → levels → curves
+→ clarity/texture/dehaze → vibrance/saturation → HSL → color_grading
+→ tone 倍率(向后兼容保留) → LUT → 降噪 → auto_levels
+→ 锐化 → vignette/grain → 几何/缩放 → 水印 → 保存
+```
+
+**远期（不在 v1.6）**：渐变蒙版（线性/径向 + 羽化 + 全局调整子集，唯一适合批量的局部形态，参数可序列化进 ProcessOptions）；XMP `crs:` 编辑参数读写（LensPilot LR 桥接从「读回结果」升级为「双向 interchange」——我方调整可被 LR 直接打开续修，LR 修完的参数我方复现）。
+
+**明确不做**：RAW 域编辑（画质追不上 LR 线性 RAW 管线，rawpy 解码后 sRGB 域调整即可，定位交付级）；笔刷蒙版/修复画笔/AI 主体选择（交互重，与批量交付定位相悖）；镜头校正（畸变/色差需 lensfun 级数据库，投入产出比低）。
+
 ### v1.5.0（i18n + Agent 契约 + 加固 + 审计遗留 + 摄影师批处理工作流）
 **A. 国际化（i18n）**
 - [x] 新 `photo_s/i18n.py`：CLI `STRINGS` 集中表（279 key × 2，parity 测试强制）、`_t(key, lang, **kwargs)`、三平台检测（macOS AppleLanguages / Windows LCID / Linux env）、`resolve_language` 优先级链（flag > env > config > persisted > 系统 > en）、GUI `~/.photos/language` 持久化、不用 `locale.setlocale`
