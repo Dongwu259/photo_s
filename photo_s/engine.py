@@ -183,6 +183,13 @@ class ProcessOptions:
     curves: str = ""            # point curves "ch:x,y;x,y|ch:..."
     vibrance: float = 0.0       # natural saturation [-1, 1], 0 = off
     color_grading: str = ""     # 3-way "zone:hue,sat;zone:hue,sat"
+    # P1 stylize (v1.6.0)
+    hsl: str = ""               # per-color "color:h,s,l;color:..."
+    clarity: float = 0.0        # local contrast, large radius (0 = off)
+    texture: float = 0.0        # fine detail, small radius (0 = off)
+    dehaze: float = 0.0         # dark-channel dehaze [-1, 1], 0 = off
+    vignette: str = ""          # radial "amount[,midpoint[,feather]]"
+    grain: str = ""             # film grain "amount[,size]"
     lut_file: Optional[str] = None  # .cube 3D/1D LUT color grade (provider or built-in)
     log_curve: Optional[str] = None  # LOG recovery curve name (SLOG3, CLOG3, ...)
     denoise: Optional[float] = None  # denoise strength; SCUNet plugin provider
@@ -1060,9 +1067,21 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
         if options.curves:
             from .grade import apply_curves, _parse_curves
             img = apply_curves(img, _parse_curves(options.curves))
+        if options.clarity:
+            from .grade import apply_clarity
+            img = apply_clarity(img, options.clarity)
+        if options.texture:
+            from .grade import apply_texture
+            img = apply_texture(img, options.texture)
+        if options.dehaze:
+            from .grade import apply_dehaze
+            img = apply_dehaze(img, options.dehaze)
         if options.vibrance:
             from .grade import apply_vibrance
             img = apply_vibrance(img, options.vibrance)
+        if options.hsl:
+            from .grade import apply_hsl, _parse_hsl
+            img = apply_hsl(img, _parse_hsl(options.hsl))
         if options.color_grading:
             from .grade import apply_color_grading, _parse_color_grading
             z = _parse_color_grading(options.color_grading)
@@ -1083,6 +1102,14 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
         # ── Auto levels (histogram stretch) ─────────────────────────────────
         if options.auto_levels:
             img = apply_auto_levels(img)
+
+        # ── Finishing looks (vignette/grain) before geometry ────────────────
+        if options.vignette:
+            from .grade import apply_vignette, _parse_vignette
+            img = apply_vignette(img, *_parse_vignette(options.vignette))
+        if options.grain:
+            from .grade import apply_grain, _parse_grain
+            img = apply_grain(img, *_parse_grain(options.grain))
 
         # ── Composition: crop → rotate → flip (before resize) ───────────────
         img = apply_crop(img, options.crop)

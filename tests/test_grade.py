@@ -13,11 +13,20 @@ from photo_s.grade import (
     _monotone_cubic,
     _parse_color_grading,
     _parse_curves,
+    _parse_grain,
+    _parse_hsl,
     _parse_levels,
+    _parse_vignette,
+    apply_clarity,
     apply_color_grading,
     apply_curves,
+    apply_dehaze,
+    apply_grain,
+    apply_hsl,
     apply_levels,
+    apply_texture,
     apply_vibrance,
+    apply_vignette,
 )
 
 
@@ -202,6 +211,133 @@ class TestColorGrading:
         assert out.info.get("icc_profile") == b"mock"
 
 
+class TestHsl:
+    def test_parse(self):
+        got = _parse_hsl("green:10,0.2,0.1;red:-5,0,0")
+        assert got["green"] == (10.0, 0.2, 0.1)
+        assert got["red"] == (-5.0, 0.0, 0.0)
+
+    def test_parse_bad_color(self):
+        with pytest.raises(ValueError):
+            _parse_hsl("cyan:10,0.2,0.1")
+
+    def test_shift_green_toward_cyan(self):
+        # pure green (hue 120°) shifted +30° → cyan (180°), luminance held
+        im = Image.new("RGB", (8, 8), (0, 180, 0))
+        out = apply_hsl(im, {"green": (30, 0, 0)})
+        r, g, b = out.getpixel((0, 0))
+        assert b > r  # blue channel rose → hue moved toward cyan
+
+    def test_sat_boost(self):
+        im = Image.new("RGB", (8, 8), (120, 120, 140))  # slightly desat blue
+        out = apply_hsl(im, {"blue": (0, 0.5, 0)})
+        r, g, b = out.getpixel((0, 0))
+        # saturating blue → the channel spread widens (b pulled away from r/g)
+        assert (b - r) > (140 - 120)
+
+    def test_alpha_and_info(self):
+        im = Image.new("RGBA", (8, 8), (0, 180, 0, 170))
+        im.info["exif"] = b"mock"
+        out = apply_hsl(im, {"green": (30, 0, 0)})
+        assert out.mode == "RGBA"
+        assert out.getpixel((0, 0))[3] == 170
+        assert out.info.get("exif") == b"mock"
+
+
+class TestClarityTexture:
+    def test_zero_noop(self):
+        im = Image.new("RGB", (8, 8), (100, 100, 100))
+        assert apply_clarity(im, 0.0) is im
+        assert apply_texture(im, 0.0) is im
+
+    def test_clarity_changes_edges(self):
+        # a flat field with one bright square → local contrast kicks the edges
+        arr = np.full((32, 32, 3), 120, dtype=np.uint8)
+        arr[8:24, 8:24] = 180
+        im = Image.fromarray(arr, "RGB")
+        out = apply_clarity(im, 0.8)
+        # at least one pixel changed vs input
+        assert np.any(np.asarray(out) != np.asarray(im))
+
+    def test_info_preserved(self):
+        im = Image.new("RGB", (8, 8), (100, 100, 100))
+        im.info["icc_profile"] = b"mock"
+        out = apply_texture(im, 0.5)
+        assert out.info.get("icc_profile") == b"mock"
+
+
+class TestDehaze:
+    def test_zero_noop(self):
+        im = Image.new("RGB", (4, 4), (120, 120, 120))
+        assert apply_dehaze(im, 0.0) is im
+
+    def test_dehaze_increases_contrast(self):
+        # uniformly hazy: dark+bright regions pulled apart
+        arr = np.zeros((16, 16, 3), dtype=np.float32)
+        arr[..., :] = 0.5          # heavy haze base
+        arr[4:12, 4:12] = 0.65     # a slightly brighter patch
+        im = Image.fromarray((arr * 255).astype(np.uint8), "RGB")
+        out = apply_dehaze(im, 0.9)
+        out_arr = np.asarray(out, dtype=np.float32) / 255.0
+        base_var = float(arr.reshape(-1, 3).std())
+        out_var = float(out_arr.reshape(-1, 3).std())
+        assert out_var > base_var  # spread widened
+
+    def test_info_preserved(self):
+        im = Image.new("RGB", (8, 8), (120, 120, 120))
+        im.info["exif"] = b"mock"
+        out = apply_dehaze(im, 0.5)
+        assert out.info.get("exif") == b"mock"
+
+
+class TestVignette:
+    def test_parse(self):
+        assert _parse_vignette("0.6,0.4,0.3") == (0.6, 0.4, 0.3)
+        assert _parse_vignette("0.6") == (0.6, 0.5, 0.5)
+
+    def test_corners_darker_than_center(self):
+        im = Image.new("RGB", (32, 32), (200, 200, 200))
+        out = apply_vignette(im, 0.8)
+        center = out.getpixel((16, 16))
+        corner = out.getpixel((1, 1))
+        assert corner[0] < center[0]
+
+    def test_negative_lifts_corners(self):
+        im = Image.new("RGB", (32, 32), (100, 100, 100))
+        out = apply_vignette(im, -0.8)
+        corner = out.getpixel((1, 1))
+        assert corner[0] > 100
+
+    def test_alpha_and_info(self):
+        im = Image.new("RGBA", (32, 32), (200, 200, 200, 150))
+        im.info["icc_profile"] = b"mock"
+        out = apply_vignette(im, 0.5)
+        assert out.mode == "RGBA"
+        assert out.getpixel((16, 16))[3] == 150
+        assert out.info.get("icc_profile") == b"mock"
+
+
+class TestGrain:
+    def test_parse(self):
+        assert _parse_grain("0.2") == (0.2, 1.0)
+        assert _parse_grain("0.2,2.5") == (0.2, 2.5)
+
+    def test_zero_noop(self):
+        im = Image.new("RGB", (8, 8), (100, 100, 100))
+        assert apply_grain(im, 0.0) is im
+
+    def test_adds_noise(self):
+        im = Image.new("RGB", (16, 16), (100, 100, 100))
+        out = apply_grain(im, 0.8)
+        assert np.any(np.asarray(out) != np.asarray(im))
+
+    def test_info_preserved(self):
+        im = Image.new("RGB", (8, 8), (100, 100, 100))
+        im.info["exif"] = b"mock"
+        out = apply_grain(im, 0.3)
+        assert out.info.get("exif") == b"mock"
+
+
 class TestEngineSlot:
     """New grading options flow through the pipeline and keep EXIF."""
 
@@ -233,6 +369,22 @@ class TestEngineSlot:
 
     def test_color_grading(self, tmp_path):
         r, out = self._run(tmp_path, color_grading="shadows:120,0.4;highlights:-10,0.2")
+        assert r.success_count == 1 and (out / "in.jpg").exists()
+
+    def test_hsl(self, tmp_path):
+        r, out = self._run(tmp_path, hsl="green:10,0.2,0.1;red:-5,0,0")
+        assert r.success_count == 1 and (out / "in.jpg").exists()
+
+    def test_clarity_texture(self, tmp_path):
+        r, out = self._run(tmp_path, clarity=0.5, texture=0.3)
+        assert r.success_count == 1 and (out / "in.jpg").exists()
+
+    def test_dehaze(self, tmp_path):
+        r, out = self._run(tmp_path, dehaze=0.6)
+        assert r.success_count == 1 and (out / "in.jpg").exists()
+
+    def test_vignette_grain(self, tmp_path):
+        r, out = self._run(tmp_path, vignette="0.5,0.4,0.4", grain="0.15,1.5")
         assert r.success_count == 1 and (out / "in.jpg").exists()
 
     def test_keeps_exif_through_grading(self, tmp_path):

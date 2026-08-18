@@ -15,13 +15,18 @@ Conventions (match ``adjust.py`` / ``lut.py``):
 """
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 __all__ = [
     "_parse_levels", "apply_levels",
     "_parse_curves", "apply_curves",
     "apply_vibrance",
     "_parse_color_grading", "apply_color_grading",
+    "_parse_hsl", "apply_hsl",
+    "apply_clarity", "apply_texture",
+    "apply_dehaze",
+    "_parse_vignette", "apply_vignette",
+    "_parse_grain", "apply_grain",
 ]
 
 
@@ -346,4 +351,229 @@ def apply_color_grading(img: Image.Image, shadows=None, midtones=None,
     new_hue = np.mod(hue + hue_shift, 1.0)
     new_sat = np.clip(sat + sat_shift, 0.0, 1.0)
     out_arr = _from_hsv(new_hue, new_sat, val)
+    return _finish_grade(img, out_arr, alpha)
+
+
+# ── HSL per-color domains ────────────────────────────────────────────────────
+
+_HSL_CENTERS = {
+    "red": 0.0, "orange": 30.0, "yellow": 60.0, "green": 120.0,
+    "aqua": 180.0, "blue": 240.0, "purple": 280.0, "magenta": 320.0,
+}
+# Gaussian sigma (degrees) for soft domain transitions — a hue exactly on a
+# domain boundary is barely affected, so bands don't cut hard edges.
+_HSL_SIGMA = 14.0
+
+
+def _hue_distance_deg(a, b):
+    """Signed shortest angular distance a→b (array-safe)."""
+    d = (a - b) % 360.0
+    return np.where(d > 180.0, d - 360.0, d)
+
+
+def _parse_hsl(s: str) -> dict:
+    """Parse ``"color:hue,sat,lum;color:..."`` → ``{color: (h, s, l)}``.
+
+    color ∈ red|orange|yellow|green|aqua|blue|purple|magenta; hue_shift in
+    degrees (-180..180), sat/lum additive (-1..1).
+    """
+    out: dict = {}
+    for seg in s.split(";"):
+        seg = seg.strip()
+        if not seg:
+            continue
+        if ":" not in seg:
+            raise ValueError(
+                f"hsl segment {seg!r} must be 'color:hue,sat,lum'")
+        color, rest = seg.split(":", 1)
+        color = color.strip().lower()
+        if color not in _HSL_CENTERS:
+            raise ValueError(
+                f"unknown hsl color {color!r} "
+                f"(expected {','.join(_HSL_CENTERS)})")
+        parts = [p.strip() for p in rest.split(",")]
+        hue = float(parts[0]) if parts[0] else 0.0
+        sat = float(parts[1]) if len(parts) > 1 and parts[1] else 0.0
+        lum = float(parts[2]) if len(parts) > 2 and parts[2] else 0.0
+        out[color] = (hue, sat, lum)
+    return out
+
+
+def apply_hsl(img: Image.Image, adjustments: dict) -> Image.Image:
+    """HSL per-color adjustments across 8 hue domains with soft transitions.
+
+    Each adjustment is ``(hue_shift_deg, sat_shift, lum_shift)`` applied
+    under a gaussian hue mask centred on that domain, so neighbouring bands
+    blend instead of banding. Shifts are additive in HSV space.
+    """
+    if not adjustments:
+        return img
+    arr, alpha = _normalize_grade_input(img)
+    hue, sat, val = _to_hsv(arr)
+    hue_deg = hue * 360.0
+    hue_shift = np.zeros_like(hue)
+    sat_shift = np.zeros_like(sat)
+    lum_shift = np.zeros_like(val)
+    for color, (dh, ds, dl) in adjustments.items():
+        center = _HSL_CENTERS[color]
+        dist = np.abs(_hue_distance_deg(hue_deg, center))
+        mask = np.exp(-(dist ** 2) / (2.0 * _HSL_SIGMA ** 2))
+        hue_shift += (dh / 360.0) * mask
+        sat_shift += ds * mask
+        lum_shift += dl * mask
+    new_hue = np.mod(hue + hue_shift, 1.0)
+    new_sat = np.clip(sat + sat_shift, 0.0, 1.0)
+    new_val = np.clip(val + lum_shift, 0.0, 1.0)
+    return _finish_grade(img, _from_hsv(new_hue, new_sat, new_val), alpha)
+
+
+# ── Clarity / texture (local contrast) ──────────────────────────────────────
+
+def _usm_local_contrast(img: Image.Image, amount: float,
+                        radius: float) -> Image.Image:
+    """Luminance-driven unsharp-mask local contrast.
+
+    ``delta = L - blur(L)`` is added to every channel: hue/sat ratios are
+    preserved and only local luminance detail changes (clarity = large
+    radius, texture = small radius).
+    """
+    amount = max(-1.0, min(1.0, float(amount)))
+    if abs(amount) < 1e-4:
+        return img
+    if img.mode not in ("RGB", "RGBA", "L"):
+        img = img.convert("RGBA")
+    alpha = img.getchannel("A") if img.mode == "RGBA" else None
+    lum = np.asarray(img.convert("L"), dtype=np.float32)
+    blurred = np.asarray(
+        Image.fromarray(lum.astype(np.uint8)).filter(
+            ImageFilter.GaussianBlur(radius=radius)),
+        dtype=np.float32)
+    delta = lum - blurred
+    if img.mode == "L":
+        out = Image.fromarray(
+            np.clip(lum + amount * delta, 0, 255).astype(np.uint8), "L")
+    else:
+        rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
+        out_arr = rgb + amount * delta[..., np.newaxis]
+        out = Image.fromarray(
+            np.clip(out_arr, 0, 255).astype(np.uint8), "RGB")
+        if alpha is not None:
+            out.putalpha(alpha)
+    out.info = img.info.copy()
+    return out
+
+
+def apply_clarity(img: Image.Image, amount: float = 0.0,
+                  radius: float = 60.0) -> Image.Image:
+    """Local contrast with a large radius (Lightroom-style clarity)."""
+    return _usm_local_contrast(img, amount, radius)
+
+
+def apply_texture(img: Image.Image, amount: float = 0.0,
+                  radius: float = 4.0) -> Image.Image:
+    """Fine-detail enhancement with a small radius (texture)."""
+    return _usm_local_contrast(img, amount, radius)
+
+
+# ── Dehaze ──────────────────────────────────────────────────────────────────
+
+def apply_dehaze(img: Image.Image, amount: float = 0.0) -> Image.Image:
+    """Dehaze via dark-channel prior with a blurred transmission estimate.
+
+    Batch/delivery grade: the transmission map is refined with a gaussian
+    blur rather than a full guided filter (no opencv dependency) — adequate
+    for uniform haze, not dense local haze. ``amount > 0`` removes haze,
+    ``< 0`` adds haze back toward the atmospheric light; 0 = unchanged.
+    """
+    amount = max(-1.0, min(1.0, float(amount)))
+    if abs(amount) < 1e-4:
+        return img
+    arr, alpha = _normalize_grade_input(img)
+    dark = np.min(arr, axis=-1)
+    flat = dark.reshape(-1)
+    k = max(1, int(flat.size * 0.001))
+    idx = np.argpartition(flat, -k)[-k:]
+    A = arr.reshape(-1, 3)[idx].mean(axis=0) + 1e-6
+    w = 0.95
+    t = 1.0 - w * dark / max(float(A.max()), 1e-6)
+    t_img = Image.fromarray((np.clip(t, 0, 1) * 255).astype(np.uint8), "L")
+    t_ref = np.asarray(
+        t_img.filter(ImageFilter.GaussianBlur(radius=8)),
+        dtype=np.float32) / 255.0
+    t_ref = np.clip(t_ref, 0.1, 1.0)
+    if amount > 0:
+        J = (arr - A) / t_ref[..., np.newaxis] + A
+        out_arr = arr + (J - arr) * amount  # scale the effect by amount
+    else:
+        out_arr = arr * (1.0 + amount) + A * (-amount)  # add haze
+    return _finish_grade(img, out_arr, alpha)
+
+
+# ── Vignette ────────────────────────────────────────────────────────────────
+
+def _parse_vignette(s: str):
+    """Parse ``"amount[,midpoint[,feather]]"`` (defaults 0.5/0.5/0.5)."""
+    parts = [p.strip() for p in s.split(",")]
+    amount = float(parts[0]) if parts[0] else 0.5
+    midpoint = float(parts[1]) if len(parts) > 1 and parts[1] else 0.5
+    feather = float(parts[2]) if len(parts) > 2 and parts[2] else 0.5
+    return (max(-1.0, min(1.0, amount)),
+            max(0.0, min(1.0, midpoint)),
+            max(0.05, min(1.0, feather)))
+
+
+def apply_vignette(img: Image.Image, amount: float = 0.5,
+                   midpoint: float = 0.5,
+                   feather: float = 0.5) -> Image.Image:
+    """Radial vignette: darken (``amount > 0``) or lift (``amount < 0``).
+
+    ``midpoint`` = where the falloff begins (0 = centre, 1 = corner);
+    ``feather`` = softness of the transition. The radial mask multiplies
+    every channel, so hue is preserved.
+    """
+    if not amount:
+        return img
+    arr, alpha = _normalize_grade_input(img)
+    h, w = arr.shape[:2]
+    y, x = np.mgrid[0:h, 0:w].astype(np.float64)
+    nx = (x - (w - 1) / 2.0) / max(w / 2.0, 1.0)
+    ny = (y - (h - 1) / 2.0) / max(h / 2.0, 1.0)
+    r = np.sqrt(nx ** 2 + ny ** 2)
+    e1 = min(1.0, midpoint + feather)
+    mask = 1.0 - amount * _smoothstep(midpoint, e1, r)
+    return _finish_grade(img, arr * mask[..., np.newaxis], alpha)
+
+
+# ── Grain ───────────────────────────────────────────────────────────────────
+
+def _parse_grain(s: str):
+    """Parse ``"amount[,size]"`` (defaults 0.1 / 1.0)."""
+    parts = [p.strip() for p in s.split(",")]
+    amount = float(parts[0]) if parts[0] else 0.1
+    size = float(parts[1]) if len(parts) > 1 and parts[1] else 1.0
+    return (max(0.0, min(1.0, amount)),
+            max(0.1, min(4.0, size)))
+
+
+def apply_grain(img: Image.Image, amount: float = 0.1,
+                size: float = 1.0) -> Image.Image:
+    """Film grain: luminance-weighted monochrome gaussian noise.
+
+    The noise pattern (optionally blurred for coarser ``size``) is weighted
+    by a midtone curve so highlights/shadows stay clean — film-like.
+    """
+    if not amount:
+        return img
+    arr, alpha = _normalize_grade_input(img)
+    h, w = arr.shape[:2]
+    rng = np.random.default_rng()
+    noise = rng.standard_normal((h, w)).astype(np.float32)
+    if size > 1.0:
+        noise_img = Image.fromarray(
+            (np.clip(noise * 127.5 + 127.5, 0, 255)).astype(np.uint8), "L")
+        noise_img = noise_img.filter(ImageFilter.GaussianBlur(radius=size - 1.0))
+        noise = (np.asarray(noise_img, dtype=np.float32) - 127.5) / 127.5
+    lum = np.clip(np.max(arr, axis=-1), 0.0, 1.0)
+    weight = np.clip(1.0 - np.abs(lum - 0.5) * 1.4, 0.0, 1.0)
+    out_arr = arr + (noise * weight)[..., np.newaxis] * amount * 0.15
     return _finish_grade(img, out_arr, alpha)
