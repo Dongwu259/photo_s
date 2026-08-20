@@ -195,6 +195,10 @@ class ProcessOptions:
     # scalar adjustments, relative 0-1 coords so one spec fits a batch.
     masks: str = ""             # "name:type:params;..." (linear/radial/color)
     mask_adjust: str = ""       # "name:key=value,...;..." referencing masks
+    # Lens correction (v1.7.0, manual params - no lens database)
+    lens_distort: float = 0.0   # radial distortion k1 (+ = barrel fix)
+    lens_vignette: str = ""     # corner-lift "amount[,midpoint]"
+    lens_ca: str = ""           # channel scales "r_scale,b_scale" (~1.0)
     lut_file: Optional[str] = None  # .cube 3D/1D LUT color grade (provider or built-in)
     log_curve: Optional[str] = None  # LOG recovery curve name (SLOG3, CLOG3, ...)
     denoise: Optional[float] = None  # denoise strength; SCUNet plugin provider
@@ -1015,6 +1019,19 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
         # ── Auto-rotate ─────────────────────────────────────────────────────
         if options.auto_rotate:
             img = _apply_auto_rotate(img)
+
+        # ── Lens correction (v1.7.0): geometry first, before any pixel
+        # grading, so every later step sees undistorted coordinates.
+        if options.lens_distort:
+            from .lens import apply_distortion
+            img = apply_distortion(img, options.lens_distort)
+        if options.lens_ca:
+            from .lens import apply_ca_fix, parse_ca
+            img = apply_ca_fix(img, *parse_ca(options.lens_ca))
+        if options.lens_vignette:
+            from .lens import apply_vignette_fix, parse_vignette_fix
+            img = apply_vignette_fix(img, *parse_vignette_fix(
+                options.lens_vignette))
 
         # ── Auto-straighten (horizon leveling, optional opencv) ────────────
         straightened = False

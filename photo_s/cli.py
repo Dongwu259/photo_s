@@ -313,6 +313,21 @@ def _add_transform_args(parser):
         help=_t('help___mask_adjust'),
     )
     parser.add_argument(
+        "--lens-distort", type=float, default=argparse.SUPPRESS,
+        metavar="K1",
+        help=_t('help___lens_distort'),
+    )
+    parser.add_argument(
+        "--lens-vignette", type=str, default=argparse.SUPPRESS,
+        metavar="AMOUNT[,MIDPOINT]",
+        help=_t('help___lens_vignette'),
+    )
+    parser.add_argument(
+        "--lens-ca", type=str, default=argparse.SUPPRESS,
+        metavar="R_SCALE,B_SCALE",
+        help=_t('help___lens_ca'),
+    )
+    parser.add_argument(
         "--log-curve", type=str, default=argparse.SUPPRESS, metavar="NAME",
         choices=["SLOG3", "CLOG3", "LOGC3", "DLOG", "VLOG", "HLG"],
         help=_t('help___log_curve'),
@@ -592,6 +607,10 @@ def _build_process_options(parsed) -> ProcessOptions:
         # Local adjustments under masks (v1.7.0)
         masks=getattr(parsed, 'masks', ""),
         mask_adjust=getattr(parsed, 'mask_adjust', ""),
+        # Lens correction (v1.7.0)
+        lens_distort=getattr(parsed, 'lens_distort', 0.0),
+        lens_vignette=getattr(parsed, 'lens_vignette', ""),
+        lens_ca=getattr(parsed, 'lens_ca', ""),
         jobs=_jobs,
     )
 
