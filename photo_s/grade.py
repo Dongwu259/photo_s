@@ -23,6 +23,7 @@ __all__ = [
     "apply_vibrance",
     "_parse_color_grading", "apply_color_grading",
     "_parse_hsl", "apply_hsl",
+    "_parse_point_color", "apply_point_color",
     "apply_clarity", "apply_texture",
     "apply_dehaze",
     "_parse_vignette", "apply_vignette",
@@ -434,6 +435,97 @@ def apply_hsl(img: Image.Image, adjustments: dict) -> Image.Image:
         hue_shift += (dh / 360.0) * mask
         sat_shift += ds * mask
         lum_shift += dl * mask
+    new_hue = np.mod(hue + hue_shift, 1.0)
+    new_sat = np.clip(sat + sat_shift, 0.0, 1.0)
+    new_val = np.clip(val + lum_shift, 0.0, 1.0)
+    return _finish_grade(img, _from_hsv(new_hue, new_sat, new_val), alpha)
+
+
+# ── Point color (sampled-color targeted adjustment) ─────────────────────────
+
+def _parse_point_color(s: str) -> list:
+    """Parse ``"r,g,b:hue,sat,lum[,range];..."``.
+
+    Each target is a sampled color (r,g,b 0-255) plus hue/sat/lum shifts
+    (hue in degrees -180..180, sat/lum additive -1..1) and an optional
+    range (tolerance 0-1, default 0.1). Unlike :func:`apply_hsl` the mask
+    is centred on the *sampled* color, not a fixed hue domain.
+    """
+    targets = []
+    for seg in s.split(";"):
+        seg = seg.strip()
+        if not seg:
+            continue
+        if ":" not in seg:
+            raise ValueError(
+                f"point_color segment {seg!r} must be 'r,g,b:hue,sat,lum[,range]'")
+        color, rest = seg.split(":", 1)
+        rgb = [p.strip() for p in color.split(",")]
+        if len(rgb) != 3:
+            raise ValueError(
+                f"point_color target {color!r} must be 'r,g,b' (0-255)")
+        try:
+            r = max(0, min(255, int(round(float(rgb[0])))))
+            g = max(0, min(255, int(round(float(rgb[1])))))
+            b = max(0, min(255, int(round(float(rgb[2])))))
+        except ValueError:
+            raise ValueError(
+                f"point_color target {color!r} must be numeric") from None
+        parts = [p.strip() for p in rest.split(",")]
+        if len(parts) > 4:
+            raise ValueError(
+                f"point_color shifts {rest!r} must be 'hue,sat,lum[,range]'")
+        try:
+            hue = float(parts[0]) if parts[0] else 0.0
+            sat = float(parts[1]) if len(parts) > 1 and parts[1] else 0.0
+            lum = float(parts[2]) if len(parts) > 2 and parts[2] else 0.0
+            rng = float(parts[3]) if len(parts) > 3 and parts[3] else 0.1
+        except ValueError:
+            raise ValueError(
+                f"point_color shifts {rest!r} must be numeric") from None
+        rng = max(0.02, min(1.0, rng))
+        targets.append((r, g, b, hue, sat, lum, rng))
+    return targets
+
+
+def _point_color_mask(hue_deg, sat, val, r, g, b, rng):
+    """Gaussian soft mask around a sampled color (HSV distance)."""
+    import colorsys
+    th, ts, tv = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+    d = (hue_deg - th * 360.0) % 360.0
+    dh = np.where(d > 180.0, d - 360.0, d) / 180.0
+    dist = np.sqrt(dh * dh + (sat - ts) ** 2 + (val - tv) ** 2)
+    mask = np.exp(-(dist ** 2) / (2.0 * rng * rng))
+    if ts > 0.1:  # gray pixels carry no meaningful hue
+        mask = mask * np.clip(sat / 0.1, 0.0, 1.0)
+    return mask
+
+
+def apply_point_color(img: Image.Image, targets: list) -> Image.Image:
+    """Hue/sat/lum shifts centred on sampled colors with soft range falloff.
+
+    Same additive HSV math as :func:`apply_hsl`, but each target's mask is
+    centred on its sampled color instead of a fixed hue-domain centre, so
+    e.g. only the sampled teal of a jacket shifts without dragging the
+    whole blue-green domain along.
+    """
+    if not targets:
+        return img
+    arr, alpha = _normalize_grade_input(img)
+    hue, sat, val = _to_hsv(arr)
+    hue_deg = hue * 360.0
+    hue_shift = np.zeros_like(hue)
+    sat_shift = np.zeros_like(sat)
+    lum_shift = np.zeros_like(val)
+    for r, g, b, dh, ds, dl, rng in targets:
+        if dh == 0.0 and ds == 0.0 and dl == 0.0:
+            continue
+        mask = _point_color_mask(hue_deg, sat, val, r, g, b, rng)
+        hue_shift += (dh / 360.0) * mask
+        sat_shift += ds * mask
+        lum_shift += dl * mask
+    if not hue_shift.any() and not sat_shift.any() and not lum_shift.any():
+        return img
     new_hue = np.mod(hue + hue_shift, 1.0)
     new_sat = np.clip(sat + sat_shift, 0.0, 1.0)
     new_val = np.clip(val + lum_shift, 0.0, 1.0)

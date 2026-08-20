@@ -276,6 +276,11 @@ def _add_transform_args(parser):
         help=_t('help___hsl'),
     )
     parser.add_argument(
+        "--point-color", type=str, default=argparse.SUPPRESS,
+        metavar="R,G,B:H,S,L[,RANGE];...",
+        help=_t('help___point_color'),
+    )
+    parser.add_argument(
         "--clarity", type=float, default=argparse.SUPPRESS, metavar="-1-1",
         help=_t('help___clarity'),
     )
@@ -578,6 +583,7 @@ def _build_process_options(parsed) -> ProcessOptions:
         vibrance=getattr(parsed, 'vibrance', 0.0),
         color_grading=getattr(parsed, 'color_grading', ""),
         hsl=getattr(parsed, 'hsl', ""),
+        point_color=getattr(parsed, 'point_color', ""),
         clarity=getattr(parsed, 'clarity', 0.0),
         texture=getattr(parsed, 'texture', 0.0),
         dehaze=getattr(parsed, 'dehaze', 0.0),

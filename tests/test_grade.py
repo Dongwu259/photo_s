@@ -433,3 +433,82 @@ class TestEngineSlot:
         assert r.fail_count == 1
         assert r.results[0].success is False
         assert "curve" in r.results[0].error.lower()
+
+
+# ── Point color (v1.7.0) ─────────────────────────────────────────────────────
+
+from photo_s.grade import (  # noqa: E402
+    _parse_point_color,
+    apply_point_color,
+)
+
+
+def _two_color_image(top=(200, 40, 40), bottom=(40, 40, 200), w=4, h=4):
+    img = Image.new("RGB", (w, h))
+    for y in range(h):
+        for x in range(w):
+            img.putpixel((x, y), top if y < h // 2 else bottom)
+    return img
+
+
+def test_parse_point_color_basic_and_range():
+    t = _parse_point_color("200,40,40:30,0.1,-0.2")[0]
+    assert t == (200, 40, 40, 30.0, 0.1, -0.2, 0.1)  # default range
+    t2 = _parse_point_color("200,40,40:30,0,0,0.3")[0]
+    assert t2[6] == pytest.approx(0.3)
+
+
+def test_parse_point_color_multiple_targets():
+    ts = _parse_point_color("255,0,0:10,0,0;0,0,255:-10,0,0")
+    assert len(ts) == 2
+    assert ts[0][0] == 255 and ts[1][2] == 255
+
+
+def test_parse_point_color_rejects_garbage():
+    for bad in ("200,40:1,0,0", "a,b,c:1,0,0", "200,40,40:x,y,z",
+                "no-colon", "200,40,40:1,0,0,0.5,9"):
+        with pytest.raises(ValueError):
+            _parse_point_color(bad)
+
+
+def test_point_color_shifts_only_matching_color():
+    img = _two_color_image()
+    out = apply_point_color(img, _parse_point_color("200,40,40:60,0,0"))
+    arr = np.asarray(out).astype(int)
+    # Red half hue-shifted 60 deg (towards yellow): R stays high, G rises.
+    assert arr[:2, :, 1].mean() > 80
+    # Blue half essentially untouched.
+    assert abs(arr[2:, :, :].mean() - np.asarray(img)[2:].mean()) < 6
+
+
+def test_point_color_sat_and_lum():
+    img = _two_color_image()
+    out = apply_point_color(img, _parse_point_color("200,40,40:0,0,0.3"))
+    arr = np.asarray(out).astype(int)
+    assert arr[:2].mean() > np.asarray(img)[:2].mean()   # red half brighter
+    assert abs(arr[2:].mean() - np.asarray(img)[2:].mean()) < 6
+
+
+def test_point_color_tight_range_excludes_neighboring_hue():
+    img = _two_color_image(top=(0, 200, 0), bottom=(60, 200, 0))  # green vs olive-ish
+    tight = apply_point_color(img, _parse_point_color("0,200,0:90,0,0,0.02"))
+    arr = np.asarray(tight).astype(int)
+    # Green half rotates towards blue/cyan strongly; olive half barely moves.
+    assert arr[:2, :, 2].mean() > 100
+    assert arr[2:, :, 2].mean() < 30
+
+
+def test_point_color_identity_noop():
+    img = _two_color_image()
+    assert apply_point_color(img, []) is img
+    out = apply_point_color(img, _parse_point_color("200,40,40:0,0,0"))
+    assert np.array_equal(np.asarray(out), np.asarray(img))
+
+
+def test_point_color_preserves_info_and_alpha():
+    img = _two_color_image().convert("RGBA")
+    img.info["exif"] = b"keepme"
+    out = apply_point_color(img, _parse_point_color("200,40,40:30,0,0"))
+    assert out.mode == "RGBA"
+    assert out.info.get("exif") == b"keepme"
+    assert np.all(np.asarray(out)[..., 3] == 255)

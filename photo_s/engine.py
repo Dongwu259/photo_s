@@ -185,6 +185,7 @@ class ProcessOptions:
     color_grading: str = ""     # 3-way "zone:hue,sat;zone:hue,sat"
     # P1 stylize (v1.6.0)
     hsl: str = ""               # per-color "color:h,s,l;color:..."
+    point_color: str = ""       # sampled-color targets "r,g,b:h,s,l[,range];..."
     clarity: float = 0.0        # local contrast, large radius (0 = off)
     texture: float = 0.0        # fine detail, small radius (0 = off)
     dehaze: float = 0.0         # dark-channel dehaze [-1, 1], 0 = off
@@ -1086,6 +1087,9 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
         if options.hsl:
             from .grade import apply_hsl, _parse_hsl
             img = apply_hsl(img, _parse_hsl(options.hsl))
+        if options.point_color:
+            from .grade import apply_point_color, _parse_point_color
+            img = apply_point_color(img, _parse_point_color(options.point_color))
         if options.color_grading:
             from .grade import apply_color_grading, _parse_color_grading
             z = _parse_color_grading(options.color_grading)
