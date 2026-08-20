@@ -508,6 +508,53 @@ STRINGS = {
         "vignette_hint": "amount[,mid[,feather]]；空 = 关闭",
         "grain": "颗粒",
         "grain_hint": "amount[,size]；空 = 关闭",
+        # Local adjustments + lens correction (v1.7.0)
+        "point_color": "点颜色",
+        "point_color_hint": "取样色定向调整 r,g,b:h,s,l[,range]；空 = 关闭",
+        "edit_point_color": "点颜色…",
+        "masks": "局部蒙版",
+        "masks_hint": "线性/径向/颜色范围蒙版 + 蒙版内局部调整；空 = 关闭",
+        "edit_masks": "蒙版…",
+        "sec_lens": "镜头矫正",
+        "lens_distort": "畸变 k1",
+        "lens_distort_hint": "正 = 矫正桶形，负 = 枕形；空 = 关闭",
+        "lens_vignette": "去暗角",
+        "lens_vignette_hint": "amount[,midpoint]；空 = 关闭",
+        "lens_ca": "消色差",
+        "lens_ca_hint": "r_scale,b_scale 如 0.999,1.001；空 = 关闭",
+        "dlt_point_color": "点颜色（取样色 + 范围）",
+        "dlt_masks": "局部蒙版编辑器",
+        "pc_add": "添加",
+        "pc_update": "更新",
+        "pc_delete": "删除",
+        "pc_sample": "取样色 (R,G,B)",
+        "pc_hue": "色相偏移",
+        "pc_sat": "饱和度",
+        "pc_lum": "明度",
+        "pc_range": "范围容差",
+        "mask_name": "名称",
+        "mask_type": "类型",
+        "mask_linear": "线性渐变",
+        "mask_radial": "径向椭圆",
+        "mask_color": "颜色范围",
+        "mask_feather": "羽化",
+        "mask_invert": "反相",
+        "mask_params": "参数",
+        "mask_adjust_sec": "蒙版内调整（滑杆，0 = 不动）",
+        "adj_exposure": "曝光 EV",
+        "adj_brightness": "亮度",
+        "adj_contrast": "对比度",
+        "adj_saturation": "饱和度",
+        "adj_vibrance": "自然饱和度",
+        "adj_clarity": "清晰度",
+        "adj_texture": "纹理",
+        "adj_sharpen": "锐化",
+        "adj_temp": "色温 K",
+        "adj_tint": "tint 绿-/品红+",
+        "adj_blur": "模糊半径 px",
+        "mask_preview": "蒙版预览",
+        "mask_refresh": "刷新预览",
+        "mask_no_preview": "勾选文件后可预览",
         # settings category tabs (v1.6.1)
         "tab_output": "输出",
         "tab_adjust": "调整",
@@ -1032,6 +1079,53 @@ STRINGS = {
         "vignette_hint": "amount[,mid[,feather]]; blank = off",
         "grain": "Grain",
         "grain_hint": "amount[,size]; blank = off",
+        # Local adjustments + lens correction (v1.7.0)
+        "point_color": "Point color",
+        "point_color_hint": "Sampled-color targeting r,g,b:h,s,l[,range]; blank = off",
+        "edit_point_color": "Point color…",
+        "masks": "Local masks",
+        "masks_hint": "Linear/radial/color-range masks + local adjustments; blank = off",
+        "edit_masks": "Masks…",
+        "sec_lens": "Lens correction",
+        "lens_distort": "Distortion k1",
+        "lens_distort_hint": "+ fixes barrel, - pincushion; blank = off",
+        "lens_vignette": "Vignette fix",
+        "lens_vignette_hint": "amount[,midpoint]; blank = off",
+        "lens_ca": "CA fix",
+        "lens_ca_hint": "r_scale,b_scale e.g. 0.999,1.001; blank = off",
+        "dlt_point_color": "Point color (sample + range)",
+        "dlt_masks": "Local mask editor",
+        "pc_add": "Add",
+        "pc_update": "Update",
+        "pc_delete": "Delete",
+        "pc_sample": "Sample color (R,G,B)",
+        "pc_hue": "Hue shift",
+        "pc_sat": "Saturation",
+        "pc_lum": "Luminance",
+        "pc_range": "Range tolerance",
+        "mask_name": "Name",
+        "mask_type": "Type",
+        "mask_linear": "Linear gradient",
+        "mask_radial": "Radial ellipse",
+        "mask_color": "Color range",
+        "mask_feather": "Feather",
+        "mask_invert": "Invert",
+        "mask_params": "Params",
+        "mask_adjust_sec": "Adjustments inside mask (sliders, 0 = untouched)",
+        "adj_exposure": "Exposure EV",
+        "adj_brightness": "Brightness",
+        "adj_contrast": "Contrast",
+        "adj_saturation": "Saturation",
+        "adj_vibrance": "Vibrance",
+        "adj_clarity": "Clarity",
+        "adj_texture": "Texture",
+        "adj_sharpen": "Sharpen",
+        "adj_temp": "Temp K",
+        "adj_tint": "Tint G-/M+",
+        "adj_blur": "Blur radius px",
+        "mask_preview": "Mask preview",
+        "mask_refresh": "Refresh preview",
+        "mask_no_preview": "Check a file to preview",
         # settings category tabs (v1.6.1)
         "tab_output": "Output",
         "tab_adjust": "Adjust",
@@ -1535,6 +1629,13 @@ class PhotoSApp:
         self.dehaze = tk.StringVar(value="")
         self.vignette = tk.StringVar(value="")
         self.grain = tk.StringVar(value="")
+        # Local adjustments + lens correction (v1.7.0) - blank = off
+        self.point_color = tk.StringVar(value="")
+        self.masks = tk.StringVar(value="")
+        self.mask_adjust = tk.StringVar(value="")
+        self.lens_distort = tk.StringVar(value="")
+        self.lens_vignette = tk.StringVar(value="")
+        self.lens_ca = tk.StringVar(value="")
         self.auto_levels = tk.BooleanVar(value=False)
         self.srgb = tk.BooleanVar(value=False)
         self.flatten_cmyk = tk.BooleanVar(value=False)
@@ -2772,6 +2873,10 @@ class PhotoSApp:
              "_open_color_wheel_dialog", "grade_wheels_val"),
             ("hsl", "hsl_hint", "edit_hsl", "_open_hsl_dialog",
              "grade_hsl_val"),
+            ("point_color", "point_color_hint", "edit_point_color",
+             "_open_point_color_dialog", "grade_point_color_val"),
+            ("masks", "masks_hint", "edit_masks", "_open_mask_dialog",
+             "grade_masks_val"),
         ]
         for off, (var_key, hint_key) in enumerate(_grade_widgets):
             r = 21 + off * 2
@@ -2808,6 +2913,28 @@ class PhotoSApp:
                      bg=COLORS["card"]).grid(
                 row=r + 1, column=0, columnspan=3, sticky="w", pady=(0, 4))
         self._refresh_grade_value_labels()
+
+        # ── Lens correction (v1.7.0) - manual params, blank = off ───────────
+        lens_frame = self._add_collapsible_section(ADJ, "sec_lens",
+                                                   default_open=False)
+        lens_frame.columnconfigure(1, weight=1)
+        _lens_fields = [
+            ("lens_distort", "lens_distort_hint"),
+            ("lens_vignette", "lens_vignette_hint"),
+            ("lens_ca", "lens_ca_hint"),
+        ]
+        for off, (var_key, hint_key) in enumerate(_lens_fields):
+            r = off * 2
+            tk.Label(lens_frame, text=self._t(var_key), font=FONT_SMALL,
+                     fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+                row=r, column=0, sticky="w")
+            ttk.Entry(lens_frame, textvariable=getattr(self, var_key),
+                      font=FONT_BODY, width=10).grid(
+                row=r, column=1, sticky="w", padx=(8, 0))
+            tk.Label(lens_frame, text=self._t(hint_key),
+                     font=FONT_TINY, fg=COLORS["text_secondary"],
+                     bg=COLORS["card"]).grid(
+                row=r + 1, column=0, columnspan=3, sticky="w", pady=(0, 4))
 
         # ── Metadata section ──────────────────────────────────────────────────
         meta_frame = self._add_collapsible_section(META, "sec_metadata")
@@ -2898,7 +3025,9 @@ class PhotoSApp:
         """Show the current curves / color-grading / hsl specs under buttons."""
         for var_key, attr in (("curves", "grade_curves_val"),
                               ("color_grading", "grade_wheels_val"),
-                              ("hsl", "grade_hsl_val")):
+                              ("hsl", "grade_hsl_val"),
+                              ("point_color", "grade_point_color_val"),
+                              ("masks", "grade_masks_val")):
             lbl = getattr(self, attr, None)
             if lbl is None:
                 continue
@@ -2967,7 +3096,8 @@ class PhotoSApp:
             specs.append(ed.to_spec(ch))
         self.curves.set("|".join(specs))
         self._refresh_grade_value_labels()
-        win.destroy()
+        if win is not None:
+            win.destroy()
 
     def _open_color_wheel_dialog(self):
         """Three HSV wheels (shadows/midtones/highlights) — LR color grading.
@@ -3039,7 +3169,8 @@ class PhotoSApp:
                          else f"{base},{lum_val:.2f}")
         self.color_grading.set(";".join(specs))
         self._refresh_grade_value_labels()
-        win.destroy()
+        if win is not None:
+            win.destroy()
 
     def _open_hsl_dialog(self):
         """8-color HSL split editor (click a chip, drive h/s/l sliders)."""
@@ -3074,7 +3205,474 @@ class PhotoSApp:
     def _hsl_ok(self, win, panel):
         self.hsl.set(panel.dump())
         self._refresh_grade_value_labels()
-        win.destroy()
+        if win is not None:
+            win.destroy()
+
+    # ── Point color editor (v1.7.0) ─────────────────────────────────────
+
+    def _open_point_color_dialog(self):
+        """Form editor for the point_color compact spec (list + sliders)."""
+        from .grade import _parse_point_color
+        if self._dlg_cooldown_active():
+            return
+        win = tk.Toplevel(self.root)
+        win.title(self._t("dlt_point_color"))
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+
+        try:
+            targets = list(_parse_point_color(self.point_color.get()))
+        except ValueError:
+            targets = []
+
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=12, pady=12)
+
+        lst = tk.Listbox(body, width=24, height=8, font=FONT_SMALL,
+                         exportselection=False, bg=COLORS["card"],
+                         fg=COLORS["text"], relief="flat",
+                         highlightthickness=1,
+                         highlightbackground=COLORS["border"])
+        lst.grid(row=0, column=0, rowspan=9, sticky="ns", padx=(0, 12))
+
+        editor = tk.Frame(body, bg=COLORS["bg"])
+        editor.grid(row=0, column=1, sticky="n")
+
+        pc_r = tk.StringVar(value="200")
+        pc_g = tk.StringVar(value="120")
+        pc_b = tk.StringVar(value="80")
+        pc_hue = tk.DoubleVar(value=0.0)
+        pc_sat = tk.DoubleVar(value=0.0)
+        pc_lum = tk.DoubleVar(value=0.0)
+        pc_range = tk.DoubleVar(value=0.15)
+        swatch = tk.Canvas(editor, width=44, height=20,
+                           bg=COLORS["card"], highlightthickness=0)
+
+        def _sync_swatch(*_):
+            try:
+                rgb = (max(0, min(255, int(pc_r.get()))),
+                       max(0, min(255, int(pc_g.get()))),
+                       max(0, min(255, int(pc_b.get()))))
+            except ValueError:
+                return
+            swatch.config(bg="#%02x%02x%02x" % rgb)
+
+        tk.Label(editor, text=self._t("pc_sample"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=0, column=0, columnspan=2, sticky="w")
+        rgb_row = tk.Frame(editor, bg=COLORS["bg"])
+        rgb_row.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        for i, var in enumerate((pc_r, pc_g, pc_b)):
+            ttk.Entry(rgb_row, textvariable=var, font=FONT_BODY,
+                      width=5).grid(row=0, column=i, padx=(0, 4))
+            var.trace_add("write", _sync_swatch)
+        swatch.grid(row=0, column=3, padx=(8, 0), rowspan=2)
+
+        _sliders = [
+            ("pc_hue", pc_hue, -180, 180, 1),
+            ("pc_sat", pc_sat, -100, 100, 1),
+            ("pc_lum", pc_lum, -100, 100, 1),
+            ("pc_range", pc_range, 2, 100, 1),
+        ]
+        for off, (key, var, lo, hi, res) in enumerate(_sliders):
+            tk.Label(editor, text=self._t(key), font=FONT_SMALL,
+                     fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+                row=2 + off * 2, column=0, sticky="w")
+            ttk.Scale(editor, from_=lo, to=hi, variable=var).grid(
+                row=2 + off * 2, column=1, sticky="ew", padx=(8, 0))
+        editor.columnconfigure(1, weight=1)
+
+        def _refresh_list():
+            lst.delete(0, tk.END)
+            for r, g, b, h, s, l, rng in targets:
+                lst.insert(tk.END, f"{r},{g},{b}  h{h:+.0f} s{s:+.2f} "
+                                   f"l{l:+.2f} r{rng:.2f}")
+
+        def _load_selected(_evt=None):
+            sel = lst.curselection()
+            if not sel:
+                return
+            r, g, b, h, s, l, rng = targets[sel[0]]
+            pc_r.set(str(r)); pc_g.set(str(g)); pc_b.set(str(b))
+            pc_hue.set(float(h)); pc_sat.set(float(s)); pc_lum.set(float(l))
+            pc_range.set(float(rng * 100))
+
+        def _read_fields():
+            r = max(0, min(255, int(pc_r.get())))
+            g = max(0, min(255, int(pc_g.get())))
+            b = max(0, min(255, int(pc_b.get())))
+            return (r, g, b, pc_hue.get(), pc_sat.get() / 100.0,
+                    pc_lum.get() / 100.0, pc_range.get() / 100.0)
+
+        def _add():
+            targets.append(_read_fields())
+            _refresh_list()
+            lst.selection_clear(0, tk.END)
+            lst.selection_set(tk.END)
+
+        def _update():
+            sel = lst.curselection()
+            if sel:
+                targets[sel[0]] = _read_fields()
+                _refresh_list()
+                lst.selection_set(sel[0])
+
+        def _delete():
+            sel = lst.curselection()
+            if sel:
+                del targets[sel[0]]
+                _refresh_list()
+
+        lst.bind("<<ListboxSelect>>", _load_selected)
+        _refresh_list()
+
+        btns = tk.Frame(editor, bg=COLORS["bg"])
+        btns.grid(row=10, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        for text, cmd in ((self._t("pc_add"), _add),
+                          (self._t("pc_update"), _update),
+                          (self._t("pc_delete"), _delete)):
+            FlatButton(btns, text=text, command=cmd,
+                       bg=COLORS["bg"], fg=COLORS["text"],
+                       hover_bg=COLORS["border"], font=FONT_SMALL,
+                       padx=8, pady=2, border_color=COLORS["border"]).pack(
+                side="left", padx=(0, 6))
+
+        bottom = tk.Frame(win, bg=COLORS["bg"])
+        bottom.pack(fill="x", padx=12, pady=(0, 12))
+        FlatButton(bottom, text=self._t("ok"),
+                   command=lambda: self._point_color_ok(win, targets),
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right")
+        FlatButton(bottom, text=self._t("cancel"), command=win.destroy,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right", padx=(0, 8))
+        _sync_swatch()
+
+    def _point_color_ok(self, win, targets):
+        def _n(v):
+            v = round(float(v), 3)
+            return str(int(v)) if v == int(v) else str(v)
+        segs = []
+        for r, g, b, h, s, l, rng in targets:
+            segs.append(f"{r},{g},{b}:{_n(h)},{_n(s)},{_n(l)},{_n(rng)}")
+        self.point_color.set(";".join(segs))
+        self._refresh_grade_value_labels()
+        if win is not None:
+            win.destroy()
+
+    # ── Local mask editor (v1.7.0) ──────────────────────────────────────
+
+    def _open_mask_dialog(self):
+        """Form editor for masks + mask_adjust, with red-overlay preview."""
+        from .mask import parse_masks, parse_mask_adjust, render_mask
+        if self._dlg_cooldown_active():
+            return
+        win = tk.Toplevel(self.root)
+        win.title(self._t("dlt_masks"))
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+
+        try:
+            specs = [(s.name, s.kind, list(s.params), s.feather, s.invert)
+                     for s in parse_masks(self.masks.get())]
+        except Exception:
+            specs = []
+        try:
+            adjusts = {k: dict(v) for k, v in
+                       parse_mask_adjust(self.mask_adjust.get()).items()}
+        except Exception:
+            adjusts = {}
+
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=12, pady=12)
+
+        lst = tk.Listbox(body, width=18, height=6, font=FONT_SMALL,
+                         exportselection=False, bg=COLORS["card"],
+                         fg=COLORS["text"], relief="flat",
+                         highlightthickness=1,
+                         highlightbackground=COLORS["border"])
+        lst.grid(row=0, column=0, sticky="nw", padx=(0, 12))
+
+        editor = tk.Frame(body, bg=COLORS["bg"])
+        editor.grid(row=0, column=1, sticky="nw")
+        editor.columnconfigure(1, weight=1)
+
+        m_name = tk.StringVar(value="mask1")
+        m_type = tk.StringVar(value="linear")
+        m_params = [tk.StringVar(value=v) for v in
+                    ("0.5", "0", "0.5", "1")]
+        m_feather = tk.DoubleVar(value=0.0)
+        m_invert = tk.BooleanVar(value=False)
+        # per-mask adjustment sliders (value 0 = untouched)
+        adj_vars = {key: tk.DoubleVar(value=0.0) for key in
+                    ("exposure", "brightness", "contrast", "saturation",
+                     "vibrance", "clarity", "texture", "sharpen",
+                     "temp", "tint", "blur")}
+        _current = {"name": None}
+
+        tk.Label(editor, text=self._t("mask_name"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=0, column=0, sticky="w")
+        ttk.Entry(editor, textvariable=m_name, font=FONT_BODY,
+                  width=10).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        tk.Label(editor, text=self._t("mask_type"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=1, column=0, sticky="w")
+        type_box = ttk.Combobox(editor, textvariable=m_type, width=12,
+                                state="readonly", values=(
+                                    self._t("mask_linear"),
+                                    self._t("mask_radial"),
+                                    self._t("mask_color")))
+        type_box.grid(row=1, column=1, sticky="w", padx=(8, 0))
+
+        param_lbls = [tk.Label(editor, text="", font=FONT_SMALL,
+                               fg=COLORS["text_secondary"],
+                               bg=COLORS["bg"]) for _ in range(4)]
+        param_widgets = []
+        for i in range(4):
+            param_lbls[i].grid(row=2 + i, column=0, sticky="w")
+            e = ttk.Entry(editor, textvariable=m_params[i], font=FONT_BODY,
+                          width=8)
+            e.grid(row=2 + i, column=1, sticky="w", padx=(8, 0))
+            param_widgets.append(e)
+
+        _PARAM_LABELS = {
+            "linear": ("x0", "y0", "x1", "y1"),
+            "radial": ("cx", "cy", "rx", "ry"),
+            "color": ("r", "g", "b", "tol"),
+        }
+
+        def _type_key():
+            for key, label in (("linear", "mask_linear"),
+                               ("radial", "mask_radial"),
+                               ("color", "mask_color")):
+                if m_type.get() == self._t(label):
+                    return key
+            return "linear"
+
+        def _sync_type(*_):
+            key = _type_key()
+            for i, lbl in enumerate(_PARAM_LABELS[key]):
+                param_lbls[i].config(text=lbl)
+
+        type_box.bind("<<ComboboxSelected>>", _sync_type)
+        _sync_type()
+
+        tk.Label(editor, text=self._t("mask_feather"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=6, column=0, sticky="w")
+        ttk.Scale(editor, from_=0, to=100, variable=m_feather).grid(
+            row=6, column=1, sticky="ew", padx=(8, 0))
+        ttk.Checkbutton(editor, text=self._t("mask_invert"),
+                        variable=m_invert).grid(
+            row=7, column=0, columnspan=2, sticky="w")
+
+        # adjustment sliders, two per row
+        tk.Label(editor, text=self._t("mask_adjust_sec"), font=FONT_SMALL,
+                 fg=COLORS["text"], bg=COLORS["bg"]).grid(
+            row=8, column=0, columnspan=2, sticky="w", pady=(8, 2))
+        _ADJ_META = (
+            ("exposure", -3, 3), ("brightness", -1, 1), ("contrast", -1, 1),
+            ("saturation", -1, 1), ("vibrance", -1, 1), ("clarity", -1, 1),
+            ("texture", -1, 1), ("sharpen", -1, 1), ("temp", 0, 12000),
+            ("tint", -100, 100), ("blur", 0, 50),
+        )
+        for i, (key, lo, hi) in enumerate(_ADJ_META):
+            r, c = 9 + i // 2, (i % 2) * 2
+            tk.Label(editor, text=self._t("adj_" + key), font=FONT_TINY,
+                     fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+                row=r, column=c, sticky="w")
+            ttk.Scale(editor, from_=lo, to=hi,
+                      variable=adj_vars[key]).grid(
+                row=r, column=c + 1, sticky="ew", padx=(6, 10))
+
+        # ── preview: red overlay of the current form spec on the first
+        # checked file (geometric masks also work on a neutral canvas)
+        preview = tk.Label(body, text=self._t("mask_no_preview"),
+                           font=FONT_SMALL, fg=COLORS["text_secondary"],
+                           bg=COLORS["card"], width=44, height=14)
+        preview.grid(row=1, column=0, columnspan=2, sticky="w",
+                     pady=(10, 0))
+        _photo = {"img": None}  # keep a ref so ImageTk isn't GC'd
+
+        def _refresh_preview():
+            from PIL import Image as PILImage, ImageTk
+            files = self._checked_files()
+            base = None
+            if files:
+                try:
+                    base = PILImage.open(files[0]).convert("RGB")
+                    base.thumbnail((360, 270), PILImage.LANCZOS)
+                except Exception:
+                    base = None
+            if base is None:
+                base = PILImage.new("RGB", (360, 240), (60, 60, 60))
+            try:
+                key = _type_key()
+                vals = []
+                for var in m_params:
+                    v = float(var.get())
+                    vals.append(v)
+                params = (int(round(vals[0])), int(round(vals[1])),
+                          int(round(vals[2])),
+                          max(0.02, vals[3] if len(vals) > 3 else 0.15)) \
+                    if key == "color" else tuple(vals[:4])
+                from .mask import MaskSpec
+                spec = MaskSpec(key, params,
+                                feather=m_feather.get() / 100.0,
+                                invert=m_invert.get())
+                m = render_mask(spec, base.width, base.height, img=base)
+                overlay = PILImage.new("RGB", base.size, (255, 40, 40))
+                out = PILImage.blend(base, overlay, 0.45)
+                mask_img = PILImage.fromarray(
+                    (m * 255).astype("uint8"), "L").convert("L")
+                out = PILImage.composite(out, base, mask_img)
+                _photo["img"] = ImageTk.PhotoImage(out)
+                preview.config(image=_photo["img"], text="", width=360,
+                               height=270)
+                preview.image = _photo["img"]
+            except Exception:
+                preview.config(image="", text=self._t("mask_no_preview"))
+
+        FlatButton(editor, text=self._t("mask_refresh"),
+                   command=_refresh_preview,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=8, pady=2, border_color=COLORS["border"]).grid(
+            row=15, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        def _refresh_list():
+            lst.delete(0, tk.END)
+            for name, kind, params, feather, invert in specs:
+                lst.insert(tk.END, f"{name}  [{kind}]")
+
+        def _read_form():
+            key = _type_key()
+            vals = [float(v.get()) for v in m_params]
+            if key == "color":
+                params = (int(round(max(0, min(255, vals[0])))),
+                          int(round(max(0, min(255, vals[1])))),
+                          int(round(max(0, min(255, vals[2])))),
+                          max(0.02, min(1.0, vals[3] if vals[3] else 0.15)))
+            elif key == "radial":
+                params = (max(0.0, min(1.0, vals[0])),
+                          max(0.0, min(1.0, vals[1])),
+                          max(0.01, vals[2]), max(0.01, vals[3]))
+            else:
+                params = tuple(max(0.0, min(1.0, v)) for v in vals[:4])
+            adjust = {}
+            for k, var in adj_vars.items():
+                v = round(var.get(), 3)
+                if v != 0.0:
+                    adjust[k] = v
+            return (m_name.get().strip() or f"mask{len(specs) + 1}", key,
+                    list(params), m_feather.get() / 100.0, m_invert.get(),
+                    adjust)
+
+        def _load_selected(_evt=None):
+            sel = lst.curselection()
+            if not sel:
+                return
+            name, kind, params, feather, invert = specs[sel[0]]
+            _current["name"] = name
+            m_name.set(name)
+            m_type.set(self._t({"linear": "mask_linear",
+                                "radial": "mask_radial",
+                                "color": "mask_color"}[kind]))
+            _sync_type()
+            for i in range(4):
+                m_params[i].set(str(params[i]) if i < len(params) else "0")
+            m_feather.set(feather * 100)
+            m_invert.set(invert)
+            for k, var in adj_vars.items():
+                var.set(adjusts.get(name, {}).get(k, 0.0))
+
+        def _add():
+            name, key, params, feather, invert, adjust = _read_form()
+            specs.append((name, key, params, feather, invert))
+            if adjust:
+                adjusts[name] = adjust
+            _refresh_list()
+            lst.selection_clear(0, tk.END)
+            lst.selection_set(tk.END)
+
+        def _update():
+            sel = lst.curselection()
+            if not sel:
+                return
+            old = specs[sel[0]][0]
+            name, key, params, feather, invert, adjust = _read_form()
+            specs[sel[0]] = (name, key, params, feather, invert)
+            if old in adjusts:
+                del adjusts[old]
+            if adjust:
+                adjusts[name] = adjust
+            _refresh_list()
+            lst.selection_set(sel[0])
+
+        def _delete():
+            sel = lst.curselection()
+            if sel:
+                name = specs[sel[0]][0]
+                del specs[sel[0]]
+                adjusts.pop(name, None)
+                _refresh_list()
+
+        lst.bind("<<ListboxSelect>>", _load_selected)
+        _refresh_list()
+
+        btns = tk.Frame(body, bg=COLORS["bg"])
+        btns.grid(row=0, column=2, sticky="nw", padx=(12, 0))
+        for text, cmd in ((self._t("pc_add"), _add),
+                          (self._t("pc_update"), _update),
+                          (self._t("pc_delete"), _delete)):
+            FlatButton(btns, text=text, command=cmd,
+                       bg=COLORS["bg"], fg=COLORS["text"],
+                       hover_bg=COLORS["border"], font=FONT_SMALL,
+                       padx=8, pady=2, border_color=COLORS["border"]).pack(
+                fill="x", pady=(0, 6))
+
+        bottom = tk.Frame(win, bg=COLORS["bg"])
+        bottom.pack(fill="x", padx=12, pady=(0, 12))
+        FlatButton(bottom, text=self._t("ok"),
+                   command=lambda: self._masks_ok(win, specs, adjusts),
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right")
+        FlatButton(bottom, text=self._t("cancel"), command=win.destroy,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right", padx=(0, 8))
+
+    def _masks_ok(self, win, specs, adjusts):
+        def _n(v):
+            v = round(float(v), 4)
+            return str(int(v)) if v == int(v) else str(v)
+        mask_segs = []
+        for name, kind, params, feather, invert in specs:
+            seg = f"{name}:{kind}:" + ",".join(_n(p) for p in params)
+            if feather:
+                seg += f",feather={_n(feather)}"
+            if invert:
+                seg += ",invert"
+            mask_segs.append(seg)
+        adj_segs = []
+        for name, adjust in adjusts.items():
+            if name not in {s[0] for s in specs}:
+                continue
+            adj_segs.append(name + ":" + ",".join(
+                f"{k}={_n(v)}" for k, v in adjust.items()))
+        self.masks.set(";".join(mask_segs))
+        self.mask_adjust.set(";".join(adj_segs))
+        self._refresh_grade_value_labels()
+        if win is not None:
+            win.destroy()
 
     def _browse_gpx(self):
         """Pick a GPX track file."""
@@ -3830,6 +4428,7 @@ class PhotoSApp:
                      "sharpen", "ev", "wb_tint", "vibrance", "clarity",
                      "texture", "dehaze"):
             _set(getattr(self, name), getattr(opts, name), float)
+        _set(self.lens_distort, getattr(opts, "lens_distort", 0.0), float)
         # strings (None → "")
         for name in ("output_dir", "prefix", "suffix", "scale_percent",
                      "max_width", "max_height", "max_pixels",
@@ -3839,7 +4438,8 @@ class PhotoSApp:
                      "crop_ratio", "rotate_bg", "flip", "pad_ratio",
                      "pad_bg", "rename_pattern", "folder_pattern",
                      "levels", "curves", "color_grading", "hsl",
-                     "vignette", "grain"):
+                     "vignette", "grain", "point_color", "masks",
+                     "mask_adjust", "lens_vignette", "lens_ca"):
             _set(getattr(self, name), getattr(opts, name), str)
         # face blur combobox stores localized labels, options store
         # "blur"/"pixelate"/None
@@ -5992,6 +6592,14 @@ class PhotoSApp:
             if self.dehaze.get().strip() else 0.0,
             vignette=self.vignette.get().strip(),
             grain=self.grain.get().strip(),
+            # Local adjustments + lens correction (v1.7.0)
+            point_color=self.point_color.get().strip(),
+            masks=self.masks.get().strip(),
+            mask_adjust=self.mask_adjust.get().strip(),
+            lens_distort=_to_float(self.lens_distort.get(), 0.0)
+            if self.lens_distort.get().strip() else 0.0,
+            lens_vignette=self.lens_vignette.get().strip(),
+            lens_ca=self.lens_ca.get().strip(),
             auto_levels=self.auto_levels.get(),
             srgb=self.srgb.get(),
             flatten_cmyk=self.flatten_cmyk.get(),

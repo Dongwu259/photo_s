@@ -151,6 +151,57 @@ class TestBuildOptions:
         assert app2.color_grading.get() == "shadows:120,0.3"
         root.destroy()
 
+    def test_v17_fields_roundtrip(self):
+        """v1.7.0 local-adjustment / lens fields map both directions."""
+        root, app = _make_app()
+        app.point_color.set("200,120,80:30,0.2,-0.1,0.2")
+        app.masks.set("sky:linear:0.5,0,0.5,1,feather=0.3")
+        app.mask_adjust.set("sky:exposure=-0.7")
+        app.lens_distort.set("0.15")
+        app.lens_vignette.set("0.3,0.4")
+        app.lens_ca.set("0.999,1.001")
+        opts = app._build_options()
+        assert opts.point_color == "200,120,80:30,0.2,-0.1,0.2"
+        assert opts.masks == "sky:linear:0.5,0,0.5,1,feather=0.3"
+        assert opts.mask_adjust == "sky:exposure=-0.7"
+        assert opts.lens_distort == 0.15
+        assert opts.lens_vignette == "0.3,0.4"
+        assert opts.lens_ca == "0.999,1.001"
+        # fresh app: all off
+        app2 = _make_app()[1]
+        o2 = app2._build_options()
+        assert o2.point_color == "" and o2.masks == ""
+        assert o2.lens_distort == 0.0 and o2.lens_ca == ""
+        # options -> UI
+        app2._apply_options_to_ui(opts)
+        assert app2.point_color.get() == "200,120,80:30,0.2,-0.1,0.2"
+        assert app2.masks.get() == "sky:linear:0.5,0,0.5,1,feather=0.3"
+        assert app2.lens_distort.get() == "0.15"
+        root.destroy()
+
+    def test_point_color_ok_writes_spec(self):
+        """_point_color_ok serializes targets back to the compact spec."""
+        root, app = _make_app()
+        app._point_color_ok(None, [(200, 120, 80, 30.0, 0.2, -0.1, 0.2),
+                                   (10, 10, 240, -20.0, 0.0, 0.1, 0.1)])
+        assert app.point_color.get() == (
+            "200,120,80:30,0.2,-0.1,0.2;10,10,240:-20,0,0.1,0.1")
+        root.destroy()
+
+    def test_masks_ok_writes_specs(self):
+        """_masks_ok serializes masks + adjustments back to compact specs."""
+        root, app = _make_app()
+        specs = [("sky", "linear", [0.5, 0.0, 0.5, 1.0], 0.3, False),
+                 ("spot", "radial", [0.5, 0.5, 0.3, 0.4], 0.0, True)]
+        adjusts = {"sky": {"exposure": -0.7, "saturation": 0.2},
+                   "gone": {"brightness": 1.0}}  # stale name is dropped
+        app._masks_ok(None, specs, adjusts)
+        assert app.masks.get() == (
+            "sky:linear:0.5,0,0.5,1,feather=0.3;"
+            "spot:radial:0.5,0.5,0.3,0.4,invert")
+        assert app.mask_adjust.get() == "sky:exposure=-0.7,saturation=0.2"
+        root.destroy()
+
 
 class TestFileList:
     def test_dims_cached_across_refreshes(self):
