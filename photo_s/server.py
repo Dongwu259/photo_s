@@ -474,6 +474,24 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
     def _dispatch_post(self, data: dict):
         if self.path == "/process/stream":
             self._handle_process_stream(data)
+        elif self.path == "/analyze":
+            # Perceptual feedback loop: agents analyze -> adjust -> process.
+            from .metrics import analyze_image
+            paths = _resolve_paths(data.get("paths", []),
+                                   bool(data.get("recursive", False)))
+            if not paths:
+                self._send_json(400, {"error": "no supported image files found"})
+                return
+            try:
+                sample_size = int(data.get("sample_size", 256))
+            except (TypeError, ValueError):
+                sample_size = 256
+            sample_size = max(16, min(2048, sample_size))
+            results = [analyze_image(p, sample_size=sample_size)
+                       for p in paths]
+            self._send_json(200, {"ok": all(r.get("ok") for r in results),
+                                  "count": len(results),
+                                  "results": results})
         elif self.path == "/process":
             paths = _resolve_paths(data.get("paths", []),
                                    bool(data.get("recursive", False)))

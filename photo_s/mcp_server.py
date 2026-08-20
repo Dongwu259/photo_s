@@ -115,6 +115,13 @@ def process_tool(
     dehaze: Optional[float] = None,
     vignette: Optional[str] = None,
     grain: Optional[str] = None,
+    # Local adjustments + lens correction (v1.7.0)
+    masks: Optional[str] = None,
+    mask_adjust: Optional[str] = None,
+    point_color: Optional[str] = None,
+    lens_distort: Optional[float] = None,
+    lens_vignette: Optional[str] = None,
+    lens_ca: Optional[str] = None,
     jobs: Optional[int] = None,
     dry_run: bool = False,
     evaluate: bool = False,
@@ -143,6 +150,9 @@ def process_tool(
         "vibrance": vibrance, "color_grading": color_grading,
         "hsl": hsl, "clarity": clarity, "texture": texture,
         "dehaze": dehaze, "vignette": vignette, "grain": grain,
+        "masks": masks, "mask_adjust": mask_adjust,
+        "point_color": point_color, "lens_distort": lens_distort,
+        "lens_vignette": lens_vignette, "lens_ca": lens_ca,
     }
     data = {k: v for k, v in data.items() if v is not None}
     if resize:
@@ -839,6 +849,27 @@ def watch_stop_tool(id: str) -> dict:
             "processed_count": len(rec["results"])}
 
 
+@_versioned
+def analyze_tool(paths: list, recursive: bool = False,
+                 sample_size: int = 256) -> dict:
+    """Perceptual analysis: histograms / channel stats / WB lean / exposure.
+
+    The feedback half of the agent grading loop - call after ``process``
+    to judge the result, adjust the grading params, process again.
+    """
+    from .cli import _collect_files
+    from .metrics import analyze_image
+
+    files = _collect_files(list(paths), recursive=recursive)
+    if not files:
+        return {"ok": False, "error": "no supported image files found",
+                "paths": list(paths)}
+    sample_size = max(16, min(2048, int(sample_size)))
+    results = [analyze_image(p, sample_size=sample_size) for p in files]
+    return {"ok": all(r.get("ok") for r in results),
+            "count": len(results), "results": results}
+
+
 # ── Server assembly ─────────────────────────────────────────────────────────
 
 
@@ -925,6 +956,13 @@ def create_server(config_path: Optional[str] = None):
     mcp.add_tool(watch_stop_tool, name="watch_stop",
                  description="Stop a background watch; results so far stay "
                              "visible via 'watch_status'.")
+    mcp.add_tool(analyze_tool, name="analyze",
+                 description="Perceptual analysis of images: per-channel + "
+                             "luma histograms, channel stats, contrast, "
+                             "saturation, white-balance lean, exposure and "
+                             "blur score. The feedback half of the "
+                             "'analyze -> adjust params -> process -> "
+                             "analyze' grading loop.")
     return mcp
 
 

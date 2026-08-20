@@ -607,3 +607,28 @@ def test_options_from_dict_output_sizes_skips_scalars():
     from photo_s.server import _options_from_dict
     opts = _options_from_dict({"output_sizes": [42, ["thumb", 16, None]]})
     assert opts.output_sizes == [("thumb", 16, None)]
+
+
+def test_analyze_route(server):
+    s, img = server
+    status, payload = s.request("POST", "/analyze", {"paths": [img]})
+    assert status == 200
+    assert payload["ok"] is True
+    res = payload["results"][0]
+    assert set(res["histogram"]) == {"r", "g", "b", "luma"}
+    assert "kelvin_estimate" in res["white_balance"]
+    assert payload["schema_version"] == 1
+
+
+def test_analyze_route_no_files(server):
+    s, _ = server
+    status, payload = s.request("POST", "/analyze", {"paths": ["/nope.jpg"]})
+    assert status == 400
+
+
+def test_analyze_route_sample_size_clamped(server):
+    s, img = server
+    status, payload = s.request("POST", "/analyze",
+                                {"paths": [img], "sample_size": "bogus"})
+    assert status == 200  # falls back to default instead of 500
+    assert payload["ok"] is True

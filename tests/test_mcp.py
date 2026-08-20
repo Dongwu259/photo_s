@@ -37,7 +37,7 @@ class TestTools:
         assert names == {"process", "info", "exif", "dedup", "cull", "select", "hdr", "blurfaces", "hash",
                          "plugin", "contact_sheet", "gallery",
                          "watermark", "preset", "bench",
-                         "watch", "watch_status", "watch_stop"}
+                         "watch", "watch_status", "watch_stop", "analyze"}
 
     def test_server_info_version(self):
         # serverInfo must report the PhotoS version, not the mcp SDK's
@@ -434,7 +434,7 @@ class TestCliListTools:
         out = capsys.readouterr().out
         assert rc == 0
         data = json.loads(out)
-        assert len(data["tools"]) == 18
+        assert len(data["tools"]) == 19
         for t in data["tools"]:
             assert "input_schema" in t
             assert "properties" in t["input_schema"]
@@ -466,7 +466,8 @@ class TestStdioEndToEnd:
                                      "cull", "select", "hdr", "blurfaces", "hash", "plugin",
                                      "contact_sheet", "gallery",
                                      "watermark", "preset", "bench",
-                                     "watch", "watch_status", "watch_stop"}
+                                     "watch", "watch_status", "watch_stop",
+                                     "analyze"}
                     result = await session.call_tool(
                         "process",
                         {"paths": [img], "output_dir": str(out),
@@ -549,3 +550,59 @@ class TestPresetTool:
         assert "p1" in lst["presets"]
         deleted = _call("preset", {"action": "delete", "name": "p1"})
         assert deleted["deleted"] is True
+
+
+class TestAnalyzeTool:
+    def test_analyze_shape(self, tmp_path):
+        img = _img(tmp_path / "a.jpg", color=(200, 150, 100))
+        r = _call("analyze", {"paths": [img]})
+        assert r["ok"] is True
+        assert r["count"] == 1
+        res = r["results"][0]
+        assert res["ok"] is True
+        assert set(res["histogram"]) == {"r", "g", "b", "luma"}
+        assert len(res["histogram"]["luma"]) == 32
+        assert sum(res["histogram"]["luma"]) > 0
+        assert "kelvin_estimate" in res["white_balance"]
+        assert "luminance" in res["exposure"]
+        assert "blur_score" in res
+        assert r["schema_version"] == 1
+
+    def test_analyze_no_files(self):
+        r = _call("analyze", {"paths": ["/nonexistent/dir"]})
+        assert r["ok"] is False
+
+
+class TestProcessToolV17Params:
+    def test_masks_and_point_color_roundtrip(self, tmp_path):
+        import numpy as np
+        from PIL import Image as PILImage
+        src = tmp_path / "m.png"
+        img = PILImage.new("RGB", (16, 16))
+        for y in range(16):
+            for x in range(16):
+                img.putpixel((x, y), (200, 40, 40) if y < 8 else (40, 40, 200))
+        img.save(src)
+        out = tmp_path / "out"
+        r = _call("process", {
+            "paths": [str(src)], "output_dir": str(out),
+            "output_format": "PNG",
+            "masks": "reds:color:200,40,40,tol=0.1",
+            "mask_adjust": "reds:brightness=0.5",
+            "point_color": "40,40,200:0,0,0.3",
+        })
+        assert r["ok"] is True
+        arr = np.asarray(PILImage.open(r["results"][0]["output"]))
+        # Mask brightened the red half (R clipped to 255); point_color
+        # lifted the blue half too but less (V 200->~255, RGB ~50).
+        assert arr[:8, :, 0].mean() > 250
+        assert arr[:8].mean() > arr[8:].mean() + 5
+
+    def test_lens_params_accepted(self, tmp_path):
+        src = _img(tmp_path / "l.jpg")
+        out = tmp_path / "out"
+        r = _call("process", {
+            "paths": [src], "output_dir": str(out), "output_format": "PNG",
+            "lens_distort": 0.2, "lens_vignette": "0.3", "lens_ca": "0.999,1.001",
+        })
+        assert r["ok"] is True

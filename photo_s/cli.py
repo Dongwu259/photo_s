@@ -1650,6 +1650,26 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___json'),
     )
 
+    # ── analyze subcommand (perceptual feedback for agents/models) ─────────
+    analyze_parser = subparsers.add_parser(
+        "analyze", help=_t('cmd_analyze'),
+    )
+    analyze_parser.add_argument(
+        "paths", nargs="+", help=_t('help___paths'),
+    )
+    analyze_parser.add_argument(
+        "-r", "--recursive", action="store_true",
+        help=_t('help___recursive'),
+    )
+    analyze_parser.add_argument(
+        "--sample-size", type=int, default=256, metavar="N",
+        help=_t('help___sample_size'),
+    )
+    analyze_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
     # ── bench subcommand ────────────────────────────────────────────────────
     bench_parser = subparsers.add_parser(
         "bench", help=_t('cmd_bench'),
@@ -2509,6 +2529,34 @@ def run_cli(args: List[str] = None) -> int:
         return 0
 
     # ── Handle 'bench' command ───────────────────────────────────────────────
+    if parsed.command == "analyze":
+        from .metrics import analyze_image
+        files = _collect_files(parsed.paths, recursive=parsed.recursive)
+        if not files:
+            print(_t("msg_no_images"))
+            return 1
+        results = [analyze_image(p, sample_size=parsed.sample_size)
+                   for p in files]
+        if getattr(parsed, 'json', False):
+            import json
+            print(json.dumps(versioned({"count": len(results),
+                                        "results": results}),
+                             indent=2, ensure_ascii=False))
+        else:
+            for r in results:
+                if not r.get("ok"):
+                    print(f"  ❌ {r['path']}  {r.get('error', '')}")
+                    continue
+                s, wb, ex = r["stats"], r["white_balance"], r["exposure"]
+                print(f"  {r['path']}  {r['size'][0]}x{r['size'][1]}"
+                      f"  lum={ex['luminance']}"
+                      f"  contrast={s['contrast']}"
+                      f"  sat={s['saturation_mean']}"
+                      f"  kelvin~{wb['kelvin_estimate']}"
+                      f"  over={ex['overexposed_pct']}%"
+                      f"  under={ex['underexposed_pct']}%")
+        return 0
+
     if parsed.command == "bench":
         import json as _json
         from .bench import run_benchmark

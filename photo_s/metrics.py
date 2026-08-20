@@ -217,3 +217,89 @@ def compute_exposure_stats(path: str, sample_size: int = 256) -> dict:
             "luminance": round(mean / 255, 3),
             "overexposed_pct": round(over, 2),
             "underexposed_pct": round(under, 2)}
+
+
+# ── Perceptual analysis (v1.7.0): the "eyes" for LLM closed-loop grading ─────
+
+def _estimate_kelvin(r_mean: float, b_mean: float) -> int:
+    """Crude color-temperature heuristic from R/B channel means.
+
+    Maps the R/B ratio around neutral (6500K at ratio 1) monotonically to
+    2000..12000K. Not a calibrated measurement - it tells an agent which
+    way the white balance leans, not the exact CCT.
+    """
+    import math as _math
+    t = r_mean / max(1.0, b_mean)
+    kelvin = 6500.0 * (t ** -1.5)
+    return int(round(max(2000.0, min(12000.0, kelvin))))
+
+
+def analyze_image(path: str, sample_size: int = 256) -> dict:
+    """Perceptual image analysis for grading feedback loops.
+
+    One call returns what an agent (or a future grading model) needs to
+    judge a result: per-channel + luma histograms (32 bins), channel
+    mean/median/std, contrast, saturation, a white-balance lean estimate,
+    exposure stats and the blur score. Sampling is capped at
+    ``sample_size`` on the longest side, so this stays fast on any photo.
+
+    ``analyze -> adjust params -> process -> analyze`` is the intended
+    loop (see docs/AGENT_API.md). Unreadable images return ``ok=False``.
+    """
+    try:
+        img = _load_sample_rgb(path, sample_size)
+    except Exception:
+        return {"ok": False, "path": path, "error": "unreadable image"}
+
+    import numpy as np
+    arr = np.asarray(img, dtype=np.float32)
+    h, w = arr.shape[:2]
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+    # Luma (Rec. 601) - matches what the exposure/blur heuristics see.
+    luma = 0.299 * r + 0.587 * g + 0.114 * b
+
+    def hist(channel):
+        counts, _ = np.histogram(channel, bins=32, range=(0, 255))
+        return [int(c) for c in counts]
+
+    # Saturation mean via max/min per pixel (fast, no HSV roundtrip).
+    mx = np.maximum(np.maximum(r, g), b)
+    mn = np.minimum(np.minimum(r, g), b)
+    sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-6), 0.0)
+
+    n = float(luma.size) or 1.0
+    return {
+        "ok": True,
+        "path": path,
+        "size": [w, h],
+        "histogram": {
+            "r": hist(r), "g": hist(g), "b": hist(b), "luma": hist(luma),
+        },
+        "stats": {
+            "mean": {"r": round(float(r.mean()), 1),
+                     "g": round(float(g.mean()), 1),
+                     "b": round(float(b.mean()), 1),
+                     "luma": round(float(luma.mean()), 1)},
+            "median": {"r": round(float(np.median(r)), 1),
+                       "g": round(float(np.median(g)), 1),
+                       "b": round(float(np.median(b)), 1),
+                       "luma": round(float(np.median(luma)), 1)},
+            "std": {"r": round(float(r.std()), 1),
+                    "g": round(float(g.std()), 1),
+                    "b": round(float(b.std()), 1),
+                    "luma": round(float(luma.std()), 1)},
+            "contrast": round(float(luma.std()) / 255.0, 3),
+            "saturation_mean": round(float(sat.mean()), 3),
+        },
+        "white_balance": {
+            "kelvin_estimate": _estimate_kelvin(float(r.mean()),
+                                                float(b.mean())),
+            "tint_gm": round(float(g.mean() - (r.mean() + b.mean()) / 2.0), 1),
+        },
+        "exposure": {
+            "luminance": round(float(luma.mean()) / 255.0, 3),
+            "overexposed_pct": round(float((luma >= 250).sum()) / n * 100, 2),
+            "underexposed_pct": round(float((luma <= 5).sum()) / n * 100, 2),
+        },
+        "blur_score": round(compute_blur_score(path, sample_size=128), 2),
+    }

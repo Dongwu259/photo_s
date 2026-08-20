@@ -10,6 +10,8 @@ from PIL import Image, ImageFilter
 
 from photo_s.metrics import compute_ssim, compute_psnr, compute_blur_score
 
+import pytest
+
 
 def _solid(path, size=(64, 64), color=(100, 150, 200), fmt="PNG"):
     Image.new("RGB", size, color).save(path, format=fmt)
@@ -156,3 +158,56 @@ class TestComputeBlurScore:
 
     def test_missing_file_zero(self, tmp_path):
         assert compute_blur_score(str(tmp_path / "nope.png")) == 0.0
+
+
+# ── analyze_image (v1.7.0) ───────────────────────────────────────────────────
+
+from photo_s.metrics import analyze_image, _estimate_kelvin
+
+
+def test_analyze_image_shape(tmp_path):
+    p = tmp_path / "a.png"
+    Image.new("RGB", (64, 48), (100, 150, 200)).save(p)
+    r = analyze_image(str(p))
+    assert r["ok"] is True
+    assert r["size"] == [64, 48]
+    for ch in ("r", "g", "b", "luma"):
+        assert len(r["histogram"][ch]) == 32
+        assert sum(r["histogram"][ch]) == 64 * 48
+    assert r["stats"]["mean"]["r"] == 100
+    assert r["stats"]["mean"]["g"] == 150
+    assert r["stats"]["mean"]["b"] == 200
+
+
+def test_analyze_image_exposure_and_contrast(tmp_path):
+    p = tmp_path / "half.png"
+    img = Image.new("RGB", (8, 8))
+    for y in range(8):
+        for x in range(8):
+            img.putpixel((x, y), (250, 250, 250) if x < 4 else (2, 2, 2))
+    img.save(p)
+    r = analyze_image(str(p))
+    assert r["exposure"]["overexposed_pct"] == pytest.approx(50, abs=1)
+    assert r["exposure"]["underexposed_pct"] == pytest.approx(50, abs=1)
+    assert r["stats"]["contrast"] > 0.4  # half black / half white
+
+
+def test_analyze_image_kelvin_direction():
+    # Warm (R-heavy) image estimates a LOWER kelvin than a cool one.
+    assert _estimate_kelvin(220, 100) < _estimate_kelvin(100, 220)
+    assert 2000 <= _estimate_kelvin(128, 128) <= 12000
+
+
+def test_analyze_image_unreadable():
+    r = analyze_image("/nonexistent/img.png")
+    assert r["ok"] is False
+
+
+def test_analyze_image_saturation(tmp_path):
+    p = tmp_path / "sat.png"
+    Image.new("RGB", (16, 16), (200, 20, 20)).save(p)
+    r = analyze_image(str(p))
+    assert r["stats"]["saturation_mean"] > 0.8
+    grey = tmp_path / "grey.png"
+    Image.new("RGB", (16, 16), (128, 128, 128)).save(grey)
+    assert analyze_image(str(grey))["stats"]["saturation_mean"] < 0.01
