@@ -1,6 +1,6 @@
 ---
 name: photo-s
-description: Batch photo processing toolbox (PhotoS). Use when the user asks to compress/convert/resize RAW or JPEG photos in batch, edit EXIF metadata (rating, keywords, camera, GPS), deduplicate similar photos, cull by exposure/sharpness, rank and move keepers by rating, merge bracketed HDR shots, blur or pixelate faces for privacy, build contact sheets or HTML galleries, generate SHA-256 manifests, rename files in batch, watch a folder and auto-process new files, or benchmark processing speed. 批量照片处理工具箱：压缩/转码/缩放/EXIF 编辑/去重/选片/HDR 合并/人脸模糊/联系表/画廊/校验清单。
+description: Batch photo processing toolbox (PhotoS). Use when the user asks to compress/convert/resize RAW or JPEG photos in batch, edit EXIF metadata (rating, keywords, camera, GPS), deduplicate similar photos, cull by exposure/sharpness, rank and move keepers by rating, merge bracketed HDR shots, blur or pixelate faces for privacy, build contact sheets or HTML galleries, generate SHA-256 manifests, rename files in batch, watch a folder and auto-process new files, benchmark processing speed, grade photos Lightroom-style (curves, levels, HSL, point color, masks, local adjustments, lens correction), or analyze images perceptually (histograms, color stats) for closed-loop grading. 批量照片处理工具箱：压缩/转码/缩放/EXIF 编辑/去重/选片/HDR 合并/人脸模糊/联系表/画廊/校验清单/LR 方向调色（曲线·HSL·点颜色·蒙版·镜头矫正）/感知分析（调色反馈闭环）。
 ---
 
 # PhotoS — Batch Photo Toolbox
@@ -60,6 +60,10 @@ pip install "photo-s-tools[mcp]"     # + MCP server (Python 3.10+)
 | Watch a folder | `photo-s watch DIR [-o DIR] [--recursive]` | auto-process new files |
 | Presets | `photo-s preset save NAME --quality 80 ...` then `photo-s batch ... --preset NAME` | saves full option set |
 | Speed benchmark | `photo-s bench --dir DIR -j 1,2,4,8 [--evaluate]` | temp output, source untouched |
+| LR-style grading | `photo-s batch PATHS... --curves "0,0;128,140;255,255" [--levels --vibrance --hsl --point-color --clarity --dehaze]` | compact-string params, see `batch --help` |
+| Local masks + adjustments | `photo-s batch PATHS... --masks "sky:linear:0.5,0,0.5,1,feather=0.3" --mask-adjust "sky:exposure=-0.7"` | named linear/radial/color masks, relative 0-1 coords |
+| Lens correction | `photo-s batch PATHS... --lens-distort 0.15 [--lens-vignette "0.3,0.4" --lens-ca "0.999,1.001"]` | manual distortion / vignette / CA fix |
+| Perceptual analysis | `photo-s analyze PATHS... --json` | histograms, channel stats, WB lean, exposure, blur - the feedback half of closed-loop grading |
 | Environment probe | `photo-s info --json` | version, optional features, plugins |
 
 ## Typical workflows
@@ -91,6 +95,16 @@ photo-s hash deliver/ -o deliver/manifest.csv --verify deliver/manifest.csv
 photo-s bench --dir "RAW/" -j 1,2,4,8 --evaluate
 ```
 
+### 5. Closed-loop grading (v1.7.0)
+```bash
+# 1. read stats: exposure.luminance / stats.contrast / white_balance.kelvin_estimate ...
+photo-s analyze "picked/*.jpg" --json
+# 2. decide params from the numbers, process to a scratch dir
+photo-s batch "picked/*.jpg" -o scratch/ --curves "0,0;128,140;255,255"     --vibrance 0.3 --wb-tint -8
+# 3. verify the deviation converged; iterate 2-4 rounds if not
+photo-s analyze "scratch/*.jpg" --json
+```
+
 ## Errors & recovery
 
 - Per-file failures do not abort the batch — check `results[].status == "error"`
@@ -108,7 +122,7 @@ photo-s bench --dir "RAW/" -j 1,2,4,8 --evaluate
 - **Python host**: `from photo_s.engine import ProcessOptions, batch_process` — no IPC overhead.
 - **MCP (deep, tool-level)**: install `photo-s-tools[mcp]` (Python 3.10+), then
   `claude mcp add photo-s -- photo-s mcp` and call tools (`process`, `select`,
-  `hdr`, `blurfaces`, `dedup`, …) directly. 18 tools, schemas via
+  `hdr`, `blurfaces`, `dedup`, `analyze`, …) directly. 19 tools, schemas via
   `photo-s mcp --list-tools`.
 - **REST**: `photo-s serve --port 0 --token auto --ready-file x.json` — poll the
   file for `{port, token}`, then HTTP with bearer token.

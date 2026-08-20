@@ -3,7 +3,7 @@
 > 以代码实际为准（v1.5.1），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
-## 1. CLI 命令（22 个）
+## 1. CLI 命令（23 个）
 
 | 命令 | 作用 |
 |---|---|
@@ -17,6 +17,7 @@
 | `blurfaces` | **人脸检测 + 模糊/马赛克**（隐私保护，`--mode blur\|pixelate`、`--margin`）；需 `photo-s-tools[enhance]` |
 | `dedup` | 查重 + `keep-sharpest`（保留最锐） |
 | `cull` | 曝光/清晰度筛选（过曝/欠曝/亮暗范围/模糊分） |
+| `analyze` | **感知分析**（v1.7.0）：直方图（RGB+luma 32 桶）/通道统计/对比度/饱和度/色温估计/曝光/模糊分，`--json` 输出 agent 可读 -- `analyze -> 调参 -> process -> analyze` 调色反馈闭环的眼睛 |
 | `check` | 图片完整性检查 |
 | `hash` | 校验和清单生成/校验（SHA-256 manifest） |
 | `contact-sheet` | 联系表（网格拼图） |
@@ -26,7 +27,7 @@
 | `config` | TOML 配置文件管理 |
 | `info` | 格式/环境探测（`--json`） |
 | `serve` | REST API（AI agent 集成，含 `/process/stream` SSE 进度） |
-| `mcp` | MCP server（stdio，18 工具，py3.10+） |
+| `mcp` | MCP server（stdio，19 工具，py3.10+） |
 | `plugin` | 插件管理 install/list/info/fetch/**scaffold** |
 | `bench` | 批量基准：`--dir -j 1,2,4,8 --denoise` 实测各并发耗时/加速比；每阶段计时（load/process/save）；`--evaluate` 输出质量（PSNR/SSIM 对比源图）；输出写临时目录跑完自动清理，不污染源目录 |
 
@@ -36,11 +37,13 @@
 
 **并发调优（v1.4.0 实测定案）**：真实交付集（29 张 24MP）`-j 1,2,4,8` 实测 2.62s→0.45s，8 线程 **5.83x**，线程远未饱和——重活（解码/缩放/编码/降噪推理）都在 Pillow/numpy/onnxruntime 里释放 GIL，纯 Python 段占比小，**多进程是负优化**（降噪场景内存翻倍）。调优旋钮：`-j` 提并发；SCUNet 降噪时可用 `OMP_NUM_THREADS` / onnxruntime intra-op 控制单算子线程数，避免与外层 `-j` 超额订阅。机器不同结论可能不同，用 `bench` 实测。
 
-## 2. 引擎处理能力（ProcessOptions 75 字段）
+## 2. 引擎处理能力（ProcessOptions 81 字段）
 
-**管线顺序**：open → 插件 pre_process → auto_rotate → auto_straighten → log_curve → 色彩管理 → 影调 → **LUT 调色（`--lut` .cube/预设，plugin provider 优先否则内置三线性）** → 白平衡(temp+tint) → 曝光 → **LR 调色块（v1.6.0：`--levels` → `--curves` → `--clarity` → `--texture` → `--dehaze` → `--vibrance` → `--hsl` → `--color-grading`）** → denoise → 自动色阶 → **暗角/颗粒（`--vignette`/`--grain`）** → crop/rotate/flip → resize → pad → 打印尺寸 → watermark → save
+**管线顺序**：open -> 插件 pre_process -> auto_rotate -> **镜头矫正（v1.7.0：畸变/消 CA/去暗角，几何先行）** -> auto_straighten -> log_curve -> 色彩管理 -> 影调 -> **LUT 调色（`--lut` .cube/预设，plugin provider 优先否则内置三线性）** -> 白平衡(temp+tint) -> 曝光 -> **LR 调色块（v1.6.0：`--levels` -> `--curves` -> `--clarity` -> `--texture` -> `--dehaze` -> `--vibrance` -> `--hsl` -> `--point-color` -> `--color-grading`）** -> **局部调整（v1.7.0：`--masks`/`--mask-adjust`，蒙版内标量调整）** -> denoise -> 自动色阶 -> **暗角/颗粒（`--vignette`/`--grain`）** -> crop/rotate/flip -> resize -> pad -> 打印尺寸 -> watermark -> save
 
 **LR 方向调色（v1.6.0，`photo_s/grade.py` 纯 numpy/PIL 零依赖）**：点曲线 `--curves "0,0;128,140;255,255"`（PCHIP 单调样条，支持 rgb/r/g/b 分通道）· 手动色阶 `--levels "80,200,1.1"` · 自然饱和度 `--vibrance` · 三向颜色分级 `--color-grading "shadows:120,0.3"` · WB tint `--wb-tint`（G/M 轴）· HSL 分色 `--hsl "green:10,0.2,0.1"`（8 色域软过渡）· 清晰度/纹理 `--clarity`/`--texture`（USM 局部对比）· 去雾 `--dehaze`（暗通道先验）· 暗角 `--vignette "0.5,0.4,0.4"` · 颗粒 `--grain "0.15,1.5"`
+
+**局部调整 + 镜头矫正 + 感知分析（v1.7.0）**：**命名蒙版** `--masks "sky:linear:0.5,0,0.5,1,feather=0.3;face:color:255,200,180,tol=0.15"`（linear/radial/color 三类，相对坐标 0-1 批量安全；`photo_s/mask.py`，v1.8 预留 subject/person/object/brush 语法）· **蒙版内调整** `--mask-adjust "sky:exposure=-0.7,vibrance=0.2"`（11 项标量：exposure/brightness/contrast/saturation/vibrance/clarity/texture/sharpen/temp/tint/blur）· **点颜色** `--point-color "200,120,80:30,0.2,-0.1,0.2"`（取样色中心软掩码，与 HSL 固定 8 域互补）· **镜头矫正** `--lens-distort k1`（桶形/枕形）/ `--lens-vignette "0.3,0.4"`（去暗角）/ `--lens-ca "0.999,1.001"`（消色差），`photo_s/lens.py` 纯 numpy 双线性 · **感知分析** `photo-s analyze`（直方图/通道统计/色温估计/曝光/模糊，`analyze -> 调参 -> process -> analyze` 闭环）
 
 | 类别 | 能力 |
 |---|---|
@@ -51,7 +54,8 @@
 | 白平衡 | wb_temp（色温 K）、wb_reference（灰卡采样） |
 | 曝光 | ev（2^EV）、auto_exposure |
 | 降噪 | denoise 0-20（SCUNet provider 优先，否则 NLM） |
-| 校正 | auto_levels（自动色阶）、log_curve（LOG 还原）、auto_straighten（扶正） |
+| 校正 | auto_levels（自动色阶）、log_curve（LOG 还原）、auto_straighten（扶正）、lens_distort/lens_vignette/lens_ca（镜头矫正） |
+| 局部调整 | masks（命名蒙版 linear/radial/color）、mask_adjust（蒙版内 11 项标量）、point_color（取样色定向） |
 | 构图 | crop、crop_ratio、rotate、flip、pad |
 | 多尺寸 | output_sizes（`label:WxH,…`） |
 | 元数据 | preserve_exif、strip_gps、scrub、date_shift、sync_date、gpx_trace、PhotoS: 打标 |
@@ -88,9 +92,9 @@
 - 无 token 时 CSRF Origin 防护（拒绝跨域浏览器请求）
 - **`POST /process/stream`**：text/event-stream 实时进度（每文件一条 `data:` 帧 + 结束 `done` 帧），agent 免轮询
 
-## 5. MCP server（18 工具）
+## 5. MCP server（19 工具）
 
-`process` `info` `exif` `dedup` `cull` `select` `hdr` `blurfaces` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` `bench` `watch` `watch_status` `watch_stop` — dedup 默认 dry_run 安全；`select` 双阈值分拣、`hdr` 曝光融合、`blurfaces` 人脸模糊均需对应 extra；模块级零 mcp import
+`process` `info` `exif` `dedup` `cull` `select` `hdr` `blurfaces` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` `bench` `watch` `watch_status` `watch_stop` `analyze` — dedup 默认 dry_run 安全；`select` 双阈值分拣、`hdr` 曝光融合、`blurfaces` 人脸模糊均需对应 extra；模块级零 mcp import
 
 ## 6. 插件系统
 

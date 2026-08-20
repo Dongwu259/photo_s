@@ -22,7 +22,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 
 | 通道 | 接入方式 |
 |---|---|
-| **MCP server** — 18 个工具（process / select / hdr / blurfaces / dedup …） | `claude mcp add photo-s -- photo-s mcp` |
+| **MCP server** — 19 个工具（process / select / hdr / blurfaces / dedup …） | `claude mcp add photo-s -- photo-s mcp` |
 | **现成 SKILL.md** — 支持 skill 的 agent 即取即用，零额外依赖 | `cp -r skills/photo-s ~/.claude/skills/` |
 | **REST API** — 异步任务 + SSE 进度 | `photo-s serve --port 0 --token auto --ready-file x.json` |
 | **Python 库直调** — 无 IPC 开销 | `from photo_s.engine import batch_process` |
@@ -48,6 +48,10 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | 点曲线 / 色阶 | ✅ | ✅ | PCHIP 点曲线，手动黑/白场/伽马 |
 | 三向颜色分级 | ✅ | ✅ | 阴影/中间调/高光 色相 + 饱和分区 |
 | HSL 分色 | ✅ | ✅ | 8 色域，色相/饱和/亮度偏移 |
+| 点颜色 | ✅ | ✅ | 取样色定向色相/饱和/亮度 + 范围容差 |
+| 局部蒙版 | ✅ | ✅ | 命名线性/径向/颜色范围蒙版，蒙版内 11 项局部调整 |
+| 镜头矫正 | ✅ | ✅ | 手动畸变 k1 / 去暗角 / 消色差（纯 numpy） |
+| 感知分析 | ✅ | ✅ | 直方图/通道统计/色温倾向/曝光/模糊（`analyze`） |
 | 自然饱和度 / 清晰度 / 纹理 | ✅ | ✅ | 反向加权饱和，局部对比 |
 | 去雾 / 暗角 / 颗粒 | ✅ | ✅ | 暗通道去雾，径向暗角，胶片颗粒 |
 | 曝光 | ✅ | ✅ | 曝光档位调整，或自动归一化到目标 |
@@ -93,7 +97,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | REST API | — | ✅ | 供 agent 使用的 HTTP 服务（异步任务 + SSE 进度） |
 | 插件系统 | — | ✅ | 第三方插件支持 |
 | 官方插件管理 | — | ✅ | list/install/info/fetch + pip 安装 |
-| MCP server | — | ✅ | 向 MCP 客户端（Claude Desktop / Claude Code / 任意客户端）暴露 18 个工具 |
+| MCP server | — | ✅ | 向 MCP 客户端（Claude Desktop / Claude Code / 任意客户端）暴露 19 个工具 |
 | 批量基准 | — | ✅ | 并发扩展实测 |
 
 > ¹ 降噪 / 自动扶正 / HDR / 人脸模糊需要可选依赖：
@@ -143,8 +147,7 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 
 ## ⚠️ 限制与说明
 
-PhotoS 是**批量 / 交付导向管线**，不是交互式编辑器——没有笔刷蒙版、
-不做 RAW 域编辑、不做镜头校正。
+PhotoS 是**批量 / 交付导向管线**，不是交互式编辑器——笔刷蒙版待 v1.8、不做 RAW 域编辑。
 
 - **设备上推理，无云端。** 降噪模型权重（SCUNet）首次使用时下载到本机；不上传任何数据。
 - **许可。** 官方代码与官方模型权重（含 SCUNet 检查点）均为 **MIT**——可自由商用。

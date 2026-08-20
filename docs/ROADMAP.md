@@ -15,8 +15,16 @@
 | v1.5.1 | Agent 接入便利化 | 现成 SKILL.md skill 包（cp -r 即用，仅核心包）、AGENT_API.md 补 Claude Code `claude mcp add` 连接（用户/项目/uvx 变体）、README 工具数 15→18 修正 + 新工具列表补全 |
 | v1.6.0 | LR 方向调色 | `photo_s/grade.py` 11 算法（点曲线 PCHIP/手动色阶/自然饱和度/三向颜色分级/WB tint/HSL 分色/清晰度·纹理/去雾/暗角/颗粒，纯 numpy+PIL 零依赖）+ 3 个 LUT/MCP bug 修复 + 四层接线（CLI 11 flag/REST 自动/MCP 33 参数/GUI 11 控件）+ 紧凑字符串建模（REST/preset 零胶水）|
 | v1.6.1 | GUI 大增强 | Lightroom 式调色编辑器（可拖拽曲线 RGB+R/G/B/复位、3 色轮+亮度条、HSL 编辑器）+ 设置面板分类 Tab（输出/调整/效果/元数据/选项）+ 区块折叠 + 工具栏分组瘦身 + 缩略图（异步懒加载）/布局记忆/过滤框/进度 ETA/重做；color_grading 支持每区亮度 |
+| v1.7.0 | 局部调整 + 镜头矫正 + 感知反馈 | `photo_s/mask.py` 命名蒙版（linear/radial/color 相对坐标 0-1，紧凑字符串 `masks`/`mask_adjust`，v1.8 AI/笔刷语法预留）+ 蒙版内 11 项标量局部调整；`point_color` 点颜色（取样色中心软掩码）；`photo_s/lens.py` 手动镜头矫正（畸变 k1/去暗角/消 CA，纯 numpy 双线性）；`analyze` 感知反馈（直方图/通道统计/色温估计/曝光/模糊，CLI+REST+MCP 19 工具）——`analyze → 调参 → process → analyze` 的 LLM 闭环；GUI 镜头/点颜色/蒙版编辑器（红色叠加预览）|
 
 ## 规划中
+
+### v1.8.0（AI 识别蒙版 + 笔刷 -- 主题：智能局部调整，方向已定）
+
+- [ ] **AI 分割蒙版**：`subject:` / `person:` / `object:label` 三类，**opencv DNN + ONNX 小权重**（复用 enhance extra 的 cv2.dnn 推理，不引新依赖；权重经 modelstore 下载+sha256+缓存，候选 U2Netp ~4.7MB / PP-HumanSeg ~5MB / YOLOv8n-seg ~6.7MB，均在用户网络安全线内）。蒙版语法 v1.7 已预留（解析即报清晰错误）。
+- [ ] **笔刷蒙版**：`brush:x,y,r;x,y,r;...` 折线序列化，GUI 画布绘制 -> 紧凑字符串，批量语义同几何蒙版。
+- [ ] 蒙版组合算子：多 mask 交集（`&`）/差集；v1.7 仅并集 + invert。
+- [ ] 复杂字符串参数局部化（curves/HSL 进蒙版内调整，v1.7 局部调整仅标量集）。
 
 ### v1.6.0（LR 方向调色增强 —— 主题：专业调色）
 
@@ -60,9 +68,12 @@ auto_rotate → auto_straighten → log_curve → 色彩管理
 → crop/rotate/flip → resize → pad → print → watermark → blur_faces → EXIF → save
 ```
 
-**远期（不在 v1.6）**：渐变蒙版（线性/径向 + 羽化 + 全局调整子集，唯一适合批量的局部形态，参数可序列化进 ProcessOptions）；XMP `crs:` 编辑参数读写（LensPilot LR 桥接从「读回结果」升级为「双向 interchange」——我方调整可被 LR 直接打开续修，LR 修完的参数我方复现）。
+**远期（不在 v1.7）**：XMP `crs:` 编辑参数读写（LensPilot LR 桥接从「读回结果」升级为「双向 interchange」--我方调整可被 LR 直接打开续修，LR 修完的参数我方复现）；专有调色模型训练（v1.7 的紧凑字符串参数空间即模型输出词汇表 + analyze 统计即数据基座，训练管线另立版本）。
 
-**明确不做**：RAW 域编辑（画质追不上 LR 线性 RAW 管线，rawpy 解码后 sRGB 域调整即可，定位交付级）；笔刷蒙版/修复画笔/AI 主体选择（交互重，与批量交付定位相悖）；镜头校正（畸变/色差需 lensfun 级数据库，投入产出比低）。
+**定位修订（v1.7.0，2026-08-20）**：旧「明确不做」三条改判两条--
+- **笔刷蒙版/AI 主体选择**：原判"交互重、与批量相悖"。改判依据：紧凑字符串建模使蒙版**可序列化进 ProcessOptions**，批量语义成立（相对坐标/命名引用）；AI 分割权重小模型化（<10MB）后成本可控。-> 拆进 v1.8。
+- **镜头矫正**：原判"需 lensfun 级数据库，投入产出比低"。改判依据：手动三参数（畸变/去暗角/消 CA）零依赖即可覆盖常见修正，lensfun 自动识别留作远期插件。-> v1.7 已落地。
+- **RAW 域编辑**：维持不做（画质追不上 LR 线性 RAW 管线，rawpy 解码后 sRGB 域调整即可，定位交付级）。
 
 ### v1.5.0（i18n + Agent 契约 + 加固 + 审计遗留 + 摄影师批处理工作流）
 **A. 国际化（i18n）**

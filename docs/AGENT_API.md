@@ -13,7 +13,7 @@
 | Python 直调 | 宿主是 Python | `from photo_s.engine import ProcessOptions, batch_process` |
 | `photo-s ... --json` | 一次性脚本 / CI | 每次调用有 ~200-300ms 解释器启动开销 |
 | `photo-s serve` | 跨进程 / 长任务 / 需进度与取消 | stdlib HTTP，同步 + 异步任务两种模式 |
-| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，18 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
+| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，19 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
 
 ---
 
@@ -60,7 +60,13 @@
 `--ev STOPS`（2^EV 曝光补偿）、`--auto-exposure 0-1`（均值亮度归一化）、
 `--log-curve NAME`（LOG 还原：SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG，纯 1D LUT）、
 `--auto-straighten`（扶正地平线，`ProcessResult.auto_straightened` 报告是否旋转）、
-`--max-straighten-angle DEG`。`--denoise N` 与 `--auto-straighten` 需要
+`--max-straighten-angle DEG`。v1.7.0 局部调整与镜头矫正：
+`--masks "sky:linear:0.5,0,0.5,1,feather=0.3"`（命名蒙版 linear/radial/color，
+相对坐标 0-1）、`--mask-adjust "sky:exposure=-0.7,vibrance=0.2"`（蒙版内标量，
+key ∈ exposure/brightness/contrast/saturation/vibrance/clarity/texture/sharpen/temp/tint/blur）、
+`--point-color "200,120,80:30,0.2,-0.1,0.2"`（取样色定向）、
+`--lens-distort K1`（畸变）、`--lens-vignette "0.3,0.4"`（去暗角）、`--lens-ca "0.999,1.001"`（消色差）。
+`--denoise N` 与 `--auto-straighten` 需要
 `pip install photo-s-tools[enhance]`（opencv-python-headless），未装时该文件报错
 （错误信息含安装提示），server 端同样经 options 映射生效（enhance 选项缺依赖时按上述规则处理）。
 
@@ -156,6 +162,7 @@ GET  /health  带 Bearer → {"status": "ok", "version": "..."}
 | `GET /tasks/<id>` | — | `{"status", "current", "total", "current_path", "result"?}` |
 | `POST /tasks/<id>/cancel` | — | `{"task_id", "cancelled"}` |
 | `POST /dedup` | `{"paths", "threshold"?, "recursive"?}` | 重复组 |
+| `POST /analyze` | `{"paths", "recursive"?, "sample_size"? (默认 256)}` | `{"ok", "count", "results": [{path, size, histogram, stats, white_balance, exposure, blur_score}]}` 感知分析（v1.7.0，调色反馈闭环） |
 | `POST /rename` | `{"paths", "pattern", "output_dir"?, "overwrite"?, "dry_run"?, "recursive"?}` | `{"total", "ok", "results"}` |
 | `POST /contact-sheet` | `{"paths", "output", "cols"?, "thumb_width"?, "thumb_height"?, "captions"?, "bg"?, "recursive"?}` | `{"output", "count"}` |
 | `POST /check` | `{"paths", "recursive"?}` | `{"checked", "ok", "corrupt"}` |
@@ -240,7 +247,7 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 }
 ```
 
-`photo-s mcp --list-tools` 返回 18 个工具及 inputSchema（JSON，不启动服务器）。
+`photo-s mcp --list-tools` 返回 19 个工具及 inputSchema（JSON，不启动服务器）。
 
 零安装变体（uvx 自动解析 PyPI 依赖，与官方 MCP Registry
 `io.github.Dongwu259/photo-s` 发布的调用一致）：
@@ -270,7 +277,7 @@ shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
 
 | 工具 | 关键参数 | 输出 |
 |---|---|---|
-| `process` | `paths[]`, `recursive`, `quality`, `output_format`, `output_dir`, `resize` "WxH", `scale`, `suffix`, `target_size` "500KB", `strip_gps`, `denoise`, `ev`, `log_curve`, `wb_temp`, `auto_straighten`, `crop_ratio` "16:9", `blur_faces` "blur"\|"pixelate", `blur_faces_margin`, `jobs`, `dry_run`, `evaluate` | `BatchResult` JSON + `ok`；`dry_run` → `{"dry_run", "count", "files", "settings"}`；`evaluate=true` 时每文件带 `ssim`（同 `--evaluate`）。`blur_faces` 需 `photo-s-tools[enhance]`（opencv），缺失时 per-file 报错 |
+| `process` | `paths[]`, `recursive`, `quality`, `output_format`, `output_dir`, `resize` "WxH", `scale`, `suffix`, `target_size` "500KB", `strip_gps`, `denoise`, `ev`, `log_curve`, `wb_temp`, `auto_straighten`, `crop_ratio` "16:9", `blur_faces` "blur"\|"pixelate", `blur_faces_margin`, v1.6 调色（`wb_tint`/`levels`/`curves`/`vibrance`/`color_grading`/`hsl`/`clarity`/`texture`/`dehaze`/`vignette`/`grain`），v1.7 局部与镜头（`masks`/`mask_adjust`/`point_color`/`lens_distort`/`lens_vignette`/`lens_ca`）, `jobs`, `dry_run`, `evaluate` | `BatchResult` JSON + `ok`；`dry_run` → `{"dry_run", "count", "files", "settings"}`；`evaluate=true` 时每文件带 `ssim`（同 `--evaluate`）。`blur_faces` 需 `photo-s-tools[enhance]`（opencv），缺失时 per-file 报错 |
 | `info` | — | 同 `photo-s info --json`（含 `optional_features`/`plugins`） |
 | `exif` | `action` "show"\|"write", `paths[]`, `recursive`, `rating_min`, `rating`, `keywords`, `camera`, `tags` {"path": {…}}, `gps` "lat,lon" | show → `{"count", "results": [{path, rating, keywords, …}]}`；write → `{"written", "errors"}`。`gps` 把同一坐标批量写入 `paths` 全部文件 |
 | `dedup` | `paths[]`, `recursive`, `threshold` (默认 5), `action` "report"\|"keep-sharpest", `dry_run` (默认 **True**) | report → `{"count", "duplicate_count", "savings_bytes", "groups"}`；keep-sharpest → `{"kept", "removed", "dry_run"}` |
@@ -288,6 +295,7 @@ shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
 | `watch` | `dir` (必填), `recursive`, `quality`, `output_format`, `output_dir`, `resize`, `timeout` | 立即返回 `{"started", "id", "dir", "recursive", "options", "timeout"}`；失败 → `{"started": false, "error"}`。后台线程监视目录自动处理；进度用 `watch_status` 轮询、`watch_stop` 结束。**需 `photo-s-tools[watch]`（watchdog）**；`remove_original` 刻意不支持（agent 驱动的删除太危险） |
 | `watch_status` | `id` | `{"ok", "id", "dir", "recursive", "running", "stopped", "processed_count", "results": [ProcessResult…], "error", "started_at"}` |
 | `watch_stop` | `id` | `{"ok", "id", "stopped", "processed_count"}`（幂等） |
+| `analyze` | `paths[]`, `recursive`, `sample_size` (默认 256) | `{"ok", "count", "results": [{path, size, histogram {r,g,b,luma ×32}, stats, white_balance, exposure, blur_score}]}` 感知分析（v1.7.0） |
 
 > `watch` 会话与 MCP 会话同生命周期（daemon 线程随进程退出消亡）；`_WATCHES`
 > 上限 20，死线程自动清理。
@@ -295,3 +303,35 @@ shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
 **破坏性安全**：`dedup keep-sharpest` 默认 `dry_run=True`，删除需显式
 `dry_run=False`；`process` 不覆盖输入（`overwrite` 默认 False）。MCP 模式仅
 显式 `--config`（不自动发现 `photo-s.toml`）；工具显式参数优先于 config 默认值。
+
+## 7. 感知反馈闭环（v1.7.0，多模态模型调色）
+
+LLM/MLLM 不会"看"图，但可以**读统计**。v1.7.0 的 `analyze`（CLI 子命令 /
+`POST /analyze` / MCP `analyze` 工具）把图像变成结构化数字，闭环由此成立：
+
+```
+analyze（读：直方图/通道统计/色温/曝光/模糊）
+   ↓ 依据偏差决定参数（紧凑字符串即"模型输出词汇表"）
+process（写：curves/levels/hsl/point_color/masks/...）
+   ↓ 输出到临时目录
+analyze（再读：验证偏差是否收敛）
+   ↓ 不收敛则微调再来（2-4 轮通常足够）
+process（最终交付输出）
+```
+
+**判读速查**（`analyze` 输出 -> 建议参数）：
+
+| 观测 | 字段 | 建议 |
+|---|---|---|
+| 偏暗/偏亮 | `exposure.luminance`（0-1） | `ev` 补偿，或 `auto_exposure 0.45` |
+| 死白/死黑 | `exposure.overexposed_pct` / `underexposed_pct` | `levels` 收黑白场；`curves` 压高光/抬阴影 |
+| 发灰不通透 | `stats.contrast`（<0.15 偏平） | `contrast`/`clarity`/`curves` S 曲线 |
+| 白平衡偏暖/冷 | `white_balance.kelvin_estimate` | `wb_temp` 反向补偿（估计 4000K = 偏暖 -> 降温） |
+| 绿/品红偏 | `white_balance.tint_gm`（正=偏品红） | `wb_tint` 负值补偿 |
+| 饱和不足 | `stats.saturation_mean` | `vibrance`（比 `saturation` 不爆肤色） |
+| 局部色偏（如天空过亮） | `histogram` 通道分布 | `masks` + `mask_adjust` 局部压暗 |
+
+**参数词汇表**：全部调色/局部/镜头参数均为 ProcessOptions 标量或紧凑字符串字段
+（语法见 §2.6），REST `/process` 的 `options` 直接透传，MCP `process` 工具同名参数。
+未来训练专有调色模型时，这套字符串 schema 即模型输出空间（约束解码友好：有限
+token、无自由文本），`analyze` 统计即监督信号来源。
