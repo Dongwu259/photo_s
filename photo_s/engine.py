@@ -190,6 +190,10 @@ class ProcessOptions:
     dehaze: float = 0.0         # dark-channel dehaze [-1, 1], 0 = off
     vignette: str = ""          # radial "amount[,midpoint[,feather]]"
     grain: str = ""             # film grain "amount[,size]"
+    # Local adjustments under masks (v1.7.0). Named masks + per-mask
+    # scalar adjustments, relative 0-1 coords so one spec fits a batch.
+    masks: str = ""             # "name:type:params;..." (linear/radial/color)
+    mask_adjust: str = ""       # "name:key=value,...;..." referencing masks
     lut_file: Optional[str] = None  # .cube 3D/1D LUT color grade (provider or built-in)
     log_curve: Optional[str] = None  # LOG recovery curve name (SLOG3, CLOG3, ...)
     denoise: Optional[float] = None  # denoise strength; SCUNet plugin provider
@@ -1088,6 +1092,23 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
             img = apply_color_grading(
                 img, shadows=z.get("shadows"), midtones=z.get("midtones"),
                 highlights=z.get("highlights"))
+
+        # ── Local adjustments under masks (v1.7.0) ─────────────────────────
+        # After global grading, before denoise: the mask selects pixels,
+        # apply_local blends the adjusted result back onto the graded image.
+        if options.mask_adjust:
+            from .mask import (MaskError, apply_local, parse_mask_adjust,
+                               parse_masks, render_mask)
+            adjusts = parse_mask_adjust(options.mask_adjust)
+            specs = {s.name: s for s in parse_masks(options.masks)}
+            for name, adjust in adjusts.items():
+                spec = specs.get(name)
+                if spec is None:
+                    raise MaskError(
+                        f"mask_adjust references unknown mask {name!r} "
+                        f"(defined: {','.join(specs) or 'none'})")
+                m = render_mask(spec, img.width, img.height, img=img)
+                img = apply_local(img, m, adjust)
 
         # ── Denoise (SCUNet plugin provider preferred, else opencv NLM) ─────
         if options.denoise:

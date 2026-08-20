@@ -248,3 +248,61 @@ def test_adjust_keys_cover_documented_set():
     assert set(ADJUST_KEYS) == {
         "exposure", "brightness", "contrast", "saturation", "vibrance",
         "clarity", "texture", "sharpen", "temp", "tint", "blur"}
+
+
+# ── Engine pipeline integration ──────────────────────────────────────────────
+
+def _process(src, out_dir, **kwargs):
+    from photo_s.engine import ProcessOptions, process_image
+    opts = ProcessOptions(output_dir=str(out_dir), suffix="_m",
+                          output_format="PNG", **kwargs)
+    return process_image(str(src), opts)
+
+
+def test_engine_pipeline_local_adjustment(tmp_path):
+    src = tmp_path / "a.png"
+    Image.new("RGB", (20, 20), (120, 120, 120)).save(src)
+    res = _process(
+        src, tmp_path / "out",
+        masks="bottom:linear:0.5,0.5,0.5,1",
+        mask_adjust="bottom:brightness=0.5")
+    out = Image.open(res.output_path).convert("RGB")
+    arr = np.asarray(out)
+    assert arr[:10].mean() == pytest.approx(120, abs=3)   # top untouched
+    assert arr[10:].mean() > 150                          # bottom brightened
+
+
+def test_engine_pipeline_color_mask_adjustment(tmp_path):
+    src = tmp_path / "a.png"
+    img = Image.new("RGB", (8, 8))
+    for y in range(8):
+        for x in range(8):
+            img.putpixel((x, y), (200, 40, 40) if y < 4 else (40, 40, 200))
+    img.save(src)
+    res = _process(
+        src, tmp_path / "out",
+        masks="reds:color:200,40,40,tol=0.1",
+        mask_adjust="reds:brightness=0.5")
+    out = np.asarray(Image.open(res.output_path).convert("RGB"))
+    assert out[:4].mean() > out[4:].mean() + 30   # red half brightened
+    assert out[4:].mean() == pytest.approx(93.3, abs=2)  # blue half untouched
+
+
+def test_engine_pipeline_unknown_mask_reference_fails(tmp_path):
+    src = tmp_path / "a.png"
+    Image.new("RGB", (4, 4), (10, 10, 10)).save(src)
+    res = _process(src, tmp_path / "out",
+                   masks="sky:linear:0,0,0,1",
+                   mask_adjust="nosuch:brightness=0.5")
+    assert res.success is False
+    assert "unknown mask" in (res.error or "")
+
+
+def test_engine_pipeline_bad_mask_spec_fails(tmp_path):
+    src = tmp_path / "a.png"
+    Image.new("RGB", (4, 4), (10, 10, 10)).save(src)
+    res = _process(src, tmp_path / "out",
+                   masks="sky:warp:0,0",
+                   mask_adjust="sky:brightness=0.5")
+    assert res.success is False
+    assert res.error

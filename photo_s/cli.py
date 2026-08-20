@@ -298,6 +298,16 @@ def _add_transform_args(parser):
         help=_t('help___grain'),
     )
     parser.add_argument(
+        "--masks", type=str, default=argparse.SUPPRESS,
+        metavar="NAME:TYPE:PARAMS;...",
+        help=_t('help___masks'),
+    )
+    parser.add_argument(
+        "--mask-adjust", type=str, default=argparse.SUPPRESS,
+        metavar="NAME:KEY=VAL,...;...",
+        help=_t('help___mask_adjust'),
+    )
+    parser.add_argument(
         "--log-curve", type=str, default=argparse.SUPPRESS, metavar="NAME",
         choices=["SLOG3", "CLOG3", "LOGC3", "DLOG", "VLOG", "HLG"],
         help=_t('help___log_curve'),
@@ -573,6 +583,9 @@ def _build_process_options(parsed) -> ProcessOptions:
         dehaze=getattr(parsed, 'dehaze', 0.0),
         vignette=getattr(parsed, 'vignette', ""),
         grain=getattr(parsed, 'grain', ""),
+        # Local adjustments under masks (v1.7.0)
+        masks=getattr(parsed, 'masks', ""),
+        mask_adjust=getattr(parsed, 'mask_adjust', ""),
         jobs=_jobs,
     )
 
