@@ -1,8 +1,8 @@
 # PhotoS 训练管线（个人 Lightroom 数据 → 自动调色模型）
 
 > v1.7.1 · 定位：**你的修图数据 + PhotoS 参数空间 = 专属调色模型**。
-> 全部基础设施已在核心包内（纯 stdlib/numpy，任何电脑可跑）；本文档同时面向
-> 人（你在 5080 那台电脑训练）与 agent（另一台电脑产数据包）。
+> 全部基础设施已在核心包内（纯 stdlib/numpy，任何电脑可跑）。
+> 角色分工：产数据包（lr-scan）在任意电脑运行；训练（lr-merge/lr-train）在训练机运行。
 
 ## 1. 数据包格式（lr_records.jsonl）
 
@@ -33,7 +33,7 @@ photo-s lr-scan --export-dir ./data --render-dir ./data/before --sanitize
 
 ```bash
 # 局域网（推荐，私有不落第三方）
-rsync -av data/ user@5080-machine:~/photo_data/mac1/     # 每台电脑一个子目录
+rsync -av data/ user@train-machine:~/photo_data/mac1/    # 每台电脑一个子目录
 # 或 scp / AirDrop / U 盘（单次批量）
 ```
 > 隐私：JSONL 必须 `--sanitize` 过（路径脱敏）；before 图是你自己的照片，
@@ -62,7 +62,7 @@ photo-s lr-predict new.jpg --model auto_tone.npz        # → 9 项全局参数
 - 岭回归闭式解，177 样本实测 R²≈0.18（线性基线，数据翻倍会涨）
 - 评估：留出 10-15% 后对比预测 vs 真实的 L1；端到端用 `photo-s diff`（PSNR/SSIM）
 
-### 3.1 升级：CLIP + MLP（torch，5080 分钟级）
+### 3.1 升级：CLIP + MLP（torch，16GB 显存分钟级）
 
 冻结 `open_clip` ViT-L/14 → 768 维 embedding → MLP(768→256→9)，MSELoss，
 lr 1e-3，AdamW，几十 epoch。参考实现 `tools/train_tone_torch.py`
@@ -97,7 +97,7 @@ lora_alpha: 128
                     {"role": "assistant", "content": "exposure=0.4,contrast=1.26,hsl=..."}]}
 ```
 
-**5080-16GB 环境**：PyTorch 2.8+（Blackwell sm_120）、CUDA 12.8、bitsandbytes 0.45+、
+**16GB 显存环境（如 RTX 5080）**：PyTorch 2.8+（Blackwell sm_120）、CUDA 12.8、bitsandbytes 0.45+、
 `pip install llamafactory`。1.3B QLoRA batch 8 无压力；3B batch 4-8。
 
 ## 5. 评估闭环（PhotoS 是渲染器，评估零胶水）
