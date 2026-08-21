@@ -26,6 +26,39 @@
 - [ ] 蒙版组合算子：多 mask 交集（`&`）/差集；v1.7 仅并集 + invert。
 - [ ] 复杂字符串参数局部化（curves/HSL 进蒙版内调整，v1.7 局部调整仅标量集）。
 
+### v1.9.0+（AI 智能修图 —— 主题：个人修图数据驱动的全自动调色，方向已定 2026-08-21）
+
+> **目标**："agent 使用的 Lightroom"，最终 agent 全自动修图。
+> **路线图（2026-08-21 定，三阶段）**：工具层（无模型补感知/循环/验收）→ 数据层（个人 LR 修图数据
+> 入 PhotoS 参数空间）→ 模型层（verifier / 小模型微调）。
+> **数据资产**：用户本人是摄影师，有海量 Lightroom 修图记录（RAW + XMP `crs:` 参数）——
+> before/after 与工具使用轨迹天然成对；PhotoS 紧凑字符串参数空间即轨迹记录格式。
+
+**阶段 1 — 工具层（纯工具，无模型）**：
+
+- [ ] `preview`/`snapshot` 工具：缩放图 base64 + 直方图 PNG 进 MCP 结果（agent 视觉感知——analyze 数字之外直接看图）
+- [ ] `analyze` 区域反馈：grid 4×4/8×8 亮度/色偏 + 过曝/欠曝区域检测 + 启发式分区（天空/肤色）
+- [ ] MCP 异步 batch job（目录级 process + poll/cancel）
+- [ ] `diff` 版本对比（PSNR/SSIM）+ 参数快照回滚
+- [ ] `audit`/`quality-gate`（pass/fail + 原因——agent 的终止条件，无 stop 条件即无全自动）
+- [ ] **XMP `crs:` 桥接**（新 `photo_s/lrxmp.py`：LR 参数 ↔ ProcessOptions 互转；渐变滤镜 ↔ linear mask、径向 ↔ radial mask 映射）——个人数据管线，从远期提级
+- [ ] **轨迹日志**：process 自动记 before-analyze → params → after-analyze（即训练数据格式）
+
+**阶段 2 — 数据层（个人 LR 数据）**：
+
+- [ ] LR 目录勾选「自动写入 XMP」→ lrxmp 批量解析 → 参数向量库
+- [ ] before 图生成：rawpy 默认渲染（无 develop 设置）即「修图前」，PhotoS 已有 rawpy
+- [ ] 编辑配方聚类：参数向量聚类 → 个人风格配方库，每配方 = PhotoS preset（零训练先落地）
+- [ ] 相似修图检索：CLIP embedding + kNN——新图找最像的既往修图 → 配方起点
+- [ ] 自动基调回归：内容特征 → 6-10 项全局参数（曝光/WB/影调）小 MLP，几千对可训
+- [ ] 教师评测集：大模型对 ~200 张打分，作为微调前后对比基准（评估先行）
+
+**阶段 3 — 模型层（数据到万级后）**：
+
+- [ ] 美学 verifier：CLIP/小 VLM + 回归头，做 reward 与验收闸门
+- [ ] LoRA 微调小模型（Qwen3-VL 3B / MiniCPM-V 4.6）：before 图 → PhotoS 紧凑字符串
+- [ ] （远期）RL 自探索：参数空间为 action、verifier 分数为 reward
+
 ### v1.6.0（LR 方向调色增强 —— 主题：专业调色）
 
 > 需求来源：商业软件 LensPilot 以 photo_s 为底层图像管线，功能摸底（2026-08-18）指出
@@ -68,7 +101,7 @@ auto_rotate → auto_straighten → log_curve → 色彩管理
 → crop/rotate/flip → resize → pad → print → watermark → blur_faces → EXIF → save
 ```
 
-**远期（不在 v1.7）**：XMP `crs:` 编辑参数读写（LensPilot LR 桥接从「读回结果」升级为「双向 interchange」--我方调整可被 LR 直接打开续修，LR 修完的参数我方复现）；专有调色模型训练（v1.7 的紧凑字符串参数空间即模型输出词汇表 + analyze 统计即数据基座，训练管线另立版本）。
+**远期（不在 v1.7）**：~~XMP `crs:` 编辑参数读写~~（**已提级：v1.9+ 阶段 1 数据管线，见上节**——个人 LR 修图数据即训练基座；LensPilot LR 桥接的「双向 interchange」目标不变：我方调整可被 LR 直接打开续修，LR 修完的参数我方复现）；专有调色模型训练（v1.7 的紧凑字符串参数空间即模型输出词汇表 + analyze 统计即数据基座，训练管线见上节 v1.9+ 阶段 2/3）。
 
 **定位修订（v1.7.0，2026-08-20）**：旧「明确不做」三条改判两条--
 - **笔刷蒙版/AI 主体选择**：原判"交互重、与批量相悖"。改判依据：紧凑字符串建模使蒙版**可序列化进 ProcessOptions**，批量语义成立（相对坐标/命名引用）；AI 分割权重小模型化（<10MB）后成本可控。-> 拆进 v1.8。
