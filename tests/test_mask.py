@@ -346,6 +346,21 @@ def test_combo_deep_chain_raises_clear_error():
         render_mask(refs["m0"], 16, 16, refs=refs)
 
 
+# ── NaN / Inf rejection (v1.8) ──────────────────────────────────────────────
+
+def test_nan_inf_params_rejected_everywhere():
+    # NaN/Inf slip past range comparisons and silently render black masks.
+    for seg in ("r:radial:0.5,0.5,nan,0.2", "r:linear:0,0,inf,1",
+                "c:color:nan,0,0", "b:brush:0.5,0.5,nan",
+                "r:radial:0.5,0.5,0.2,0.2,feather=nan"):
+        with pytest.raises(MaskError, match="finite|numeric"):
+            parse_masks(seg)
+    with pytest.raises(MaskError, match="finite"):
+        parse_mask_adjust("m:brightness=nan")
+    with pytest.raises(MaskError, match="finite"):
+        parse_masks("r:linear:0,0,1,1,tol=inf")
+
+
 # ── v1.8: brush / combo / string adjustments ─────────────────────────────────
 
 def test_brush_renders_stroke_union():

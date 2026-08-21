@@ -32,6 +32,8 @@ match ``grade.py``: functions never mutate inputs and ``img.info`` is copied
 onto results.
 """
 
+import math
+
 import numpy as np
 from PIL import Image, ImageFilter
 
@@ -110,6 +112,14 @@ def _fmt_num(v) -> str:
     return f"{float(v):.4g}"
 
 
+def _req_finite(v: float, what: str, seg: str) -> float:
+    """Reject NaN/Inf numeric params — they slip past range checks and
+    silently render as black masks (agent f-strings are real inputs)."""
+    if not math.isfinite(v):
+        raise MaskError(f"{what} must be finite (got {v!r} in {seg!r})")
+    return v
+
+
 def _parse_mask_segment(seg: str, index: int) -> MaskSpec:
     """Parse one ``[name:]type:params`` segment into a MaskSpec."""
     seg = seg.strip()
@@ -172,13 +182,15 @@ def _parse_mask_segment(seg: str, index: int) -> MaskSpec:
             invert = True
             continue
         if low.startswith("feather="):
-            feather = float(low.split("=", 1)[1])
+            feather = _req_finite(
+                float(low.split("=", 1)[1]), "feather value", seg)
             continue
         if low.startswith("tol="):
-            tol = float(low.split("=", 1)[1])
+            tol = _req_finite(float(low.split("=", 1)[1]), "tol value", seg)
             continue
         try:
-            positional.append(float(tok))
+            positional.append(
+                _req_finite(float(tok), "numeric param", seg))
         except ValueError:
             raise MaskError(f"bad numeric param {tok!r} in mask {seg!r}") from None
 
@@ -244,7 +256,8 @@ def _parse_brush(seg: str, name: str, params: str) -> MaskSpec:
             raise MaskError(
                 f"brush dot must be 'x,y,r' (got {dot!r} in {seg!r})")
         try:
-            x, y, r = (float(p) for p in parts)
+            x, y, r = (_req_finite(float(p), "brush dot value", seg)
+                       for p in parts)
         except ValueError:
             raise MaskError(
                 f"brush dot values must be numeric (got {dot!r} in {seg!r})"
@@ -385,7 +398,10 @@ def parse_mask_adjust(s: str) -> dict:
                 adjust[key] = val
                 continue
             try:
-                adjust[key] = float(val)
+                adjust[key] = _req_finite(
+                    float(val), f"mask_adjust value for {key!r}", seg)
+            except MaskError:
+                raise  # _req_finite 的 finite 信息比通用 numeric 更精确
             except ValueError:
                 raise MaskError(
                     f"mask_adjust value for {key!r} must be numeric "
