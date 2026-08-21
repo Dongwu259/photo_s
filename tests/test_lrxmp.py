@@ -401,9 +401,12 @@ def test_predict_clear_errors_for_bad_inputs(tmp_path):
     Image.new("RGB", (32, 32), (80, 90, 100)).save(img)
     with pytest.raises(LrError, match="模型文件不存在"):
         lrxmp.predict_auto_tone(str(img), str(tmp_path / "none.npz"))
+    import numpy as np
+    np.savez(tmp_path / "ok.npz", W=np.zeros((84, 9)),
+             targets=np.array(lrxmp.TARGETS))
     with pytest.raises(LrError, match="图片不存在"):
         lrxmp.predict_auto_tone(str(tmp_path / "none.jpg"),
-                                str(tmp_path / "none.npz"))
+                                str(tmp_path / "ok.npz"))
     import numpy as np
     np.savez(tmp_path / "no_targets.npz", W=np.zeros((84, 9)))
     with pytest.raises(LrError, match="targets"):
