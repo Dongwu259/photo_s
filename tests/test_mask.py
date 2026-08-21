@@ -357,9 +357,10 @@ def test_object_label_allows_spaces():
             parse_masks(f"x:object:{bad}")
 
 
-def test_mask_adjust_duplicate_name_rejected():
-    with pytest.raises(MaskError, match="duplicate"):
-        parse_mask_adjust("a:exposure=-0.5; a:brightness=0.2")
+def test_mask_adjust_duplicate_name_merges():
+    # 同蒙版多段合并（覆盖会静默丢前段）
+    out = parse_mask_adjust("a:exposure=-0.5; a:brightness=0.2")
+    assert out == {"a": {"exposure": -0.5, "brightness": 0.2}}
 
 
 def test_combo_operand_with_hyphen_rejected():

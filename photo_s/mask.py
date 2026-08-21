@@ -458,10 +458,12 @@ def parse_mask_adjust(s: str) -> dict:
         if not name or not adjust:
             raise MaskError(f"bad mask_adjust segment {seg!r}")
         if name in out:
-            raise MaskError(
-                f"duplicate mask_adjust name {name!r} "
-                f"(merge into one segment; parse_masks rejects dupes too)")
-        out[name] = adjust
+            # 同蒙版多段合并（GUI 每蒙版一段；agent 手写
+            # "a:exposure=..;a:brightness=.." 是自然写法——
+            # 覆盖会静默丢前段，拒绝则误伤合法输入）
+            out[name].update(adjust)
+        else:
+            out[name] = adjust
     return out
 
 
