@@ -241,3 +241,47 @@ class TestFileList:
             app._refresh_file_list()
             assert app._dims_cache == first, "re-refresh must hit the cache"
         root.destroy()
+
+
+class TestMaskWorkflow:
+    def test_workflow_opens_with_v18_specs_and_closes_safely(self, tmp_path):
+        """打开工作流：combo/brush/字符串键调整解析 + 叠加渲染；
+        快速关窗不崩（win.after 回调的 winfo_exists 防护）。"""
+        import tkinter as tk
+        from PIL import Image
+        root, app = _make_app()
+        p = os.path.join(str(tmp_path), "a.jpg")
+        Image.new("RGB", (60, 40), (100, 120, 140)).save(p)
+        app.files = [p]
+        app._checked = {p}
+        app._photo_masks = None
+        app.masks.set("sky:linear:0,0,1,0,feather=0.3;"
+                      "c:combo:sky&f;f:brush:0.5,0.5,0.05")
+        app.mask_adjust.set("sky:brightness=0.5;"
+                            "sky:curves={r:0,0;128,140;255,255}")
+        app._open_mask_workflow()
+        root.update()
+        wins = [w for w in root.winfo_children()
+                if isinstance(w, tk.Toplevel)]
+        assert wins, "workflow window must open"
+        wins[0].destroy()
+        root.update()  # 触发 pending after 回调，winfo_exists 防护拦截
+        root.destroy()
+
+    def test_workflow_with_no_checked_files_is_noop(self, monkeypatch):
+        """空勾选 → 警告提示而非崩溃（self._flash 不存在——回归）。"""
+        import tkinter as tk
+        from tkinter import messagebox
+        warns = []
+        monkeypatch.setattr(messagebox, "showwarning",
+                            lambda *a, **k: warns.append(a) or None)
+        root, app = _make_app()
+        app.files = []
+        app._checked = set()
+        app._open_mask_workflow()
+        root.update()
+        assert warns, "must warn when no photos are checked"
+        wins = [w for w in root.winfo_children()
+                if isinstance(w, tk.Toplevel)]
+        assert not wins, "no checked files must not open a window"
+        root.destroy()

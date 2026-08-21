@@ -4097,7 +4097,8 @@ class PhotoSApp:
             return
         files = self._checked_files()
         if not files:
-            self._flash(self._t("mask_no_check"))
+            messagebox.showwarning(self._t("dlg_no_files_title"),
+                                   self._t("mask_no_check"))
             return
         from .mask import (MaskError, MaskSpec, parse_masks,
                            parse_mask_adjust, render_mask)
