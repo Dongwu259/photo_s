@@ -909,19 +909,37 @@ def scan_and_report(paths: Optional[Sequence[str]] = None
 
 
 def write_export(records: Sequence[Dict[str, Any]], out_dir: str,
-                 images: Optional[Dict[str, str]] = None) -> str:
+                 images: Optional[Dict[str, str]] = None,
+                 sanitize: bool = False) -> str:
     """写训练数据 JSONL（每行一张照片：path + options + image）→ 返回文件路径。
 
     ``images``：path → before 渲染图路径（--render-dir 产出），写入 ``image`` 键。
+    ``sanitize``：path/image 只留 basename（分享训练包时隐藏本地目录结构——
+    目录名可能泄露拍摄地/客户）；原始映射写 ``lr_paths.json``（仅本地，勿外发）。
     """
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, "lr_records.jsonl")
+    mapping: Dict[str, str] = {}
     with open(out, "w", encoding="utf-8") as f:
         for rec in records:
             line = dict(rec)
-            if images and rec.get("path") in images:
-                line["image"] = images[rec["path"]]
+            orig = line.get("path")
+            if sanitize and orig:
+                mapping[orig] = os.path.basename(orig)
+                line["path"] = os.path.basename(orig)
+            if sanitize and line.get("catalog"):
+                # 目录结构同样脱敏：只留会话名（如 3-29）
+                line["catalog"] = os.path.basename(
+                    os.path.dirname(os.path.dirname(line["catalog"]))) \
+                    or line["catalog"]
+            if images and orig in images:
+                line["image"] = (os.path.basename(images[orig])
+                                 if sanitize else images[orig])
             f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    if sanitize and mapping:
+        with open(os.path.join(out_dir, "lr_paths.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump(mapping, f, ensure_ascii=False, indent=2)
     return out
 
 

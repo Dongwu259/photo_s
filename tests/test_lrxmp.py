@@ -302,3 +302,14 @@ def test_write_export_with_images(tmp_path):
     out = lrxmp.write_export(recs, str(tmp_path), images={"/x/a.ARW": "/y/a.jpg"})
     line = open(out, encoding="utf-8").readline()
     assert '"image": "/y/a.jpg"' in line
+
+
+def test_write_export_sanitize(tmp_path):
+    recs = [{"path": "/secret/千岛湖/x.ARW", "catalog": "/secret/Lrc目录/8-2/1/1.lrcat",
+             "edited": True, "options": {"exposure": 1.0}}]
+    out = lrxmp.write_export(recs, str(tmp_path), sanitize=True)
+    line = open(out, encoding="utf-8").readline()
+    assert "x.ARW" in line and "/secret/" not in line and "千岛湖" not in line
+    assert '"catalog": "8-2"' in line
+    mapping = open(tmp_path / "lr_paths.json", encoding="utf-8").read()
+    assert "/secret/千岛湖/x.ARW" in mapping  # 原始映射仅存本地

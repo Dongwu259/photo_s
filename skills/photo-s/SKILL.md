@@ -1,6 +1,6 @@
 ---
 name: photo-s
-description: Batch photo processing toolbox (PhotoS). Use when the user asks to compress/convert/resize RAW or JPEG photos in batch, edit EXIF metadata (rating, keywords, camera, GPS), deduplicate similar photos, cull by exposure/sharpness, rank and move keepers by rating, merge bracketed HDR shots, blur or pixelate faces for privacy, build contact sheets or HTML galleries, generate SHA-256 manifests, rename files in batch, watch a folder and auto-process new files, benchmark processing speed, grade photos Lightroom-style (curves, levels, HSL, point color, masks, local adjustments, lens correction), or analyze images perceptually (histograms, color stats) for closed-loop grading. 批量照片处理工具箱：压缩/转码/缩放/EXIF 编辑/去重/选片/HDR 合并/人脸模糊/联系表/画廊/校验清单/LR 方向调色（曲线·HSL·点颜色·蒙版·镜头矫正）/感知分析（调色反馈闭环）。
+description: Batch photo processing toolbox (PhotoS). Use when the user asks to compress/convert/resize RAW or JPEG photos in batch, edit EXIF metadata (rating, keywords, camera, GPS), deduplicate similar photos, cull by exposure/sharpness, rank and move keepers by rating, merge bracketed HDR shots, blur or pixelate faces for privacy, build contact sheets or HTML galleries, generate SHA-256 manifests, rename files in batch, watch a folder and auto-process new files, benchmark processing speed, grade photos Lightroom-style (curves, levels, HSL, point color, masks, local adjustments, lens correction), or analyze images perceptually (histograms, color stats) for closed-loop grading, produce personal training packages from Lightroom data (lr-scan/lr-train/lr-recipes), or gate delivery with audit/preview/diff. 批量照片处理工具箱：压缩/转码/缩放/EXIF 编辑/去重/选片/HDR 合并/人脸模糊/联系表/画廊/校验清单/LR 方向调色（曲线·HSL·点颜色·蒙版·镜头矫正）/感知分析（调色反馈闭环）/LR 数据训练包（lr-scan 家族）/质量闸门（audit/preview/diff）。
 ---
 
 # PhotoS — Batch Photo Toolbox
@@ -64,6 +64,17 @@ pip install "photo-s-tools[mcp]"     # + MCP server (Python 3.10+)
 | Local masks + adjustments | `photo-s batch PATHS... --masks "sky:linear:0.5,0,0.5,1,feather=0.3" --mask-adjust "sky:exposure=-0.7"` | named linear/radial/color masks, relative 0-1 coords |
 | Lens correction | `photo-s batch PATHS... --lens-distort 0.15 [--lens-vignette "0.3,0.4" --lens-ca "0.999,1.001"]` | manual distortion / vignette / CA fix |
 | Perceptual analysis | `photo-s analyze PATHS... --json` | histograms, channel stats, WB lean, exposure, blur - the feedback half of closed-loop grading |
+| Visual snapshot | `photo-s preview IMG [--max-dim 1024] [--json]` | downscaled JPEG + histogram PNG (base64) - pixels for multimodal agents |
+| Regional feedback | `photo-s analyze PATHS... --grid 4 --json` | per-cell luma/color + sky/skin ratios + over/underexposed boxes |
+| Quality gate | `photo-s audit PATHS... [--over-max 2 --blur-min 0.05] [--json]` | pass/fail + reasons - the agent's stop condition |
+| Version compare | `photo-s diff A.jpg B.jpg --json` | PSNR / SSIM / MAD between before/after |
+| LR training package | `photo-s lr-scan [--export-dir DIR --render-dir DIR --sanitize]` | discover .lrcat/.xmp → coverage report + JSONL labels + before images |
+| Auto-tone train | `photo-s lr-train --data lr_records.jsonl --images before/ --out m.npz` | ridge regression, pure numpy, 9 global params (needs >=30 edited photos) |
+| Auto-tone predict | `photo-s lr-predict IMG --model m.npz` | image → 9 global params for batch |
+| Recipe clustering | `photo-s lr-recipes --data lr_records.jsonl` | your personal style signatures as PhotoS options |
+| Similar-edit search | `photo-s lr-similar IMG --data lr_records.jsonl --images before/` | content-feature kNN → past edit as starting point |
+| Eval set prep | `photo-s lr-eval --data ... --out eval.json --sample 200` | before/after render pairs + teacher scoring template |
+| Trace log | `photo-s batch PATHS... --trace DIR` | before-analyze → params → after-analyze per file (training format) |
 | Environment probe | `photo-s info --json` | version, optional features, plugins |
 
 ## Typical workflows
@@ -122,7 +133,8 @@ photo-s analyze "scratch/*.jpg" --json
 - **Python host**: `from photo_s.engine import ProcessOptions, batch_process` — no IPC overhead.
 - **MCP (deep, tool-level)**: install `photo-s-tools[mcp]` (Python 3.10+), then
   `claude mcp add photo-s -- photo-s mcp` and call tools (`process`, `select`,
-  `hdr`, `blurfaces`, `dedup`, `analyze`, …) directly. 19 tools, schemas via
+  `hdr`, `blurfaces`, `dedup`, `analyze`, `preview`, `audit`, `diff`,
+  `batch_start/status/cancel`, …) directly. 25 tools, schemas via
   `photo-s mcp --list-tools`.
 - **REST**: `photo-s serve --port 0 --token auto --ready-file x.json` — poll the
   file for `{port, token}`, then HTTP with bearer token.

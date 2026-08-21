@@ -1694,6 +1694,10 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___lr_render'),
     )
     lr_scan_parser.add_argument(
+        "--sanitize", action="store_true",
+        help=_t('help___lr_sanitize'),
+    )
+    lr_scan_parser.add_argument(
         "--json", action="store_true",
         help=_t('help___json'),
     )
@@ -2757,7 +2761,8 @@ def run_cli(args: List[str] = None) -> int:
             r = render_before_images(records, render_path)
             images = r["images"]
         if getattr(parsed, 'export_dir', None):
-            export_path = write_export(records, parsed.export_dir, images=images)
+            export_path = write_export(records, parsed.export_dir, images=images,
+                                       sanitize=bool(getattr(parsed, 'sanitize', False)))
         if getattr(parsed, 'json', False):
             if render_path:
                 report["summary"]["rendered"] = r["rendered"]
