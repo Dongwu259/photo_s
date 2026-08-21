@@ -1433,6 +1433,9 @@ def batch_process(
                           per file BEFORE output-path reservation, so per-file
                           fields (e.g. GUI per-photo masks) are consistent with
                           the pre-assigned output paths. Must be thread-safe.
+                          The hook always receives the original (pre-loop)
+                          options, never the previous file's result, so
+                          returning it unchanged for a path is always safe.
 
     Returns:
         BatchResult aggregating all individual results.
@@ -1481,9 +1484,13 @@ def batch_process(
     # predicted here, so those keep their per-file computation.
     reserved_paths = set()
     predictable = not options.rename_pattern and not options.folder_pattern
+    base_options = options
     for path in input_paths:
         if per_file_options is not None:
-            options = per_file_options(path, options)
+            # 钩子始终收到未变异的 base options：本函数逐文件复用 options
+            # 变量，若传上一文件的结果，未注入的字段会跨文件泄漏（GUI
+            # per-photo 蒙版曾因此让无蒙版照片继承上一张的蒙版）。
+            options = per_file_options(path, base_options)
         opts_copy = replace(options, jobs=1)
         # Pre-assign sequence number (mutable list for process_image compatibility)
         opts_copy._seq_counter = [seq]

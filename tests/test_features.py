@@ -256,6 +256,38 @@ class TestPerFileOptions:
             output_dir=str(tmp_path / "o"), suffix="_x", jobs=1))
         assert result.success_count == 1
 
+    def test_no_masks_photo_does_not_inherit_previous(self, tmp_path):
+        """照片 A 有蒙版、B 无条目 → B 必须用全局 options（防泄漏）。"""
+        from photo_s.engine import batch_process, ProcessOptions
+        from dataclasses import replace
+        import numpy as np
+        from PIL import Image
+        a = _make_image(tmp_path / "a.jpg")
+        b = _make_image(tmp_path / "b.jpg")
+        out = str(tmp_path / "out")
+        base = ProcessOptions(output_dir=out, suffix="_m",
+                              output_format="PNG", jobs=1)
+
+        def hook(path, opts):
+            if path == a:
+                return replace(opts, masks="sky:linear:0,0,1,0",
+                               mask_adjust="sky:brightness=0.5")
+            return opts  # B 无蒙版：原样返回
+
+        result = batch_process([a, b], base, per_file_options=hook)
+        assert result.success_count == 2
+        # B 的输出必须等于无钩子批处理的结果（未被 A 的蒙版污染）
+        out_plain = str(tmp_path / "out_plain")
+        result_plain = batch_process(
+            [b], ProcessOptions(output_dir=out_plain, suffix="_m",
+                                output_format="PNG", jobs=1))
+        assert result_plain.success_count == 1
+        img_b = np.asarray(Image.open(os.path.join(out, "b_m.png"))
+                           .convert("RGB"))
+        img_b_plain = np.asarray(
+            Image.open(os.path.join(out_plain, "b_m.png")).convert("RGB"))
+        assert np.allclose(img_b, img_b_plain)
+
 
 class TestResume:
     def test_skips_existing_outputs(self, tmp_path):
