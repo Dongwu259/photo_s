@@ -1732,7 +1732,7 @@ class PhotoSApp:
         # image on each refresh freezes the UI on RAW files
         self._dims_cache: dict = {}
         self._thumb_cache: dict = {}   # (path, size, mtime) → PIL Image
-        self._thumb_size = 48          # file-list thumbnail edge px
+        self._thumb_size = 96          # file-list thumbnail edge px
         self._pending_thumbs: list = []   # (label, path, cache_key) queue
         self._thumbs_after = None      # pending after() id for the queue
         self.filter_var = tk.StringVar(value="")  # file-list filter box
@@ -1888,8 +1888,8 @@ class PhotoSApp:
             with open(self._state_file(), encoding="utf-8") as f:
                 state = json.load(f)
             self._thumb_size = int(state.get("thumb_size", self._thumb_size))
-            if self._thumb_size not in (32, 48, 64):
-                self._thumb_size = 48
+            if self._thumb_size not in (48, 96, 144):
+                self._thumb_size = 96
             return state
         except Exception:
             return {}
@@ -2199,7 +2199,7 @@ class PhotoSApp:
             values=[self._t("thumb_small"), self._t("thumb_medium"),
                     self._t("thumb_large")],
         )
-        _thumb_idx = {32: 0, 48: 1, 64: 2}.get(self._thumb_size, 1)
+        _thumb_idx = {48: 0, 96: 1, 144: 2}.get(self._thumb_size, 1)
         self.thumb_size_combo.current(_thumb_idx)
         self.thumb_size_combo.bind("<<ComboboxSelected>>", self._on_thumb_size)
         self.thumb_size_combo.pack(side="right", padx=(4, 8))
@@ -3127,8 +3127,7 @@ class PhotoSApp:
         page = tk.Label(nav, text="", font=FONT_TINY,
                         fg=COLORS["text_secondary"], bg=COLORS["bg"])
         page.pack(side="left")
-        img_lbl = tk.Label(frame, bg=COLORS["card"],
-                           width=max_w // 8, height=max_h // 16)
+        img_lbl = tk.Label(frame, bg=COLORS["card"])
         img_lbl.pack(fill="both", expand=True, pady=(4, 0))
 
         def _load(i=None):
@@ -4865,7 +4864,10 @@ class PhotoSApp:
         def _toggle():
             state["open"] = not state["open"]
             if state["open"]:
-                content.pack(fill="x", padx=18, pady=(2, 4))
+                # after= keeps the section in place: a bare pack() would
+                # re-append to the queue end, jumping the section to the
+                # bottom of the settings list (it appears to vanish).
+                content.pack(fill="x", padx=18, pady=(2, 4), after=header)
                 header.configure(text="▾ " + title)
             else:
                 content.pack_forget()
@@ -6785,7 +6787,7 @@ class PhotoSApp:
         """Rebuild the file list at a new thumbnail size (cache keyed on
         size via the row rebuild; cached PIL images are re-fitted)."""
         idx = self.thumb_size_combo.current()
-        new = {0: 32, 1: 48, 2: 64}.get(idx, 48)
+        new = {0: 48, 1: 96, 2: 144}.get(idx, 96)
         if new != self._thumb_size:
             self._thumb_size = new
             self._thumb_cache.clear()  # re-fit to the new size
@@ -7172,8 +7174,10 @@ class PhotoSApp:
         render-polls aren't starved. A neutral placeholder shows meanwhile;
         RAW files use a half-size decode."""
         size = self._thumb_size
-        lbl = tk.Label(row, text="", bg=bg, width=size // 9,
-                       height=size // 9,
+        # No fixed char width/height: the Label sizes itself to the
+        # PhotoImage (v1.8: larger thumbnails previously got squished into
+        # a ~40px char-unit box).
+        lbl = tk.Label(row, text="", bg=bg,
                        fg=COLORS["text_secondary"],
                        font=(PLATFORM_FONTS["body"], 18))
         self._pending_thumbs.append((lbl, path, cache_key))
@@ -7210,7 +7214,7 @@ class PhotoSApp:
                 photo = ImageTk.PhotoImage(img)
                 lbl.configure(image=photo)
                 lbl._photo_ref = photo
-                lbl.configure(width=size // 9, height=size // 9, text="")
+                lbl.configure(text="")
             except Exception:
                 lbl.configure(text="▦")
             done += 1
