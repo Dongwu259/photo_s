@@ -557,6 +557,15 @@ STRINGS = {
         "mask_down": "▼ 下移",
         "mask_drag_hint": "空白处拖动 = 绘制；拖拽蒙版内部 = 移动位置",
         "mask_ai_empty": "AI 未识别到该内容（蒙版为空）",
+        "mask_ai_overlay_warn":
+            "AI 蒙版无法渲染（缺 opencv 或权重未下载）：列表中的 AI "
+            "蒙版不会显示在画布上，批量处理时该照片会失败。"
+            "可先安装 photo-s-tools[enhance] 或运行 photo-s info 检查。",
+        "mask_bad_segment_warn":
+            "蒙版字符串含无法解析的段，已跳过损坏段、保留其余蒙版。"
+            "（原先会把整串蒙版全部清空）",
+        "preview_per_photo_hint":
+            "注：预览不含逐照片蒙版（批量处理时才注入）",
         "mask_tool": "工具",
         "mask_tool_linear": "线性渐变",
         "mask_tool_radial": "径向椭圆",
@@ -1161,6 +1170,17 @@ STRINGS = {
         "mask_down": "▼ Down",
         "mask_drag_hint": "Drag empty area = paint; drag inside a mask = move it",
         "mask_ai_empty": "AI found nothing (empty mask)",
+        "mask_ai_overlay_warn":
+            "AI mask cannot render (opencv missing or weights not "
+            "downloaded): AI masks won't show on the canvas and that "
+            "photo will fail in batch. Install photo-s-tools[enhance] "
+            "or check with photo-s info.",
+        "mask_bad_segment_warn":
+            "Some mask segments could not be parsed: the broken ones were "
+            "dropped and the rest kept (previously the whole list was "
+            "silently cleared).",
+        "preview_per_photo_hint":
+            "Note: preview excludes per-photo masks (injected at batch)",
         "mask_tool": "Tool",
         "mask_tool_linear": "Linear gradient",
         "mask_tool_radial": "Radial ellipse",
@@ -3193,6 +3213,7 @@ class PhotoSApp:
             st["orig"] = base
             st["pil"] = base
             _show(base, path)
+            _refresh()  # 打开/翻页即显示编辑器状态（不再停留在原图）
 
         def _refresh():
             """Re-render with the current editor state (no-op without
@@ -3566,10 +3587,13 @@ class PhotoSApp:
             pc_range.set(float(rng * 100))
 
         def _read_fields():
-            r = max(0, min(255, int(pc_r.get())))
-            g = max(0, min(255, int(pc_g.get())))
-            b = max(0, min(255, int(pc_b.get())))
-            return (r, g, b, pc_hue.get(), pc_sat.get() / 100.0,
+            def _ch(v):
+                try:
+                    return max(0, min(255, int(float(v))))
+                except (TypeError, ValueError):
+                    return 0  # 非数字输入不崩 Tk 回调（_sync_swatch 同款防御）
+            return (_ch(pc_r.get()), _ch(pc_g.get()), _ch(pc_b.get()),
+                    pc_hue.get(), pc_sat.get() / 100.0,
                     pc_lum.get() / 100.0, pc_range.get() / 100.0)
 
         def _add():
@@ -4087,6 +4111,7 @@ class PhotoSApp:
         #                "adjusts": {name: {key: val}},
         #                "visible": {name: bool}}
         photo = {}
+        bad_masks_warned = [False]
         for f in files:
             pm = (self._photo_masks or {}).get(f)
             masks_s = (pm or {}).get("masks", self.masks.get())
@@ -4095,7 +4120,24 @@ class PhotoSApp:
                 specs = [(s.name, s.kind, list(s.params), s.feather,
                           s.invert) for s in parse_masks(masks_s)]
             except MaskError:
+                # 逐段容错：坏段丢弃、合法段保留（整串清空会让 9 个
+                # 合法段 + 1 个笔误段全部消失，OK 后整批蒙版被覆盖）
                 specs = []
+                for seg in masks_s.split(";"):
+                    seg = seg.strip()
+                    if not seg:
+                        continue
+                    try:
+                        specs.extend(
+                            (s.name, s.kind, list(s.params), s.feather,
+                             s.invert) for s in parse_masks(seg))
+                    except MaskError:
+                        continue
+                if not bad_masks_warned[0]:
+                    bad_masks_warned[0] = True
+                    messagebox.showwarning(
+                        self._t("mask_tool"),
+                        self._t("mask_bad_segment_warn"))
             try:
                 adjusts = {k: dict(v) for k, v in
                            parse_mask_adjust(adj_s).items()}
@@ -4179,11 +4221,22 @@ class PhotoSApp:
             if not undo_stack:
                 return
             path, snap = undo_stack.pop()
+            if path == "__all__":  # apply-to-all 快照：还原全部照片
+                for f, s in snap.items():
+                    photo[f] = s
+                current["name"] = None
+                ai_cache.clear()
+                _load_adjusts()
+                _refresh_list()
+                _draw_image()
+                return
             if path != files[idx[0]]:
                 # undo belongs to another photo: jump there, then restore
                 idx[0] = files.index(path)
             photo[path] = snap
             current["name"] = None
+            mode["add"] = None  # A/B 模式是临时的，跨照片/撤销不残留
+            ai_cache.clear()
             _load_adjusts()
             _refresh_list()
             _draw_image()
@@ -4236,9 +4289,12 @@ class PhotoSApp:
         # AI mask cache: (path, mask_name) -> float32 hxw mask; AI inference
         # is slow, so overlay redraws reuse it instead of re-segmenting.
         ai_cache = {}
+        ai_skip_warned = [False]  # AI 叠加层渲染失败只警告一次
 
         def _draw_image():
             """Fit the current photo into the canvas, with overlay."""
+            if not win.winfo_exists():
+                return  # 窗口已关闭（<50ms 内关窗时 after 回调仍会触发）
             canvas.delete("all")
             import numpy as np
             from PIL import Image as PILImage, ImageTk
@@ -4286,6 +4342,13 @@ class PhotoSApp:
                         over[..., k] = over[..., k] * (1 - 0.55 * m) \
                             + c[k] * 0.55 * m
                 except MaskError:
+                    # AI 蒙版缺 cv2/权重时叠加层静默跳过 → 列表带 ✓ 但画布
+                    # 隐形，用户到批量才见失败——一次性点明原因
+                    if not ai_skip_warned[0]:
+                        ai_skip_warned[0] = True
+                        messagebox.showwarning(
+                            self._t("mask_tool"),
+                            self._t("mask_ai_overlay_warn"))
                     continue
             out = PILImage.fromarray(np.clip(over, 0, 255).astype(np.uint8))
             _img_photo["tk"] = ImageTk.PhotoImage(out)
@@ -4350,7 +4413,7 @@ class PhotoSApp:
         mode = {"add": None}  # None = paint new; True/False = A add / B
         # subtract strokes onto the current brush mask
         move = {"active": False, "name": None, "dx0": 0, "dy0": 0,
-                "orig": None}  # Alt+drag moves an existing mask
+                "orig": None, "moved": False}  # Alt+drag moves an existing mask
 
         def _mask_at(evt):
             """Return the name of the topmost visible mask under the cursor,
@@ -4413,6 +4476,11 @@ class PhotoSApp:
                         continue
                     # color masks don't move (no spatial center)
                 except MaskError:
+                    if not ai_skip_warned[0]:
+                        ai_skip_warned[0] = True
+                        messagebox.showwarning(
+                            self._t("mask_tool"),
+                            self._t("mask_ai_overlay_warn"))
                     continue
             return None
 
@@ -4425,6 +4493,8 @@ class PhotoSApp:
             base = _img_photo["pil"]
             if base is None or scale <= 0:
                 return
+            if abs(dx_canvas) > 1 or abs(dy_canvas) > 1:
+                move["moved"] = True  # 无位移的点击不记 undo
             drx = dx_canvas / scale / base.width
             dry = dy_canvas / scale / base.height
             name = move["name"]
@@ -4472,8 +4542,9 @@ class PhotoSApp:
                         _save_adjusts()
                         move.update({"active": True, "name": hit,
                                      "dx0": evt.x, "dy0": evt.y,
-                                     "orig": list(s[2])})
+                                     "orig": list(s[2]), "moved": False})
                         current["name"] = hit
+                        feather_v.set(s[3] * 100)  # 画布点击同步羽化滑杆
                         _refresh_list(select=hit)
                         _load_adjusts()
                         return
@@ -4531,7 +4602,9 @@ class PhotoSApp:
             if move["active"]:
                 # moving is undoable as one step
                 move["active"] = False
-                _push_undo()
+                if move["moved"]:
+                    _push_undo()
+                move["moved"] = False
                 return
             if not drag["active"]:
                 return
@@ -4592,7 +4665,14 @@ class PhotoSApp:
                 base = _img_photo["pil"]
                 if base is None:
                     return
-                m = segment(base, kind, label=label)
+                # CPU 推理耗时数秒：先落 watch 光标 + 状态提示，避免
+                # 无反馈冻结（异步化需要 queue 模式，超出本对话框范围）
+                win.config(cursor="watch")
+                win.update_idletasks()
+                try:
+                    m = segment(base, kind, label=label)
+                finally:
+                    win.config(cursor="")
                 if m.max() < 0.01:
                     messagebox.showwarning(
                         self._t("mask_ai_empty"), self._t("mask_ai_empty"))
@@ -4606,7 +4686,8 @@ class PhotoSApp:
                     name = _new_spec_name(kind)
                 ai_cache.pop((files[idx[0]], name), None)
                 _set_current_mask(name, (name, kind, [label] if label
-                                         else [], 0.0, False))
+                                         else [],
+                                         feather_v.get() / 100.0, False))
                 _refresh_list(select=name)
                 _draw_image()
             except (ImportError, RuntimeError) as e:
@@ -4692,6 +4773,7 @@ class PhotoSApp:
             _adjusts().pop(name, None)
             _visible().pop(name, None)
             current["name"] = None
+            ai_cache.clear()  # 该蒙版的分割缓存随删除失效
             _refresh_list()
             _draw_image()
 
@@ -4713,6 +4795,8 @@ class PhotoSApp:
                 current["name"] = _specs()[sel[0]][0]
                 feather_v.set(_specs()[sel[0]][3] * 100)
 
+        feather_undo = {"name": None, "val": None}  # 拖动过程只 push 一次
+
         def _apply_feather(*_):
             """Live-update the selected mask's feather from the slider."""
             name = current["name"]
@@ -4720,13 +4804,18 @@ class PhotoSApp:
                 return
             for i, s in enumerate(_specs()):
                 if s[0] == name and s[1] != "color":
-                    if abs(s[3] - feather_v.get() / 100.0) > 1e-6:
-                        _push_undo()
-                    _specs()[i] = (s[0], s[1], list(s[2]),
-                                   feather_v.get() / 100.0, s[4])
-                    _refresh_list(select=name)
-                    _draw_image()
-                    return
+                    v = feather_v.get() / 100.0
+                    if abs(s[3] - v) > 1e-6:
+                        # 逐 tick push 会把 50 cap 的旧快照全挤出栈；
+                        # 同一次拖动（值单调变化）只记录一个 undo
+                        if feather_undo["name"] != name or \
+                                abs(feather_undo["val"] - s[3]) > 1e-9:
+                            _push_undo()
+                            feather_undo.update(name=name, val=v)
+                        _specs()[i] = (s[0], s[1], list(s[2]), v, s[4])
+                        _refresh_list(select=name)
+                        _draw_image()
+                        return
 
         # ── adjustments for the current mask ─────────────────────────────
         adj_vars = {key: tk.DoubleVar(value=0.0) for key in (
@@ -4778,6 +4867,8 @@ class PhotoSApp:
             _save_adjusts()
             idx[0] = (idx[0] + delta) % len(files)
             current["name"] = None
+            mode["add"] = None  # A/B 模式不跨照片残留
+            ai_cache.clear()    # 缓存按 (path, name) 键，翻页后旧图不清理会无界增长
             _load_adjusts()
             _refresh_list()
             _draw_image()
@@ -4821,7 +4912,15 @@ class PhotoSApp:
 
         def _apply_all():
             """Copy current photo's masks to every checked photo (deep)."""
-            _push_undo()
+            # 全量快照：Ctrl+Z 还原所有照片，而不是只剩当前一张
+            undo_stack.append(("__all__", {
+                f: {"specs": [(s[0], s[1], list(s[2]), s[3], s[4])
+                              for s in photo[f]["specs"]],
+                    "adjusts": {k: dict(v) for k, v in
+                                photo[f]["adjusts"].items()},
+                    "visible": dict(photo[f]["visible"])}
+                for f in files}))
+            del undo_stack[:-_MAX_UNDO]
             src = photo[files[idx[0]]]
             for f in files:
                 photo[f] = {
@@ -8803,6 +8902,12 @@ class PhotoSApp:
         nav_lbl = tk.Label(nav, text="", font=FONT_SMALL,
                            fg=COLORS["text_secondary"], bg=COLORS["bg"])
         nav_lbl.pack(side="left", padx=(0, 12))
+        if self._photo_masks:
+            # 预览走全局 options，不含 per-photo 蒙版（工作流保存的逐照片
+            # 蒙版只在批量处理时经 per_file_options 注入）——点明状态差异
+            tk.Label(nav, text=self._t("preview_per_photo_hint"),
+                     font=FONT_TINY, fg=COLORS["accent"],
+                     bg=COLORS["bg"]).pack(side="left")
         FlatButton(nav, text="‹", command=lambda: _nav(-1),
                    bg=COLORS["card"], fg=COLORS["text"],
                    hover_bg=COLORS["bg"], border_color=COLORS["border"],
