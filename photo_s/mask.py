@@ -120,6 +120,39 @@ def _req_finite(v: float, what: str, seg: str) -> float:
     return v
 
 
+def _extract_tail_keywords(params: str, seg: str):
+    """Strip trailing ``,feather=..``/``,invert`` keywords off params.
+
+    ``to_string``/GUI 对每种 kind 都把 feather/invert 追加在段尾
+    （brush 落在最后一个 ``|`` 点后），几何类型解析时逐 token 处理，
+    v1.8 类型（subject/person/object/brush/combo）需要先剥走。
+    返回 (params_without_keywords, feather, invert)。
+    """
+    feather = 0.0
+    invert = False
+    pipes = params.split("|")
+    toks = pipes[-1].split(",")
+    while toks:
+        t = toks[-1].strip().lower()
+        if t == "invert":
+            invert = True
+            toks.pop()
+        elif t.startswith("feather="):
+            try:
+                feather = _req_finite(
+                    float(t.split("=", 1)[1]), "feather value", seg)
+            except MaskError:
+                raise
+            except ValueError:
+                raise MaskError(
+                    f"bad feather value {t!r} in mask {seg!r}") from None
+            toks.pop()
+        else:
+            break
+    pipes[-1] = ",".join(toks)
+    return "|".join(pipes), feather, invert
+
+
 def _parse_mask_segment(seg: str, index: int) -> MaskSpec:
     """Parse one ``[name:]type:params`` segment into a MaskSpec."""
     seg = seg.strip()
@@ -130,9 +163,12 @@ def _parse_mask_segment(seg: str, index: int) -> MaskSpec:
     if len(parts) == 3:
         name, mtype, params = parts[0].strip(), parts[1].strip().lower(), parts[2]
     elif len(parts) == 2:
-        if parts[1].strip().lower() in _KNOWN_TYPES:
+        # type token 可能带尾部关键字（"m:subject,feather=0.3"）
+        head, _, kws = parts[1].partition(",")
+        head = head.strip().lower()
+        if head in _KNOWN_TYPES:
             # "main:subject" - named param-less mask (v1.8), not type:params
-            name, mtype, params = parts[0].strip(), parts[1].strip().lower(), ""
+            name, mtype, params = parts[0].strip(), head, kws
         else:
             name, mtype, params = str(index), parts[0].strip().lower(), parts[1]
     else:
@@ -148,14 +184,17 @@ def _parse_mask_segment(seg: str, index: int) -> MaskSpec:
 
     # v1.8 types have their own params syntax.
     if mtype == "subject":
+        params, feather, invert = _extract_tail_keywords(params, seg)
         if params.strip():
             raise MaskError(f"subject mask takes no params (got {seg!r})")
-        return MaskSpec("subject", (), 0.0, False, name)
+        return MaskSpec("subject", (), feather, invert, name)
     if mtype == "person":
+        params, feather, invert = _extract_tail_keywords(params, seg)
         if params.strip():
             raise MaskError(f"person mask takes no params (got {seg!r})")
-        return MaskSpec("person", (), 0.0, False, name)
+        return MaskSpec("person", (), feather, invert, name)
     if mtype == "object":
+        params, feather, invert = _extract_tail_keywords(params, seg)
         label = params.strip().lower()
         # 空格允许（traffic light / hot dog 等 15 个 COCO 类含空格），
         # label 是段末位，空格不会破坏 ;/: 结构
@@ -163,7 +202,7 @@ def _parse_mask_segment(seg: str, index: int) -> MaskSpec:
             raise MaskError(
                 f"object mask needs one COCO label like 'object:car' "
                 f"(got {seg!r})")
-        return MaskSpec("object", (label,), 0.0, False, name)
+        return MaskSpec("object", (label,), feather, invert, name)
     if mtype == "brush":
         return _parse_brush(seg, name, params)
     if mtype == "combo":
@@ -245,6 +284,7 @@ def _parse_brush(seg: str, name: str, params: str) -> MaskSpec:
     Internally the negative radius is stored as ``-r`` so the spec tuple
     stays (x, y, r) - no structural change.
     """
+    params, feather, invert = _extract_tail_keywords(params, seg)
     dots = []
     for dot in params.split("|"):
         dot = dot.strip()
@@ -272,7 +312,7 @@ def _parse_brush(seg: str, name: str, params: str) -> MaskSpec:
         dots.append((x, y, -r if subtract else r))
     if not dots:
         raise MaskError(f"brush mask needs at least one dot (got {seg!r})")
-    return MaskSpec("brush", tuple(dots), 0.0, False, name)
+    return MaskSpec("brush", tuple(dots), feather, invert, name)
 
 
 def _parse_combo(seg: str, name: str, params: str) -> MaskSpec:
@@ -282,6 +322,7 @@ def _parse_combo(seg: str, name: str, params: str) -> MaskSpec:
     combo result at render time (union of the operands would defeat the
     combination). Names must not contain ``&`` or ``-``.
     """
+    params, feather, invert = _extract_tail_keywords(params, seg)
     a_op_b = params.strip()
     for op in ("&", "-"):
         if op in a_op_b:
@@ -296,7 +337,7 @@ def _parse_combo(seg: str, name: str, params: str) -> MaskSpec:
             if name in (a, b):
                 raise MaskError(
                     f"combo {name!r} cannot reference itself (got {seg!r})")
-            return MaskSpec("combo", (a, op, b), 0.0, False, name)
+            return MaskSpec("combo", (a, op, b), feather, invert, name)
     raise MaskError(
         f"combo needs 'A&B' or 'A-B' (got {seg!r})")
 

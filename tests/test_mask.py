@@ -357,6 +357,26 @@ def test_object_label_allows_spaces():
             parse_masks(f"x:object:{bad}")
 
 
+def test_v18_types_accept_feather_invert_keywords():
+    # to_string/GUI 对所有 kind 追加 ,feather=/,invert（render 也支持）；
+    # parser 此前只认几何类型 → round-trip 断裂、GUI 蒙版静默丢失。
+    cases = ["m:subject,feather=0.3", "m:subject,invert",
+             "m:subject,feather=0.3,invert", "m:person,feather=0.5",
+             "m:object:car,feather=0.2",
+             "m:brush:0.5,0.5,0.05|0.6,0.6,0.05,feather=0.3,invert",
+             "c:combo:a&b,feather=0.3",
+             "m:linear:0,0,1,1,feather=0.2,invert"]
+    for s in cases:
+        sp = parse_masks(s)[0]
+        s2 = sp.to_string()          # round-trip 必须保真
+        back = parse_masks(s2)[0]
+        assert back.params == sp.params
+        assert abs(back.feather - sp.feather) < 1e-6
+        assert back.invert == sp.invert
+    with pytest.raises(MaskError, match="feather"):
+        parse_masks("m:subject,feather=abc")
+
+
 def test_nan_inf_params_rejected_everywhere():
     # NaN/Inf slip past range comparisons and silently render black masks.
     for seg in ("r:radial:0.5,0.5,nan,0.2", "r:linear:0,0,inf,1",
