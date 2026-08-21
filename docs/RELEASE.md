@@ -23,8 +23,17 @@
 ## 发布核心 `photo-s-tools`（每次发版）
 
 ```bash
+# 0. v1.8.0+ 专属：先上传三个 AI 分割权重为 GitHub release 附件
+#    （URL 写死在 photo_s/segmask.py WEIGHTS：u2netp.onnx /
+#     pphumanseg.onnx / yolov8n-seg-fp16.onnx，tag 必须正好 v1.8.0；
+#     本地验证文件 /tmp/v18_weights/，shasum -a 256 与 pin 值复核一致）
+#    gh release create v1.8.0 --title "v1.8.0" --notes "..." \
+#      /tmp/v18_weights/u2netp.onnx /tmp/v18_weights/pphumanseg.onnx \
+#      /tmp/v18_weights/yolov8n-seg-fp16.onnx
+#    不传则 AI 蒙版首次使用下载失败（不静默）。
+
 # 1. 本地验证（必须全绿）
-python3 -m pytest tests/ -q                 # 521 个
+python3 -m pytest tests/ -q                 # 1072 个
 python3 -m photo_s.cli --help               # CLI 冒烟
 python3 -m photo_s.cli plugin list --json   # 官方插件目录
 

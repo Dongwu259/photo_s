@@ -126,7 +126,7 @@ photo-s select ~/shoot/ -r --selects-dir 精选 --rejects-dir 淘汰 --dry-run
 photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 ```
 
-`photo-s --help` 列出全部 22 个子命令。语言：`--language en|zh|auto`。
+`photo-s --help` 列出全部 33 个子命令。语言：`--language en|zh|auto`。
 
 ---
 
@@ -134,7 +134,7 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/FEATURES.md`](FEATURES.md) | 完整功能清单——32 个 CLI 命令、引擎管线 |
+| [`docs/FEATURES.md`](FEATURES.md) | 完整功能清单——33 个 CLI 命令、引擎管线 |
 | [`docs/AGENT_API.md`](AGENT_API.md) | Agent 契约：JSON 结构、退出码、REST、MCP |
 | [`docs/PLUGINS.md`](PLUGINS.md) | 插件系统：SCUNet 降噪、LUT、自己写插件 |
 | [`docs/GUI_CHANGES.md`](GUI_CHANGES.md) | GUI 行为与接口契约 |
@@ -147,7 +147,7 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 
 ## ⚠️ 限制与说明
 
-PhotoS 是**批量 / 交付导向管线**，不是交互式编辑器——笔刷蒙版待 v1.8、不做 RAW 域编辑。
+PhotoS 是**批量 / 交付导向管线**，不是交互式编辑器——不做 RAW 域编辑。局部编辑是规格驱动的：命名蒙版（linear/radial/color/AI 分割/笔刷/组合算子）+ 蒙版内局部调整，全部以紧凑字符串建模，经 CLI/REST/MCP/preset 零胶水传递。
 
 - **设备上推理，无云端。** 降噪模型权重（SCUNet）首次使用时下载到本机；不上传任何数据。
 - **许可。** 官方代码与官方模型权重（含 SCUNet 检查点）均为 **MIT**——可自由商用。

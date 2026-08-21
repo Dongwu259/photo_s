@@ -130,7 +130,7 @@ photo-s select ~/shoot/ -r --selects-dir picks --rejects-dir bin --dry-run
 photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 ```
 
-`photo-s --help` lists all 22 commands. Language: `--language en|zh|auto`.
+`photo-s --help` lists all 33 commands. Language: `--language en|zh|auto`.
 
 ---
 
@@ -138,7 +138,7 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 
 | Doc | Contents |
 |---|---|
-| [`docs/FEATURES.md`](docs/FEATURES.md) | Full inventory — 22 CLI commands, engine pipeline |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | Full inventory — 33 CLI commands, engine pipeline |
 | [`docs/AGENT_API.md`](docs/AGENT_API.md) | Agent contract: JSON shapes, exit codes, REST, MCP |
 | [`docs/PLUGINS.md`](docs/PLUGINS.md) | Plugin system: SCUNet denoise, LUT, write your own |
 | [`docs/GUI_CHANGES.md`](docs/GUI_CHANGES.md) | GUI behavior & interface contract |
@@ -151,7 +151,7 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 
 ## ⚠️ Limitations
 
-PhotoS is a **batch / delivery pipeline**, not an interactive editor — no brush masks yet (v1.8), no RAW-domain editing.
+PhotoS is a **batch / delivery pipeline**, not an interactive editor — no RAW-domain editing. Local editing is spec-driven: named masks (linear/radial/color/AI segmentation/brush strokes/combos) + local adjustments under masks, all as compact strings that serialize through CLI/REST/MCP/presets.
 
 - **On-device inference, no cloud.** Denoise model weights (SCUNet) download to
   your machine on first use; nothing is uploaded.

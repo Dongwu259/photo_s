@@ -66,6 +66,29 @@
 key ∈ exposure/brightness/contrast/saturation/vibrance/clarity/texture/sharpen/temp/tint/blur）、
 `--point-color "200,120,80:30,0.2,-0.1,0.2"`（取样色定向）、
 `--lens-distort K1`（畸变）、`--lens-vignette "0.3,0.4"`（去暗角）、`--lens-ca "0.999,1.001"`（消色差）。
+
+**v1.8.0 蒙版扩展**（`--masks` 段可混用；`;` 分隔多蒙版、`|` 分隔笔刷点）：
+- **AI 分割**：`subject:`（显著性主体）/ `person:`（人像）/ `object:car`（COCO 80 类，
+  含空格类名可达如 `object:traffic light`）——需 `photo-s-tools[enhance]`（opencv），
+  权重首次使用经 modelstore 下载 + sha256 校验（缺依赖/下载失败 → 该文件 per-file 报错，不静默）
+- **笔刷**：`brush:0.5,0.5,0.05|0.6,0.5,0.05`（点间胶囊并集；负点 `-0.6,0.5,0.05` = 减去）
+- **组合算子**：`combo:sky&face`（交集）/ `combo:sky-face`（差集），引用已命名蒙版并替换
+- **蒙版内复杂参数**：`--mask-adjust "sky:curves={r:0,0;128,140;255,255};face:hsl={red:0.1,0.2,0}"`
+  （curves/hsl/color_grading/vignette/grain 五个字符串键用 `{}` 包裹，与全局 grade 字符串同格式）
+- 所有类型支持段尾 `,feather=0.3`/`,invert`（round-trip 保真）；数值参数拒绝 NaN/Inf（清晰报错）
+- **per-photo 蒙版**：REST `process` 的 `options` 键与 CLI 同；逐照片差异经
+  `batch_process(per_file_options=)` 钩子注入（钩子始终收到未变异的 base options）
+
+### 2.7 LR 数据桥接（v1.7.1+，个人修图数据 → PhotoS 参数空间）
+
+| 命令 | stdout JSON shape | 说明 |
+|---|---|---|
+| `lr-scan [--export-dir D] [--render-dir D] [--sanitize D]` | `{"catalogs": [...], "xmp_files", "coverage": {...}, "export"?}` | 只读扫描 .lrcat/.xmp → 覆盖报告 + 训练 JSONL + rawpy before 图；`--sanitize` 产出脱敏数据包（剥 EXIF、image 为 basename，配合 `--images` 直接可训） |
+| `lr-merge PKG... -o OUT` | `{"packages", "records", "edited", "images_copied", "duplicates", "conflicts"}` | 多机数据包合并（去重 + 图集复制 + 绝对路径重写） |
+| `lr-train --data lr_records.jsonl [--images DIR] --out m.npz` | 训练进度（stderr）+ 模型文件 | 岭回归 9 项全局参数，纯 numpy；sanitize 包缺 --images 时报"缺图跳过"诊断 |
+| `lr-predict IMG [--model m.npz] --json` | `{"path", "options": {ev, contrast, saturation, vibrance, wb_temp, wb_tint, clarity, texture, dehaze}}` | **输出键与 ProcessOptions 字段一致（exposure→ev），REST/MCP/CLI 零映射可直接套用**；自动识别岭回归 / CLIP+MLP npz（后者需 torch + open-clip-torch，缺失报清晰 LrError） |
+| `lr-recipes` / `lr-similar` / `lr-eval` | 配方聚类 / 相似编辑检索 / 教师评测集 | v1.7.1，见 `photo-s <cmd> --help` |
+
 `--denoise N` 与 `--auto-straighten` 需要
 `pip install photo-s-tools[enhance]`（opencv-python-headless），未装时该文件报错
 （错误信息含安装提示），server 端同样经 options 映射生效（enhance 选项缺依赖时按上述规则处理）。

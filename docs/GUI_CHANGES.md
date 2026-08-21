@@ -18,6 +18,40 @@
 | 第六轮 | 工作流补全 | 审查打分灯箱、去重查看器、画廊导出、摘要对话框可滚动（v1.2.0，见 §8） |
 | 第七轮 | v1.4.0 深化 | EXIF 编辑器扩拍摄信息 7 字段、批量重命名实时预览、多图并排对比（首个 Canvas 缩放视口，见 §9） |
 | 第八轮 | v1.6.0 工作流 | 评审灯箱加「移动精选/淘汰」（`_select_move` seam）、HDR 合并对话框（「更多工具」）、设置面板人脸模糊选项（见 §11） |
+| 第九轮 | v1.8.0 蒙版工作流 | LR 式画布蒙版工作流（`_open_mask_workflow`）、调色对话框实时预览（见 §12） |
+
+---
+
+## 12. 第九轮：v1.8.0 蒙版工作流 + 实时预览
+
+### 12.1 LR 式画布蒙版工作流（`_open_mask_workflow`）
+
+- 入口：「更多工具」→ 蒙版；勾选照片打开 **1320x860** 大窗口（可缩到 1080x700）
+- 画布：大图 + 多蒙版叠加（`_MASK_COLORS` 分色半透明 overlay）；笔刷/线性/径向/取色/AI 工具
+- 蒙版类型全支持：linear/radial/color + AI（subject/person/object:label）+ brush + combo
+- **拖拽蒙版内部 = 移动位置**；Alt 拖拽同样移动；图层列表上移/下移排序
+- **A/B 加减模式**：选中笔刷蒙版后 A=加画、B=减画（负点 `-x,y,r` 编码，模式跨照片/撤销清零）
+- 径向蒙版绘制时显示**虚线范围圈**；羽化滑杆 live（AI/笔刷蒙版同样生效，`,feather=` 序列化 round-trip）
+- **undo**：50 层深快照栈，快照含 path（跨照片 undo 自动跳转）；apply-all 记全量快照
+- ◀▶ 翻页（所有勾选照片），per-photo 蒙版经 `batch_process(per_file_options=)` 逐文件注入
+  （engine 钩子保证无蒙版照片回落全局 options——见 §2.1 同款 seam）
+- 序列化共享模块级 `_mask_spec_string`（workflow 与 v1.7 表单对话框共用，combo/负笔刷点编码统一）
+
+### 12.2 调色对话框实时预览（v1.8.0）
+
+- `_add_photo_reference(parent, on_pick, render_fn)`：内嵌照片预览条 + 翻页 + 点击取色；
+  打开/翻页即渲染编辑器状态（不再停在原图）
+- 四个对话框接线：曲线 `_curve_render` / 色轮 `_wheels_render` / HSL `_hsl_render` /
+  点颜色 `_pc_render`——与引擎相同的 grade 函数与字符串构造，**所见即所得**
+- 预览缩略图档位 48/96/144（移除 Label 字符单位 bug）
+
+### 12.3 健壮性（发布前扫描修复，见 commit 历史）
+
+- per-photo 蒙版跨文件泄漏（engine 钩子收 base options）
+- combo/object/负笔刷点序列化崩溃与编码错误（共享 helper）
+- AI 叠加层缺依赖一次性警告、坏蒙版段逐段容错（不再整串清空）
+- 线性工具点击未拖动零长度防护、异类工具不覆写选中蒙版、切换蒙版先存滑杆编辑
+- ai_cache 翻页/删除/撤销清理、50ms 关窗 after 回调防护、AI 分割 watch 光标
 
 ---
 

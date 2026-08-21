@@ -3,7 +3,7 @@
 > 以代码实际为准（v1.5.1），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
-## 1. CLI 命令（32 个）
+## 1. CLI 命令（33 个）
 
 | 命令 | 作用 |
 |---|---|
@@ -52,7 +52,7 @@
 
 **LR 方向调色（v1.6.0，`photo_s/grade.py` 纯 numpy/PIL 零依赖）**：点曲线 `--curves "0,0;128,140;255,255"`（PCHIP 单调样条，支持 rgb/r/g/b 分通道）· 手动色阶 `--levels "80,200,1.1"` · 自然饱和度 `--vibrance` · 三向颜色分级 `--color-grading "shadows:120,0.3"` · WB tint `--wb-tint`（G/M 轴）· HSL 分色 `--hsl "green:10,0.2,0.1"`（8 色域软过渡）· 清晰度/纹理 `--clarity`/`--texture`（USM 局部对比）· 去雾 `--dehaze`（暗通道先验）· 暗角 `--vignette "0.5,0.4,0.4"` · 颗粒 `--grain "0.15,1.5"`
 
-**局部调整 + 镜头矫正 + 感知分析（v1.7.0）**：**命名蒙版** `--masks "sky:linear:0.5,0,0.5,1,feather=0.3;face:color:255,200,180,tol=0.15"`（linear/radial/color 三类，相对坐标 0-1 批量安全；`photo_s/mask.py`，v1.8 预留 subject/person/object/brush 语法）· **蒙版内调整** `--mask-adjust "sky:exposure=-0.7,vibrance=0.2"`（11 项标量：exposure/brightness/contrast/saturation/vibrance/clarity/texture/sharpen/temp/tint/blur）· **点颜色** `--point-color "200,120,80:30,0.2,-0.1,0.2"`（取样色中心软掩码，与 HSL 固定 8 域互补）· **镜头矫正** `--lens-distort k1`（桶形/枕形）/ `--lens-vignette "0.3,0.4"`（去暗角）/ `--lens-ca "0.999,1.001"`（消色差），`photo_s/lens.py` 纯 numpy 双线性 · **感知分析** `photo-s analyze`（直方图/通道统计/色温估计/曝光/模糊，`analyze -> 调参 -> process -> analyze` 闭环）
+**局部调整 + 镜头矫正 + 感知分析（v1.7.0，v1.8.0 扩展）**：**命名蒙版** `--masks "sky:linear:0.5,0,0.5,1,feather=0.3;face:color:255,200,180,tol=0.15"`（linear/radial/color 相对坐标 0-1 批量安全 + v1.8 AI 分割 `subject`/`person`/`object:car`（COCO 80 类，ONNX 经 modelstore 下载 + sha256 校验）+ 笔刷 `brush:x,y,r|x,y,r`（负点 `-x,y,r` 为减模式）+ 组合算子 `combo:A&B`/`combo:A-B`；`photo_s/mask.py`）· **蒙版内调整** `--mask-adjust "sky:exposure=-0.7,vibrance=0.2"`（11 项标量 + 5 项复杂字符串 `{}` 包裹：curves/hsl/color_grading/vignette/grain 复用 grade.py）· **点颜色** `--point-color "200,120,80:30,0.2,-0.1,0.2"`（取样色中心软掩码，与 HSL 固定 8 域互补）· **镜头矫正** `--lens-distort k1`（桶形/枕形）/ `--lens-vignette "0.3,0.4"`（去暗角）/ `--lens-ca "0.999,1.001"`（消色差），`photo_s/lens.py` 纯 numpy 双线性 · **感知分析** `photo-s analyze`（直方图/通道统计/色温估计/曝光/模糊，`analyze -> 调参 -> process -> analyze` 闭环）
 
 | 类别 | 能力 |
 |---|---|

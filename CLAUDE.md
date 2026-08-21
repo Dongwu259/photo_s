@@ -16,7 +16,7 @@
 ## 架构速览
 
 - `engine.py` — `ProcessOptions` dataclass + `process_image` + `batch_process`（核心，含 `per_file_options(path, opts)` 钩子——GUI per-photo 蒙版经此逐文件注入，在输出路径预分配前调用）
-- `cli.py` — argparse，子命令：compress/convert/batch/exif/preset/watch/dedup/info/rename/config/serve/mcp/check/contact-sheet/cull/select/hdr/blurfaces/hash/gallery/bench/plugin（含 plugin scaffold）/analyze/lr-scan/lr-train/lr-predict/lr-recipes/lr-similar/lr-eval/diff/audit/preview；`--language {en,zh,auto}` 全局 flag（`_pre_parse_language` 两段式解析：先 resolve 语言再建 parser，argparse 构造时定死 help 文本）
+- `cli.py` — argparse，子命令：compress/convert/batch/exif/preset/watch/dedup/info/rename/config/serve/mcp/check/contact-sheet/cull/select/hdr/blurfaces/hash/gallery/bench/plugin（含 plugin scaffold）/analyze/lr-scan/lr-train/lr-predict/lr-recipes/lr-similar/lr-eval/lr-merge/diff/audit/preview；`--language {en,zh,auto}` 全局 flag（`_pre_parse_language` 两段式解析：先 resolve 语言再建 parser，argparse 构造时定死 help 文本）
 - `contract.py` — JSON 输出契约：`SCHEMA_VERSION = 1` + `versioned(payload)`（加性顶层键 `schema_version`，非信封）；CLI `--json`/REST `_send_json`/MCP 工具三处复用，零项目 import
 - `i18n.py` — 国际化共享模块：`detect_system_language()`（三平台：env LANG/LC_ALL → macOS `defaults read -g AppleLanguages` → Windows `GetUserDefaultUILanguage` LCID → `locale.getlocale()`，每级 try/except 永不崩，`_system_language()` 记忆化）；`resolve_language()` 优先级 **flag > `PHOTO_S_LANG` env > config `language` > persisted(GUI) > 系统检测 > "en"**；`CURRENT_LANG` 模块变量 + `_t(key, lang, **kwargs)`（.format 只允许命名占位符）；CLI `STRINGS` 表（zh/en parity 测试强制）；GUI 持久化 `~/.photos/language`。**注意：检测层绝不调 `locale.setlocale`**（进程级副作用会污染后续 `open()` 默认编码）
 - `gui.py` — Tkinter，双语（STRINGS zh/en），启动语言 `resolve_language(use_persisted=True)`（持久化 > env > 系统），`_on_language_selected` 持久化用户选择；设置面板可滚动 canvas；工作流对话框：审查打分灯箱（`_review_scan`/`_review_save` 同步 helper，EXIF 部分更新，评审后可按评分一键移动精选/淘汰：`_select_move` seam + 对话框 select 行）、去重查看器（`_dedup_scan`/`_dedup_move_to_trash` 同步 helper，移入 `_duplicates_trash` 不删除）、画廊导出（`_gallery_build`）、可滚动摘要对话框、「更多工具」菜单（`_show_watch` 目录监视 / `_show_contact_sheet` / `_show_cull` / `_show_hash` / `_show_hdr` HDR 合并 / `_show_presets`，Tk-free seam：`_cull_scan`/`_contact_sheet_build`/`_hash_generate`/`_hash_verify`/`_hdr_merge`/`_select_move`/`_apply_options_to_ui`）、**视觉预览**（`_preview`：真实管线渲染到临时目录，`_preview_options` 强制 `remove_original=False`，签名防抖自动刷新，root-drain 清理 tempdir）。**线程约定**：worker 只 `queue.put`，UI 更新走主线程 after-drain 循环（跨线程 `win.after` 会在非主循环下炸）
@@ -47,7 +47,7 @@
 ## 常用命令
 
 ```bash
-python3 -m pytest tests/ -q      # 全量测试（当前 1049 个）
+python3 -m pytest tests/ -q      # 全量测试（当前 1072 个）
 python3 -m photo_s.cli --help    # CLI 冒烟（无 PATH 依赖；--language en/zh 切换）
 python3 -m photo_s.cli plugin list --json   # 官方插件目录 + 已装状态
 python3 -m photo_s.cli mcp --list-tools     # MCP 工具 + schema（需 photo-s-tools[mcp]，py3.10+）
