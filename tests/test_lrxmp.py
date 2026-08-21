@@ -4,6 +4,7 @@
 XMP sidecar），数值为真实修图数据。
 """
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -231,3 +232,73 @@ def test_scan_and_report_end_to_end(tmp_path):
     lines = open(out, encoding="utf-8").read().strip().splitlines()
     assert len(lines) == 2
     assert '"edited": true' in lines[0]
+
+
+# ---------------------------------------------------------------- 数据层（训练）
+
+def _synthetic_records(tmp_path, n=40):
+    from PIL import Image
+    records = []
+    for i in range(n):
+        img = Image.new("RGB", (64, 64),
+                        (i * 4 % 255, 100 + i % 80, 50 + i % 100))
+        p = tmp_path / f"p{i}.jpg"
+        img.save(p)
+        exp = round((i % 21 - 10) / 20.0, 2)
+        records.append({"path": str(p), "image": str(p), "edited": True,
+                        "options": {"exposure": exp,
+                                    "contrast": 1.0 + i / 200.0}})
+    return records
+
+
+def test_train_predict_roundtrip(tmp_path):
+    recs = _synthetic_records(tmp_path)
+    model = str(tmp_path / "m.npz")
+    res = lrxmp.train_auto_tone(recs, model)
+    assert res["samples"] == 40
+    assert 0.0 <= res["r2"] <= 1.0
+    assert lrxmp.predict_auto_tone(str(tmp_path / "p5.jpg"), model)["options"]
+
+
+def test_train_too_few_samples(tmp_path):
+    recs = _synthetic_records(tmp_path, 5)
+    with pytest.raises(LrError):
+        lrxmp.train_auto_tone(recs, str(tmp_path / "m.npz"))
+
+
+def test_cluster_recipes(tmp_path):
+    recs = _synthetic_records(tmp_path)
+    res = lrxmp.cluster_recipes(recs, k=4)
+    assert res["k"] == 4
+    assert sum(c["size"] for c in res["clusters"]) == 40
+    assert all(c["options"]["exposure"] is not None
+               for c in res["clusters"])
+
+
+def test_similar_photos_excludes_self(tmp_path):
+    recs = _synthetic_records(tmp_path)
+    hits = lrxmp.similar_photos(str(tmp_path / "p0.jpg"), recs, k=3)
+    assert len(hits) == 3
+    assert not any(os.path.splitext(os.path.basename(h["path"]))[0] == "p0"
+                   for h in hits)
+    assert hits[0]["distance"] <= hits[-1]["distance"]
+
+
+def test_render_before_images(tmp_path):
+    from PIL import Image
+    src = tmp_path / "a.jpg"
+    Image.new("RGB", (200, 100), (120, 140, 160)).save(src)
+    recs = [{"path": str(src), "edited": True}]
+    out = tmp_path / "before"
+    res = lrxmp.render_before_images(recs, str(out))
+    assert res["rendered"] == 1
+    assert (out / "a.jpg").exists()
+    res2 = lrxmp.render_before_images(recs, str(out))
+    assert res2["skipped"] == 1  # 幂等
+
+
+def test_write_export_with_images(tmp_path):
+    recs = [{"path": "/x/a.ARW", "edited": True, "options": {"exposure": 1.0}}]
+    out = lrxmp.write_export(recs, str(tmp_path), images={"/x/a.ARW": "/y/a.jpg"})
+    line = open(out, encoding="utf-8").readline()
+    assert '"image": "/y/a.jpg"' in line

@@ -981,6 +981,10 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___json'),
     )
     batch_parser.add_argument(
+        "--trace", type=str, default=None, metavar="DIR",
+        help=_t('help___trace'),
+    )
+    batch_parser.add_argument(
         "-f", "--format", type=_format_arg, default=argparse.SUPPRESS,
         help=_t('help___format'),
     )
@@ -1666,6 +1670,10 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___sample_size'),
     )
     analyze_parser.add_argument(
+        "--grid", type=int, default=0, choices=[0, 4, 8], metavar="N",
+        help=_t('help___grid'),
+    )
+    analyze_parser.add_argument(
         "--json", action="store_true",
         help=_t('help___json'),
     )
@@ -1682,6 +1690,164 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___lr_export'),
     )
     lr_scan_parser.add_argument(
+        "--render-dir", type=str, default=None, metavar="DIR",
+        help=_t('help___lr_render'),
+    )
+    lr_scan_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
+    # ── lr-* data-layer subcommands (v1.9.0 phase 2, zero new deps) ─────────
+    lr_train_parser = subparsers.add_parser(
+        "lr-train", help=_t('cmd_lr_train'),
+    )
+    lr_train_parser.add_argument(
+        "--data", type=str, required=True, metavar="JSONL",
+        help=_t('help___lr_data'),
+    )
+    lr_train_parser.add_argument(
+        "--images", type=str, default=None, metavar="DIR",
+        help=_t('help___lr_images'),
+    )
+    lr_train_parser.add_argument(
+        "--out", type=str, default="auto_tone.npz", metavar="NPZ",
+        help=_t('help___lr_out'),
+    )
+    lr_train_parser.add_argument(
+        "--lambda", type=float, default=1.0, dest="ridge_lambda",
+        metavar="L", help=_t('help___lr_lambda'),
+    )
+
+    lr_predict_parser = subparsers.add_parser(
+        "lr-predict", help=_t('cmd_lr_predict'),
+    )
+    lr_predict_parser.add_argument(
+        "image", type=str, help=_t('help___lr_image'),
+    )
+    lr_predict_parser.add_argument(
+        "--model", type=str, default="auto_tone.npz", metavar="NPZ",
+        help=_t('help___lr_model'),
+    )
+    lr_predict_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
+    lr_recipes_parser = subparsers.add_parser(
+        "lr-recipes", help=_t('cmd_lr_recipes'),
+    )
+    lr_recipes_parser.add_argument(
+        "--data", type=str, required=True, metavar="JSONL",
+        help=_t('help___lr_data'),
+    )
+    lr_recipes_parser.add_argument(
+        "-k", type=int, default=6, metavar="N",
+        help=_t('help___lr_k'),
+    )
+    lr_recipes_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
+    lr_similar_parser = subparsers.add_parser(
+        "lr-similar", help=_t('cmd_lr_similar'),
+    )
+    lr_similar_parser.add_argument(
+        "image", type=str, help=_t('help___lr_image'),
+    )
+    lr_similar_parser.add_argument(
+        "--data", type=str, required=True, metavar="JSONL",
+        help=_t('help___lr_data'),
+    )
+    lr_similar_parser.add_argument(
+        "--images", type=str, default=None, metavar="DIR",
+        help=_t('help___lr_images'),
+    )
+    lr_similar_parser.add_argument(
+        "-k", type=int, default=5, metavar="N",
+        help=_t('help___lr_k'),
+    )
+    lr_similar_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
+    lr_eval_parser = subparsers.add_parser(
+        "lr-eval", help=_t('cmd_lr_eval'),
+    )
+    lr_eval_parser.add_argument(
+        "--data", type=str, required=True, metavar="JSONL",
+        help=_t('help___lr_data'),
+    )
+    lr_eval_parser.add_argument(
+        "--images", type=str, default=None, metavar="DIR",
+        help=_t('help___lr_images'),
+    )
+    lr_eval_parser.add_argument(
+        "--out", type=str, default="eval.json", metavar="JSON",
+        help=_t('help___lr_out'),
+    )
+    lr_eval_parser.add_argument(
+        "--sample", type=int, default=200, metavar="N",
+        help=_t('help___lr_sample'),
+    )
+
+    # ── diff / audit / preview (v1.9.0 tool layer, agent feedback) ─────────
+    diff_parser = subparsers.add_parser(
+        "diff", help=_t('cmd_diff'),
+    )
+    diff_parser.add_argument(
+        "paths", nargs=2, metavar="A B",
+        help=_t('help___diff_paths'),
+    )
+    diff_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
+    audit_parser = subparsers.add_parser(
+        "audit", help=_t('cmd_audit'),
+    )
+    audit_parser.add_argument(
+        "paths", nargs="+", help=_t('help___paths'),
+    )
+    audit_parser.add_argument(
+        "-r", "--recursive", action="store_true",
+        help=_t('help___recursive'),
+    )
+    audit_parser.add_argument(
+        "--over-max", type=float, default=None, metavar="PCT",
+        help=_t('help___over_max'),
+    )
+    audit_parser.add_argument(
+        "--under-max", type=float, default=None, metavar="PCT",
+        help=_t('help___under_max'),
+    )
+    audit_parser.add_argument(
+        "--blur-min", type=float, default=None, metavar="SCORE",
+        help=_t('help___blur_min'),
+    )
+    audit_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
+    preview_parser = subparsers.add_parser(
+        "preview", help=_t('cmd_preview'),
+    )
+    preview_parser.add_argument(
+        "path", type=str, help=_t('help___lr_image'),
+    )
+    preview_parser.add_argument(
+        "--max-dim", type=int, default=1024, metavar="N",
+        help=_t('help___max_dim'),
+    )
+    preview_parser.add_argument(
+        "--no-histogram", action="store_true",
+        help=_t('help___no_histogram'),
+    )
+    preview_parser.add_argument(
         "--json", action="store_true",
         help=_t('help___json'),
     )
@@ -1782,6 +1948,9 @@ def run_cli(args: List[str] = None) -> int:
                  cull_parser, select_parser, hdr_parser, blurfaces_parser,
                  hash_parser, gallery_parser, bench_parser, config_parser,
                  serve_parser, mcp_parser, analyze_parser, lr_scan_parser,
+                 lr_train_parser, lr_predict_parser, lr_recipes_parser,
+                 lr_similar_parser, lr_eval_parser,
+                 diff_parser, audit_parser, preview_parser,
                  preset_save, preset_load, preset_delete,
                  plugin_install, plugin_uninstall, plugin_info, plugin_fetch,
                  config_init, config_show):
@@ -2551,7 +2720,8 @@ def run_cli(args: List[str] = None) -> int:
         if not files:
             print(_t("msg_no_images"))
             return 1
-        results = [analyze_image(p, sample_size=parsed.sample_size)
+        results = [analyze_image(p, sample_size=parsed.sample_size,
+                                 grid=getattr(parsed, 'grid', 0))
                    for p in files]
         if getattr(parsed, 'json', False):
             import json
@@ -2574,15 +2744,24 @@ def run_cli(args: List[str] = None) -> int:
         return 0
 
     if parsed.command == "lr-scan":
-        from .lrxmp import scan_and_report, write_export
+        from .lrxmp import render_before_images, scan_and_report, write_export
         import json
         import time
         t0 = time.monotonic()
         report, records = scan_and_report(parsed.paths)
         export_path = None
+        render_path = None
+        images = {}
+        if getattr(parsed, 'render_dir', None):
+            render_path = parsed.render_dir
+            r = render_before_images(records, render_path)
+            images = r["images"]
         if getattr(parsed, 'export_dir', None):
-            export_path = write_export(records, parsed.export_dir)
+            export_path = write_export(records, parsed.export_dir, images=images)
         if getattr(parsed, 'json', False):
+            if render_path:
+                report["summary"]["rendered"] = r["rendered"]
+                report["summary"]["render_failed"] = r["failed"]
             print(json.dumps(versioned(report), indent=2, ensure_ascii=False))
         else:
             s = report["summary"]
@@ -2593,6 +2772,9 @@ def run_cli(args: List[str] = None) -> int:
                       f"{c['v1_8']:>6}{c['point_color']:>7}")
             print(_t("msg_lr_summary").format(
                 photos=s["photos"], xmp=s["xmp_photos"], edited=s["edited"]))
+            if render_path:
+                print(_t("msg_lr_rendered").format(
+                    n=r["rendered"], skip=r["skipped"], failed=r["failed"]))
             print(_t("msg_lr_params"))
             for k, v in list(report["param_usage"].items())[:15]:
                 print(f"  {k:<30} {v:>4}")
@@ -2609,6 +2791,146 @@ def run_cli(args: List[str] = None) -> int:
                     print(f"  {k:<28} {v:>4}")
             if export_path:
                 print(_t("msg_lr_export").format(path=export_path))
+        return 0
+
+    if parsed.command in ("lr-train", "lr-predict", "lr-recipes",
+                          "lr-similar", "lr-eval"):
+        import json
+        from .lrxmp import (cluster_recipes, load_training_data,
+                            predict_auto_tone, prep_eval_set,
+                            similar_photos, train_auto_tone)
+        import photo_s.lrxmp as _lrx
+
+        def _load_records():
+            with open(parsed.data, encoding="utf-8") as f:
+                return [json.loads(line) for line in f if line.strip()]
+
+        if parsed.command == "lr-train":
+            recs = _load_records()
+            try:
+                res = train_auto_tone(recs, parsed.out,
+                                      image_dir=parsed.images,
+                                      ridge_lambda=parsed.ridge_lambda)
+            except _lrx.LrError as e:
+                print(f"❌ {e}")
+                return 1
+            print(_t("msg_lr_trained").format(
+                n=res["samples"], r2=res["r2"], out=res["out"]))
+
+        elif parsed.command == "lr-predict":
+            try:
+                res = predict_auto_tone(parsed.image, parsed.model)
+            except _lrx.LrError as e:
+                print(f"❌ {e}")
+                return 1
+            if getattr(parsed, 'json', False):
+                print(json.dumps(versioned(res), indent=2, ensure_ascii=False))
+            else:
+                print(f"{parsed.image}")
+                for k, v in res["options"].items():
+                    print(f"  {k:<12} {v}")
+
+        elif parsed.command == "lr-recipes":
+            recs = _load_records()
+            try:
+                res = cluster_recipes(recs, k=parsed.k)
+            except _lrx.LrError as e:
+                print(f"❌ {e}")
+                return 1
+            if getattr(parsed, 'json', False):
+                print(json.dumps(versioned(res), indent=2, ensure_ascii=False))
+            else:
+                print(_t("msg_lr_recipes").format(k=res["k"], n=res["samples"]))
+                for i, c in enumerate(res["clusters"], 1):
+                    opts = ",".join(f"{k}={v}" for k, v in c["options"].items()
+                                    if v not in (0, 1.0, 5250))
+                    print(f"  #{i} [{c['ratio'] * 100:.0f}%] {c['size']} 张  {opts}")
+                    if c["examples"][0]:
+                        print(f"      例: {c['examples'][0]}")
+
+        elif parsed.command == "lr-similar":
+            recs = _load_records()
+            try:
+                hits = similar_photos(parsed.image, recs,
+                                      image_dir=parsed.images, k=parsed.k)
+            except _lrx.LrError as e:
+                print(f"❌ {e}")
+                return 1
+            if getattr(parsed, 'json', False):
+                print(json.dumps(versioned({"query": parsed.image,
+                                            "hits": hits}), indent=2,
+                       ensure_ascii=False))
+            else:
+                print(_t("msg_lr_similar").format(
+                    img=parsed.image, k=len(hits)))
+                for h in hits:
+                    opts = ",".join(f"{k}={v}"
+                                    for k, v in (h.get("options") or {}).items())
+                    print(f"  d={h['distance']:.3f}  {h['path']}  {opts}")
+
+        else:  # lr-eval
+            recs = _load_records()
+            try:
+                res = prep_eval_set(recs, parsed.out,
+                                    image_dir=parsed.images,
+                                    sample=parsed.sample)
+            except _lrx.LrError as e:
+                print(f"❌ {e}")
+                return 1
+            print(_t("msg_lr_eval").format(n=res["count"], out=res["out"]))
+        return 0
+
+    if parsed.command == "diff":
+        import json
+        from .metrics import compare_images
+        res = compare_images(parsed.paths[0], parsed.paths[1])
+        if getattr(parsed, 'json', False):
+            print(json.dumps(versioned(res), indent=2, ensure_ascii=False))
+        elif res.get("ok"):
+            print(f"{res['path_a']}  vs  {res['path_b']}")
+            print(f"  PSNR={res['psnr']}dB  SSIM={res['ssim']}  "
+                  f"MAD={res['mean_abs_diff']}")
+        else:
+            print(f"❌ {res.get('error', '')}")
+        return 0
+
+    if parsed.command == "audit":
+        import json
+        from .audit import audit_image
+        from . import engine as _engine
+        files = _collect_files(parsed.paths, recursive=parsed.recursive)
+        if not files:
+            print(_t("msg_no_images"))
+            return 1
+        results = [audit_image(p, overexposed_max=parsed.over_max,
+                               underexposed_max=parsed.under_max,
+                               blur_min=parsed.blur_min)
+                   for p in files]
+        if getattr(parsed, 'json', False):
+            print(json.dumps(versioned({"count": len(results),
+                                        "passed": sum(1 for r in results
+                                                      if r.get("passed")),
+                                        "results": results}),
+                             indent=2, ensure_ascii=False))
+        else:
+            for r in results:
+                mark = "✅" if r.get("passed") else "❌"
+                print(f"  {mark} {r['path']}  {r.get('reason', r.get('error', ''))}")
+        return 0
+
+    if parsed.command == "preview":
+        import json
+        from .metrics import snapshot_image
+        res = snapshot_image(parsed.path, max_dim=parsed.max_dim,
+                             include_histogram=not parsed.no_histogram)
+        if getattr(parsed, 'json', False):
+            print(json.dumps(versioned(res), indent=2, ensure_ascii=False))
+        elif res.get("ok"):
+            print(f"{res['path']}  {res['size'][0]}x{res['size'][1]}  "
+                  f"jpeg={res['jpeg_bytes']}B"
+                  f"{' +histogram' if 'histogram_png_base64' in res else ''}")
+        else:
+            print(f"❌ {res.get('error', '')}")
         return 0
 
     if parsed.command == "bench":
@@ -2845,7 +3167,45 @@ def run_cli(args: List[str] = None) -> int:
             print(f"   {_t('msg_quality_range', q=options.quality)}")
         print()
 
-    result = batch_process(files, options, progress_callback=progress_callback)
+    # ── Trace log (v1.9.0 数据管线：before-analyze → params → after-analyze) ──
+    trace_file = None
+    trace_lock = None
+    if getattr(parsed, 'trace', None):
+        import dataclasses
+        import json as _json
+        import threading as _th
+        os.makedirs(parsed.trace, exist_ok=True)
+        trace_file = open(os.path.join(parsed.trace, "photo_s_trace.jsonl"),
+                          "a", encoding="utf-8")
+        trace_lock = _th.Lock()
+
+        def trace_cb(src, result):
+            from .metrics import analyze_image
+            try:
+                before = analyze_image(src, 128)
+                after = (analyze_image(result.output_path, 128)
+                         if result.success and result.output_path else None)
+            except Exception:
+                before = after = None
+            entry = {
+                "path": src,
+                "success": result.success,
+                "error": result.error,
+                "output": result.output_path,
+                "before": before,
+                "after": after,
+                "options": dataclasses.asdict(options),
+            }
+            with trace_lock:
+                trace_file.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+                trace_file.flush()
+    else:
+        trace_cb = None
+
+    result = batch_process(files, options, progress_callback=progress_callback,
+                           trace_callback=trace_cb)
+    if trace_file:
+        trace_file.close()
 
     # ── Write CSV report if requested ───────────────────────────────────────
     if getattr(parsed, 'report', None):

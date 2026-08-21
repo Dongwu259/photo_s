@@ -1411,6 +1411,7 @@ def batch_process(
     options: ProcessOptions,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
     cancel_checker: Optional[Callable[[], bool]] = None,
+    trace_callback: Optional[Callable[[str, "ProcessResult"], None]] = None,
 ) -> BatchResult:
     """
     Process multiple images in batch, with optional parallel execution.
@@ -1518,6 +1519,9 @@ def batch_process(
 
         opts = per_image_options[idx]
         result = process_image(path, opts)
+
+        if trace_callback is not None:
+            trace_callback(path, result)
 
         if progress_callback:
             with progress_lock:

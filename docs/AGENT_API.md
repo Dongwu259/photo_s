@@ -13,7 +13,7 @@
 | Python 直调 | 宿主是 Python | `from photo_s.engine import ProcessOptions, batch_process` |
 | `photo-s ... --json` | 一次性脚本 / CI | 每次调用有 ~200-300ms 解释器启动开销 |
 | `photo-s serve` | 跨进程 / 长任务 / 需进度与取消 | stdlib HTTP，同步 + 异步任务两种模式 |
-| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，19 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
+| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，25 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
 
 ---
 
@@ -162,7 +162,10 @@ GET  /health  带 Bearer → {"status": "ok", "version": "..."}
 | `GET /tasks/<id>` | — | `{"status", "current", "total", "current_path", "result"?}` |
 | `POST /tasks/<id>/cancel` | — | `{"task_id", "cancelled"}` |
 | `POST /dedup` | `{"paths", "threshold"?, "recursive"?}` | 重复组 |
-| `POST /analyze` | `{"paths", "recursive"?, "sample_size"? (默认 256)}` | `{"ok", "count", "results": [{path, size, histogram, stats, white_balance, exposure, blur_score}]}` 感知分析（v1.7.0，调色反馈闭环） |
+| `POST /analyze` | `{"paths", "recursive"?, "sample_size"? (默认 256), "grid"? (4\|8)}` | `{"ok", "count", "results": [{path, size, histogram, stats, white_balance, exposure, blur_score, grid?, regions?}]}` 感知分析（v1.7.0 闭环；v1.7.1 加 `grid` 区域反馈 + `regions` 天空/肤色/过曝框） |
+| `POST /diff` | `{"path_a", "path_b", "sample_size"? (默认 256)}` | `{"ok", "psnr", "ssim", "mean_abs_diff", "size"}` 版本数值对比（v1.7.1，before/after 判定） |
+| `POST /audit` | `{"paths", "recursive"?, "overexposed_max"?, "underexposed_max"?, "blur_min"?}` | `{"ok", "count", "passed", "results": [{ok, passed, checks[], reason}]}` 出片质量闸门（v1.7.1，agent 终止条件） |
+| `POST /preview` | `{"path", "max_dim"? (默认 1024), "include_histogram"? (默认 true)}` | `{"ok", "path", "size", "jpeg_base64", "jpeg_bytes", "histogram_png_base64"?}` 视觉快照（v1.7.1，多模态 agent 的像素输入） |
 | `POST /rename` | `{"paths", "pattern", "output_dir"?, "overwrite"?, "dry_run"?, "recursive"?}` | `{"total", "ok", "results"}` |
 | `POST /contact-sheet` | `{"paths", "output", "cols"?, "thumb_width"?, "thumb_height"?, "captions"?, "bg"?, "recursive"?}` | `{"output", "count"}` |
 | `POST /check` | `{"paths", "recursive"?}` | `{"checked", "ok", "corrupt"}` |
@@ -247,7 +250,7 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 }
 ```
 
-`photo-s mcp --list-tools` 返回 19 个工具及 inputSchema（JSON，不启动服务器）。
+`photo-s mcp --list-tools` 返回 25 个工具及 inputSchema（JSON，不启动服务器）。
 
 零安装变体（uvx 自动解析 PyPI 依赖，与官方 MCP Registry
 `io.github.Dongwu259/photo-s` 发布的调用一致）：
@@ -295,7 +298,13 @@ shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
 | `watch` | `dir` (必填), `recursive`, `quality`, `output_format`, `output_dir`, `resize`, `timeout` | 立即返回 `{"started", "id", "dir", "recursive", "options", "timeout"}`；失败 → `{"started": false, "error"}`。后台线程监视目录自动处理；进度用 `watch_status` 轮询、`watch_stop` 结束。**需 `photo-s-tools[watch]`（watchdog）**；`remove_original` 刻意不支持（agent 驱动的删除太危险） |
 | `watch_status` | `id` | `{"ok", "id", "dir", "recursive", "running", "stopped", "processed_count", "results": [ProcessResult…], "error", "started_at"}` |
 | `watch_stop` | `id` | `{"ok", "id", "stopped", "processed_count"}`（幂等） |
-| `analyze` | `paths[]`, `recursive`, `sample_size` (默认 256) | `{"ok", "count", "results": [{path, size, histogram {r,g,b,luma ×32}, stats, white_balance, exposure, blur_score}]}` 感知分析（v1.7.0） |
+| `analyze` | `paths[]`, `recursive`, `sample_size` (默认 256), `grid` (0\|4\|8) | `{"ok", "count", "results": [{path, size, histogram {r,g,b,luma ×32}, stats, white_balance, exposure, blur_score, grid?, regions?}]}` 感知分析（v1.7.0；`grid`/`regions` v1.7.1：逐格亮度色偏 + 天空/肤色占比 + 过曝/欠曝区域框） |
+| `preview` | `path`, `max_dim` (默认 1024), `include_histogram` (默认 true) | `{"ok", "size", "jpeg_base64", "jpeg_bytes", "histogram_png_base64"?}` 视觉快照（v1.7.1）——多模态 agent 直接看图 |
+| `diff` | `path_a`, `path_b`, `sample_size` (默认 256) | `{"ok", "psnr", "ssim", "mean_abs_diff"}` 版本数值对比（v1.7.1） |
+| `audit` | `paths[]`, `recursive`, `overexposed_max`?, `underexposed_max`?, `blur_min`? | `{"ok", "count", "passed", "results": [{passed, checks[], reason}]}` 出片质量闸门（v1.7.1，终止条件） |
+| `batch_start` | `paths[]`, `options{}`（同 `process` 的键）, `recursive`, `jobs` (默认 4) | `{"ok", "job_id", "total"}` 异步目录任务（v1.7.1）——选项对整批文件统一生效（masks/lens 等共享 spec） |
+| `batch_status` | `job_id` | `{"ok", "phase" (starting/processing/done), "done", "total", "current", "fail_count", "results"?}` 轮询 |
+| `batch_cancel` | `job_id` | `{"ok", "cancelled"}` 取消（在跑的文件跑完，未开始的跳过） |
 
 > `watch` 会话与 MCP 会话同生命周期（daemon 线程随进程退出消亡）；`_WATCHES`
 > 上限 20，死线程自动清理。

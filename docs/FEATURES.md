@@ -3,7 +3,7 @@
 > 以代码实际为准（v1.5.1），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
-## 1. CLI 命令（23 个）
+## 1. CLI 命令（32 个）
 
 | 命令 | 作用 |
 |---|---|
@@ -18,6 +18,15 @@
 | `dedup` | 查重 + `keep-sharpest`（保留最锐） |
 | `cull` | 曝光/清晰度筛选（过曝/欠曝/亮暗范围/模糊分） |
 | `analyze` | **感知分析**（v1.7.0）：直方图（RGB+luma 32 桶）/通道统计/对比度/饱和度/色温估计/曝光/模糊分，`--json` 输出 agent 可读 -- `analyze -> 调参 -> process -> analyze` 调色反馈闭环的眼睛 |
+| `lr-scan` | **Lightroom 数据桥接报告**（v1.7.1）：自动发现 .lrcat/.xmp（缺省扫 ~/Pictures+~/Desktop）→ 覆盖报告（参数频率/蒙版/工具轨迹/缺口）；`--export-dir` 导出训练 JSONL（path+PhotoS 参数），`--render-dir` 渲染 before 图（rawpy）——一条命令产出完整训练包 |
+| `lr-train` | **自动基调回归训练**（v1.7.1）：岭回归（纯 numpy，零 torch）9 项全局参数（曝光/对比/饱和/自然饱和/WB/清晰度/纹理/去雾），R² 报告，产出 auto_tone.npz |
+| `lr-predict` | 自动基调推理：图片 → 9 项参数（v1.7.1） |
+| `lr-recipes` | **编辑配方聚类**（v1.7.1）：KMeans 参数空间 → 个人风格配方库（簇中心即 PhotoS options） |
+| `lr-similar` | 相似修图检索（v1.7.1）：84 维内容特征 kNN → 最像的既往修图及其参数 |
+| `lr-eval` | 教师评测集准备（v1.7.1）：采样 → before/after 渲染对（PhotoS 自渲染）+ 打分模板 |
+| `diff` | 版本数值对比（v1.7.1）：PSNR/SSIM/平均绝对差，before/after 判定 |
+| `audit` | **出片质量闸门**（v1.7.1）：过曝/欠曝/模糊/亮度/对比/色温逐项 pass/fail + 原因——agent 终止条件 |
+| `preview` | **视觉快照**（v1.7.1）：缩放 JPEG base64 + 直方图 PNG——多模态 agent 的像素输入 |
 | `check` | 图片完整性检查 |
 | `hash` | 校验和清单生成/校验（SHA-256 manifest） |
 | `contact-sheet` | 联系表（网格拼图） |

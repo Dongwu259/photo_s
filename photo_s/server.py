@@ -487,11 +487,62 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 sample_size = 256
             sample_size = max(16, min(2048, sample_size))
-            results = [analyze_image(p, sample_size=sample_size)
+            grid = int(data.get("grid", 0) or 0)
+            if grid not in (4, 8):
+                grid = 0
+            results = [analyze_image(p, sample_size=sample_size, grid=grid)
                        for p in paths]
             self._send_json(200, {"ok": all(r.get("ok") for r in results),
                                   "count": len(results),
                                   "results": results})
+        elif self.path == "/diff":
+            # Numeric before/after comparison (PSNR/SSIM/MAD).
+            from .metrics import compare_images
+            path_a = data.get("path_a", "")
+            path_b = data.get("path_b", "")
+            if not path_a or not path_b or not os.path.exists(path_a) \
+                    or not os.path.exists(path_b):
+                self._send_json(400, {"error": "path_a and path_b required"})
+                return
+            try:
+                sample_size = int(data.get("sample_size", 256))
+            except (TypeError, ValueError):
+                sample_size = 256
+            self._send_json(200, compare_images(
+                path_a, path_b, sample_size=max(16, min(1024, sample_size))))
+        elif self.path == "/audit":
+            # Quality gate: pass/fail + reasons (agent stop condition).
+            from .audit import audit_image
+            paths = _resolve_paths(data.get("paths", []),
+                                   bool(data.get("recursive", False)))
+            if not paths:
+                self._send_json(400, {"error": "no supported image files found"})
+                return
+            thresholds = {k: data[k] for k in
+                          ("overexposed_max", "underexposed_max", "blur_min")
+                          if k in data and isinstance(data[k], (int, float))}
+            results = [audit_image(p, **thresholds) for p in paths]
+            self._send_json(200, {
+                "ok": True,
+                "count": len(results),
+                "passed": sum(1 for r in results if r.get("passed")),
+                "results": results,
+            })
+        elif self.path == "/preview":
+            # Visual snapshot: downscaled JPEG + histogram PNG (base64).
+            from .metrics import snapshot_image
+            path = data.get("path", "")
+            if not path or not os.path.exists(path):
+                self._send_json(400, {"error": "path required"})
+                return
+            try:
+                max_dim = int(data.get("max_dim", 1024))
+            except (TypeError, ValueError):
+                max_dim = 1024
+            include_histogram = bool(data.get("include_histogram", True))
+            self._send_json(200, snapshot_image(
+                path, max_dim=max(64, min(4096, max_dim)),
+                include_histogram=include_histogram))
         elif self.path == "/process":
             paths = _resolve_paths(data.get("paths", []),
                                    bool(data.get("recursive", False)))

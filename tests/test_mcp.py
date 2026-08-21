@@ -37,7 +37,9 @@ class TestTools:
         assert names == {"process", "info", "exif", "dedup", "cull", "select", "hdr", "blurfaces", "hash",
                          "plugin", "contact_sheet", "gallery",
                          "watermark", "preset", "bench",
-                         "watch", "watch_status", "watch_stop", "analyze"}
+                         "watch", "watch_status", "watch_stop", "analyze",
+                         "diff", "audit", "preview",
+                         "batch_start", "batch_status", "batch_cancel"}
 
     def test_server_info_version(self):
         # serverInfo must report the PhotoS version, not the mcp SDK's
@@ -434,7 +436,7 @@ class TestCliListTools:
         out = capsys.readouterr().out
         assert rc == 0
         data = json.loads(out)
-        assert len(data["tools"]) == 19
+        assert len(data["tools"]) == 25
         for t in data["tools"]:
             assert "input_schema" in t
             assert "properties" in t["input_schema"]
@@ -467,7 +469,9 @@ class TestStdioEndToEnd:
                                      "contact_sheet", "gallery",
                                      "watermark", "preset", "bench",
                                      "watch", "watch_status", "watch_stop",
-                                     "analyze"}
+                                     "analyze", "diff", "audit", "preview",
+                                     "batch_start", "batch_status",
+                                     "batch_cancel"}
                     result = await session.call_tool(
                         "process",
                         {"paths": [img], "output_dir": str(out),

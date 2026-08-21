@@ -26,6 +26,7 @@ import secrets
 import sys
 import threading
 import time
+import uuid
 from typing import List, Optional
 
 from . import __version__
@@ -851,11 +852,14 @@ def watch_stop_tool(id: str) -> dict:
 
 @_versioned
 def analyze_tool(paths: list, recursive: bool = False,
-                 sample_size: int = 256) -> dict:
+                 sample_size: int = 256, grid: int = 0) -> dict:
     """Perceptual analysis: histograms / channel stats / WB lean / exposure.
 
     The feedback half of the agent grading loop - call after ``process``
     to judge the result, adjust the grading params, process again.
+    ``grid`` (4|8) adds per-cell luminance/saturation/color sampling plus
+    sky/skin region ratios and over/underexposed bounding boxes - the
+    input local adjustments need.
     """
     from .cli import _collect_files
     from .metrics import analyze_image
@@ -865,9 +869,149 @@ def analyze_tool(paths: list, recursive: bool = False,
         return {"ok": False, "error": "no supported image files found",
                 "paths": list(paths)}
     sample_size = max(16, min(2048, int(sample_size)))
-    results = [analyze_image(p, sample_size=sample_size) for p in files]
+    grid = int(grid or 0)
+    if grid not in (4, 8):
+        grid = 0
+    results = [analyze_image(p, sample_size=sample_size, grid=grid)
+               for p in files]
     return {"ok": all(r.get("ok") for r in results),
             "count": len(results), "results": results}
+
+
+def diff_tool(path_a: str, path_b: str, sample_size: int = 256) -> dict:
+    """Numeric before/after comparison: PSNR / SSIM / mean-abs-diff.
+
+    Judgement for the grading loop - is the new version better or worse?
+    """
+    from .metrics import compare_images
+
+    return compare_images(path_a, path_b,
+                          sample_size=max(16, min(1024, int(sample_size))))
+
+
+def audit_tool(paths: list, recursive: bool = False,
+               overexposed_max: float = None, underexposed_max: float = None,
+               blur_min: float = None) -> dict:
+    """Quality gate: pass/fail + reasons (overexposure/blur/luminance...).
+
+    The agent's stop condition - a photo that passes audit is "good enough".
+    """
+    from .cli import _collect_files
+    from .audit import audit_image
+
+    files = _collect_files(list(paths), recursive=recursive)
+    if not files:
+        return {"ok": False, "error": "no supported image files found",
+                "paths": list(paths)}
+    thresholds = {}
+    if overexposed_max is not None:
+        thresholds["overexposed_max"] = overexposed_max
+    if underexposed_max is not None:
+        thresholds["underexposed_max"] = underexposed_max
+    if blur_min is not None:
+        thresholds["blur_min"] = blur_min
+    results = [audit_image(p, **thresholds) for p in files]
+    return {"ok": True, "count": len(results),
+            "passed": sum(1 for r in results if r.get("passed")),
+            "results": results}
+
+
+def preview_tool(path: str, max_dim: int = 1024,
+                 include_histogram: bool = True) -> dict:
+    """Visual snapshot: downscaled JPEG + histogram PNG (base64).
+
+    Gives multimodal agents actual pixels to look at - complement the
+    numeric stats from ``analyze``.
+    """
+    from .metrics import snapshot_image
+
+    return snapshot_image(path, max_dim=max(64, min(4096, int(max_dim))),
+                          include_histogram=include_histogram)
+
+
+# ── Async batch jobs (v1.9.0: directory-level process + poll/cancel) ────────
+_JOBS: dict = {}
+_JOBS_LOCK = threading.Lock()
+
+
+def _job_worker(job_id: str, files: list, options):
+    from .engine import batch_process
+    state = _JOBS[job_id]
+
+    def cb(idx, total, path, status=""):
+        with _JOBS_LOCK:
+            state.update({"done": idx, "total": total,
+                          "current": os.path.basename(path) if path else "",
+                          "phase": status or "processing"})
+
+    def cancel_checker():
+        with _JOBS_LOCK:
+            return bool(state.get("cancelled"))
+
+    result = batch_process(files, options, progress_callback=cb,
+                           cancel_checker=cancel_checker)
+    with _JOBS_LOCK:
+        state["phase"] = "done"
+        state["results"] = [r.to_dict() for r in result.results]
+        state["fail_count"] = result.fail_count
+
+
+def batch_start_tool(paths: list, options: dict, recursive: bool = False,
+                     jobs: int = 4) -> dict:
+    """Start an async directory-level batch job. Returns ``job_id`` to poll
+    with ``batch_status`` / cancel with ``batch_cancel``. ``options`` uses the
+    same keys as ``process``; options apply to every file (masks/point_color/
+    lens_* included - shared specs work across a whole batch).
+    """
+    from .cli import _collect_files
+    from .engine import ProcessOptions
+
+    files = _collect_files(list(paths), recursive=recursive)
+    if not files:
+        return {"ok": False, "error": "no supported image files found",
+                "paths": list(paths)}
+    try:
+        opts = ProcessOptions(**{k: v for k, v in options.items()
+                                 if k in ProcessOptions.__dataclass_fields__})
+    except TypeError as e:
+        return {"ok": False, "error": f"invalid options: {e}"}
+    opts.jobs = max(1, int(jobs))
+    job_id = uuid.uuid4().hex[:12]
+    with _JOBS_LOCK:
+        _JOBS[job_id] = {"job_id": job_id, "phase": "starting",
+                         "total": len(files), "done": 0, "current": "",
+                         "cancelled": False, "results": None, "fail_count": 0}
+    threading.Thread(target=_job_worker, args=(job_id, files, opts),
+                     daemon=True).start()
+    return {"ok": True, "job_id": job_id, "total": len(files)}
+
+
+def batch_status_tool(job_id: str) -> dict:
+    """Poll a batch job: phase (starting/processing/done/cancelled),
+    progress (done/total) and full per-file results when finished.
+    """
+    with _JOBS_LOCK:
+        state = _JOBS.get(job_id)
+    if state is None:
+        return {"ok": False, "error": f"unknown job {job_id}"}
+    out = {k: state[k] for k in ("job_id", "phase", "total", "done",
+                                 "current", "fail_count")}
+    out["ok"] = True
+    if state.get("results") is not None:
+        out["results"] = state["results"]
+    return out
+
+
+def batch_cancel_tool(job_id: str) -> dict:
+    """Cancel a running batch job (in-flight images finish, pending are
+    skipped as cancelled)."""
+    with _JOBS_LOCK:
+        state = _JOBS.get(job_id)
+        if state is not None:
+            state["cancelled"] = True
+    if state is None:
+        return {"ok": False, "error": f"unknown job {job_id}"}
+    return {"ok": True, "job_id": job_id, "cancelled": True}
 
 
 # ── Server assembly ─────────────────────────────────────────────────────────
@@ -956,6 +1100,18 @@ def create_server(config_path: Optional[str] = None):
     mcp.add_tool(watch_stop_tool, name="watch_stop",
                  description="Stop a background watch; results so far stay "
                              "visible via 'watch_status'.")
+    mcp.add_tool(batch_start_tool, name="batch_start",
+                 description=batch_start_tool.__doc__)
+    mcp.add_tool(batch_status_tool, name="batch_status",
+                 description=batch_status_tool.__doc__)
+    mcp.add_tool(batch_cancel_tool, name="batch_cancel",
+                 description=batch_cancel_tool.__doc__)
+    mcp.add_tool(diff_tool, name="diff",
+                 description=diff_tool.__doc__)
+    mcp.add_tool(audit_tool, name="audit",
+                 description=audit_tool.__doc__)
+    mcp.add_tool(preview_tool, name="preview",
+                 description=preview_tool.__doc__)
     mcp.add_tool(analyze_tool, name="analyze",
                  description="Perceptual analysis of images: per-channel + "
                              "luma histograms, channel stats, contrast, "

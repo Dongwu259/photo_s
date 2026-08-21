@@ -65,7 +65,7 @@ import os
 import re
 import sqlite3
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 __all__ = [
     "LrError", "parse_xmp_sidecar", "parse_develop_blob", "scan_catalog",
@@ -908,11 +908,366 @@ def scan_and_report(paths: Optional[Sequence[str]] = None
     return report, records
 
 
-def write_export(records: Sequence[Dict[str, Any]], out_dir: str) -> str:
-    """写训练数据 JSONL（每行一张照片：path + options）→ 返回文件路径。"""
+def write_export(records: Sequence[Dict[str, Any]], out_dir: str,
+                 images: Optional[Dict[str, str]] = None) -> str:
+    """写训练数据 JSONL（每行一张照片：path + options + image）→ 返回文件路径。
+
+    ``images``：path → before 渲染图路径（--render-dir 产出），写入 ``image`` 键。
+    """
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, "lr_records.jsonl")
     with open(out, "w", encoding="utf-8") as f:
         for rec in records:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            line = dict(rec)
+            if images and rec.get("path") in images:
+                line["image"] = images[rec["path"]]
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
     return out
+
+
+# ---------------------------------------------------------------- 训练数据
+
+_RAW_EXT = (".arw", ".cr2", ".cr3", ".nef", ".nrw", ".dng", ".raf", ".rw2",
+            ".orf", ".pef", ".srw", ".x3f")
+
+# 自动基调回归的目标参数（9 项全局；裁剪/扶正是意图不学）
+TARGETS: Tuple[str, ...] = ("exposure", "contrast", "saturation", "vibrance",
+                            "wb_temp", "wb_tint", "clarity", "texture", "dehaze")
+_NEUTRAL = {"exposure": 0.0, "contrast": 1.0, "saturation": 1.0,
+            "vibrance": 0.0, "wb_temp": 5250.0, "wb_tint": 0.0,
+            "clarity": 0.0, "texture": 0.0, "dehaze": 0.0}
+_WB_SCALE = 500.0  # wb_temp 归一化：(-5250)/500
+
+
+def _target_vector(options: Dict[str, Any]) -> List[float]:
+    v = []
+    for t in TARGETS:
+        x = float(options.get(t, _NEUTRAL[t]))
+        if t == "wb_temp":
+            x = (x - 5250.0) / _WB_SCALE
+        v.append(x)
+    return v
+
+
+def _target_options(vec: Sequence[float]) -> Dict[str, Any]:
+    out = {}
+    for t, x in zip(TARGETS, vec):
+        x = float(x)
+        if t == "wb_temp":
+            x = x * _WB_SCALE + 5250.0
+            out[t] = int(round(x))
+        elif t in ("contrast", "saturation"):
+            out[t] = round(x, 3)
+        else:
+            out[t] = round(x, 3)
+    return out
+
+
+def _content_features(img) -> List[float]:
+    """内容特征：32-bin luma + 3×16-bin 通道直方图 + 4 统计 = 84 维。
+
+    零依赖（numpy），作为 CLIP embedding 的平价替代；CLIP 升级路径见文档。
+    """
+    import numpy as np
+    from PIL import Image as _PILImage
+    arr = np.asarray(img.convert("RGB"), dtype=np.float32)
+    h, w = arr.shape[:2]
+    if max(h, w) > 256:
+        scale = 256.0 / max(h, w)
+        arr = np.asarray(img.resize((max(1, int(w * scale)),
+                                     max(1, int(h * scale))),
+                                    _PILImage.LANCZOS), dtype=np.float32)
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+    luma = 0.299 * r + 0.587 * g + 0.114 * b
+    feats: List[float] = []
+    hl, _ = np.histogram(luma, bins=32, range=(0, 255))
+    feats.extend(float(c) / float(luma.size) for c in hl)
+    for ch in (r, g, b):
+        hc, _ = np.histogram(ch, bins=16, range=(0, 255))
+        feats.extend(float(c) / float(ch.size) for c in hc)
+    feats.extend([
+        float(luma.mean()) / 255.0,
+        float(luma.std()) / 255.0,
+        float((np.maximum.reduce([r, g, b]) -
+               np.minimum.reduce([r, g, b])).mean()) / 255.0,
+        float(luma.std() / (luma.mean() + 1e-6)),
+    ])
+    return feats
+
+
+def render_before_images(records: Sequence[Dict[str, Any]], out_dir: str,
+                         max_side: int = 1536,
+                         progress_callback: Optional[Callable] = None
+                         ) -> Dict[str, Any]:
+    """rawpy 默认渲染已编辑照片的 before 图 → ``<out_dir>/<原名>.jpg``。
+
+    幂等（已存在跳过）；RAW 走 rawpy，非 RAW（如原片 JPEG）直接复制解码。
+    返回 ``{rendered, skipped, failed, images: {path: jpg}}``。
+    """
+    import rawpy
+    from PIL import Image
+    os.makedirs(out_dir, exist_ok=True)
+    images: Dict[str, str] = {}
+    rendered = skipped = failed = 0
+    edited = [r for r in records if r.get("edited")]
+    total = len(edited)
+    for i, rec in enumerate(edited):
+        p = rec.get("path")
+        if progress_callback:
+            progress_callback(i, total, p or "", "rendering")
+        if not p or not os.path.exists(p):
+            continue
+        stem = os.path.splitext(os.path.basename(p))[0]
+        out = os.path.join(out_dir, stem + ".jpg")
+        if os.path.exists(out):
+            images[p] = out
+            skipped += 1
+            continue
+        try:
+            if p.lower().endswith(_RAW_EXT):
+                with rawpy.imread(p) as raw:
+                    img = Image.fromarray(raw.postprocess())
+            else:
+                img = Image.open(p)
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+            img.thumbnail((max_side, max_side))
+            img.save(out, "JPEG", quality=90)
+            images[p] = out
+            rendered += 1
+        except Exception:
+            failed += 1
+    return {"rendered": rendered, "skipped": skipped, "failed": failed,
+            "images": images}
+
+
+def load_training_data(records: Sequence[Dict[str, Any]],
+                       image_dir: Optional[str] = None
+                       ) -> Tuple[List[List[float]], List[List[float]],
+                                  List[Dict[str, Any]]]:
+    """records → (X, Y, metas)。X = 84 维内容特征（image 键指向 before 图），
+    Y = 9 项目标参数向量（含归一化）。缺图/无编辑的记录跳过。"""
+    from PIL import Image
+    X: List[List[float]] = []
+    Y: List[List[float]] = []
+    metas: List[Dict[str, Any]] = []
+    for rec in records:
+        if not rec.get("edited"):
+            continue
+        img_path = rec.get("image")
+        if not img_path and image_dir:
+            img_path = os.path.join(image_dir, os.path.splitext(
+                os.path.basename(rec["path"]))[0] + ".jpg")
+        if not img_path or not os.path.exists(img_path):
+            continue
+        try:
+            img = Image.open(img_path)
+        except Exception:
+            continue
+        X.append(_content_features(img))
+        Y.append(_target_vector(rec.get("options") or {}))
+        metas.append({"path": rec.get("path"), "image": img_path,
+                      "options": rec.get("options")})
+    return X, Y, metas
+
+
+def train_auto_tone(records: Sequence[Dict[str, Any]],
+                    out_path: str,
+                    image_dir: Optional[str] = None,
+                    ridge_lambda: float = 1.0) -> Dict[str, Any]:
+    """岭回归自动基调模型（闭式解，纯 numpy）→ model.npz。
+
+    Y = 9 项全局参数（TARGETS）；X = 84 维内容特征。小数据、零依赖、
+    任何机器可训——是 CLIP+MLP 路线的可落地基线（升级路径见模块 docstring）。
+    """
+    import numpy as np
+    X, Y, _m = load_training_data(records, image_dir)
+    if len(X) < 30:
+        raise LrError(
+            f"训练样本不足（{len(X)} < 30）——先把各电脑 lr-scan 的数据合并")
+    Xa = np.asarray(X, dtype=np.float64)
+    Ya = np.asarray(Y, dtype=np.float64)
+    n, d = Xa.shape
+    # 闭式解 (XᵀX + λI)⁻¹XᵀY；X 已含截距列
+    A = Xa.T @ Xa + ridge_lambda * np.eye(d)
+    W = np.linalg.solve(A, Xa.T @ Ya)
+    pred = Xa @ W
+    ss_res = float(((Ya - pred) ** 2).sum())
+    ss_tot = float(((Ya - Ya.mean(axis=0)) ** 2).sum())
+    r2 = 1.0 - ss_res / max(ss_tot, 1e-12)
+    np.savez(out_path, W=W, targets=np.array(TARGETS),
+             n_samples=n, ridge_lambda=ridge_lambda)
+    return {"samples": n, "dims": d, "r2": round(r2, 3), "out": out_path}
+
+
+def predict_auto_tone(image_path: str, model_path: str) -> Dict[str, Any]:
+    """模型推理：图片 → 9 项全局参数 options。"""
+    import numpy as np
+    from PIL import Image
+    model = np.load(model_path)
+    W, targets = model["W"], model["targets"]
+    if tuple(targets) != TARGETS:
+        raise LrError(f"模型目标不匹配 {tuple(targets)} != {TARGETS}")
+    img = Image.open(image_path)
+    x = np.asarray(_content_features(img), dtype=np.float64)
+    vec = x @ W
+    opts = _target_options(vec)
+    return {"path": image_path, "options": opts}
+
+
+def cluster_recipes(records: Sequence[Dict[str, Any]], k: int = 6,
+                    seed: int = 0) -> Dict[str, Any]:
+    """编辑配方聚类（numpy KMeans，参数向量空间）→ 个人风格配方库。
+
+    每簇中心 = PhotoS options（可直接 preset）；输出簇大小/占比/代表照片。
+    """
+    import numpy as np
+    vecs = []
+    metas = []
+    for rec in records:
+        if not rec.get("edited"):
+            continue
+        o = rec.get("options") or {}
+        if not o:
+            continue
+        vecs.append(_target_vector(o))
+        metas.append({"path": rec.get("path")})
+    if len(vecs) < k * 2:
+        raise LrError(f"可聚类样本不足（{len(vecs)} < {k * 2}）")
+    X = np.asarray(vecs, dtype=np.float64)
+    # 按列归一化（标准差）
+    scale = X.std(axis=0)
+    scale[scale == 0] = 1.0
+    Xs = X / scale
+    rng = np.random.default_rng(seed)
+    n = len(Xs)
+    # KMeans++ 初始化
+    centers = [Xs[int(rng.integers(n))]]
+    for _ in range(1, k):
+        dist = np.min([((Xs - c) ** 2).sum(axis=1) for c in centers], axis=0)
+        probs = dist / dist.sum()
+        centers.append(Xs[int(rng.choice(n, p=probs))])
+    centers = np.asarray(centers)
+    for _ in range(50):
+        labels = np.argmin([((Xs - c) ** 2).sum(axis=1) for c in centers],
+                           axis=0)
+        new_centers = np.array([Xs[labels == j].mean(axis=0) if (labels == j)
+                                .any() else centers[j] for j in range(k)])
+        if np.allclose(new_centers, centers):
+            break
+        centers = new_centers
+    clusters = []
+    for j in range(k):
+        idx = np.where(labels == j)[0]
+        center = centers[j] * scale
+        clusters.append({
+            "size": int(len(idx)),
+            "ratio": round(float(len(idx)) / n, 3),
+            "options": _target_options(center),
+            "examples": [metas[i]["path"] for i in idx[:3]],
+        })
+    return {"k": k, "samples": n,
+            "clusters": sorted(clusters, key=lambda c: -c["size"])}
+
+
+def similar_photos(query_path: str, records: Sequence[Dict[str, Any]],
+                   image_dir: Optional[str] = None, k: int = 5,
+                   ) -> List[Dict[str, Any]]:
+    """相似修图检索：内容特征（84 维直方图特征）L1 距离 kNN。
+
+    新图 → 最像的既往修图 → 其 options 即修图起点。CLIP embedding 为
+    升级路径（换特征即得），本实现零依赖。
+    """
+    from PIL import Image
+    q = _content_features(Image.open(query_path))
+    q_stem = os.path.splitext(os.path.basename(query_path))[0]
+    scored = []
+    for rec in records:
+        if not rec.get("edited"):
+            continue
+        if os.path.splitext(os.path.basename(rec.get("path") or ""))[0] \
+                == q_stem:
+            continue  # 排除查询图自身
+        img_path = rec.get("image")
+        if not img_path and image_dir:
+            img_path = os.path.join(image_dir, os.path.splitext(
+                os.path.basename(rec["path"]))[0] + ".jpg")
+        if not img_path or not os.path.exists(img_path):
+            continue
+        try:
+            f = _content_features(Image.open(img_path))
+        except Exception:
+            continue
+        dist = sum(abs(a - b) for a, b in zip(q, f))
+        scored.append({"path": rec.get("path"), "distance": round(dist, 4),
+                       "options": rec.get("options")})
+    scored.sort(key=lambda s: s["distance"])
+    return scored[:k]
+
+
+def prep_eval_set(records: Sequence[Dict[str, Any]], out_path: str,
+                  image_dir: Optional[str] = None, sample: int = 200,
+                  seed: int = 1) -> Dict[str, Any]:
+    """教师评测集：采样已编辑照片 → before/after 渲染对 + 打分 prompt。
+
+    after 由 PhotoS 自己渲染（options → process_image），因此评测集是
+    自包含的：before.jpg + after.jpg + options + 教师打分模板。
+    """
+    import random
+    from PIL import Image
+    from .engine import ProcessOptions, process_image
+    edited = [r for r in records if r.get("edited") and r.get("options")]
+    if len(edited) > sample:
+        rng = random.Random(seed)
+        edited = rng.sample(edited, sample)
+    out_dir = os.path.dirname(os.path.abspath(out_path)) or "."
+    os.makedirs(out_dir, exist_ok=True)
+    entries = []
+    done = 0
+    for rec in edited:
+        src = rec.get("path")
+        if not src or not os.path.exists(src):
+            continue
+        stem = os.path.splitext(os.path.basename(src))[0]
+        before = os.path.join(out_dir, f"eval_before_{stem}.jpg")
+        after = os.path.join(out_dir, f"eval_after_{stem}.jpg")
+        try:
+            if not os.path.exists(before):
+                # before = 已渲染图（rawpy 默认显影），PIL 开不了 RAW
+                bsrc = rec.get("image") or src
+                if not os.path.exists(bsrc):
+                    continue
+                img = Image.open(bsrc)
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                img.thumbnail((1024, 1024))
+                img.save(before, "JPEG", quality=88)
+            if not os.path.exists(after):
+                fields = {k: v for k, v in (rec.get("options") or {}).items()
+                          if k in ProcessOptions.__dataclass_fields__}
+                fields["output_dir"] = out_dir  # 中间产物不污染源目录
+                res = process_image(src, ProcessOptions(**fields))
+                if res.success and res.output_path:
+                    img = Image.open(res.output_path)
+                    img.thumbnail((1024, 1024))
+                    img.save(after, "JPEG", quality=88)
+            entries.append({"path": src, "before": before, "after": after,
+                            "options": rec.get("options")})
+            done += 1
+        except Exception:
+            continue
+    prompt = (
+        "# 教师美学评估任务\n\n"
+        "对每对图片（before=原图，after=PhotoS 修图结果）评分：\n\n"
+        "1. **提升度 1-10**：after 相对 before 的美学提升（构图/曝光/色彩/氛围）\n"
+        "2. **问题清单**：after 中的新缺陷（过曝、色偏、不自然、丢失细节）\n"
+        "3. **一句话点评**：这张图是否达到出片标准\n\n"
+        "输出 JSON：{\"path\": ..., \"score\": N, \"issues\": [...], \"verdict\": ...}\n"
+    )
+    with open(os.path.join(out_dir, "eval_prompt.md"), "w",
+              encoding="utf-8") as f:
+        f.write(prompt)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump({"count": len(entries), "prompt_file": "eval_prompt.md",
+                   "entries": entries}, f, ensure_ascii=False, indent=2)
+    return {"count": len(entries), "out": out_path}

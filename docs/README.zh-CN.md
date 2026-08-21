@@ -22,7 +22,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 
 | 通道 | 接入方式 |
 |---|---|
-| **MCP server** — 19 个工具（process / select / hdr / blurfaces / dedup …） | `claude mcp add photo-s -- photo-s mcp` |
+| **MCP server** — 25 个工具（process / select / hdr / blurfaces / dedup …） | `claude mcp add photo-s -- photo-s mcp` |
 | **现成 SKILL.md** — 支持 skill 的 agent 即取即用，零额外依赖 | `cp -r skills/photo-s ~/.claude/skills/` |
 | **REST API** — 异步任务 + SSE 进度 | `photo-s serve --port 0 --token auto --ready-file x.json` |
 | **Python 库直调** — 无 IPC 开销 | `from photo_s.engine import batch_process` |
@@ -97,7 +97,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | REST API | — | ✅ | 供 agent 使用的 HTTP 服务（异步任务 + SSE 进度） |
 | 插件系统 | — | ✅ | 第三方插件支持 |
 | 官方插件管理 | — | ✅ | list/install/info/fetch + pip 安装 |
-| MCP server | — | ✅ | 向 MCP 客户端（Claude Desktop / Claude Code / 任意客户端）暴露 19 个工具 |
+| MCP server | — | ✅ | 向 MCP 客户端（Claude Desktop / Claude Code / 任意客户端）暴露 25 个工具 |
 | 批量基准 | — | ✅ | 并发扩展实测 |
 
 > ¹ 降噪 / 自动扶正 / HDR / 人脸模糊需要可选依赖：
@@ -134,7 +134,7 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/FEATURES.md`](FEATURES.md) | 完整功能清单——22 个 CLI 命令、引擎管线 |
+| [`docs/FEATURES.md`](FEATURES.md) | 完整功能清单——32 个 CLI 命令、引擎管线 |
 | [`docs/AGENT_API.md`](AGENT_API.md) | Agent 契约：JSON 结构、退出码、REST、MCP |
 | [`docs/PLUGINS.md`](PLUGINS.md) | 插件系统：SCUNet 降噪、LUT、自己写插件 |
 | [`docs/GUI_CHANGES.md`](GUI_CHANGES.md) | GUI 行为与接口契约 |

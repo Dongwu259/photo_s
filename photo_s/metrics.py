@@ -234,7 +234,132 @@ def _estimate_kelvin(r_mean: float, b_mean: float) -> int:
     return int(round(max(2000.0, min(12000.0, kelvin))))
 
 
-def analyze_image(path: str, sample_size: int = 256) -> dict:
+def _hue_deg_arr(r, g, b):
+    """数组版 HSV 色相（0-360），无 colorsys 逐像素开销。"""
+    import numpy as np
+    mx = np.maximum.reduce([r, g, b])
+    mn = np.minimum.reduce([r, g, b])
+    d = mx - mn
+    hue = np.zeros_like(mx)
+    sel = mx == r
+    hue[sel] = 60.0 * (((g[sel] - b[sel]) / np.maximum(d[sel], 1e-6)) % 6.0)
+    sel = mx == g
+    hue[sel] = 60.0 * ((b[sel] - r[sel]) / np.maximum(d[sel], 1e-6) + 2.0)
+    sel = mx == b
+    hue[sel] = 60.0 * ((r[sel] - g[sel]) / np.maximum(d[sel], 1e-6) + 4.0)
+    return np.where(d > 0, hue, 0.0)
+
+
+def _grid_cells(arr, grid: int) -> list:
+    """grid×grid 区域采样：每格 {x, y, luma, sat, r, g, b}（相对坐标 0-1）。"""
+    import numpy as np
+    h, w = arr.shape[:2]
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+    luma = 0.299 * r + 0.587 * g + 0.114 * b
+    mx = np.maximum(np.maximum(r, g), b)
+    mn = np.minimum(np.minimum(r, g), b)
+    sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-6), 0.0)
+    cells = []
+    for gy in range(grid):
+        row = []
+        for gx in range(grid):
+            y0, y1 = h * gy // grid, h * (gy + 1) // grid
+            x0, x1 = w * gx // grid, w * (gx + 1) // grid
+            c = arr[y0:y1, x0:x1]
+            cc_r, cc_g, cc_b = c[..., 0], c[..., 1], c[..., 2]
+            cc_l = 0.299 * cc_r + 0.587 * cc_g + 0.114 * cc_b
+            cc_mx = np.maximum(np.maximum(cc_r, cc_g), cc_b)
+            cc_mn = np.minimum(np.minimum(cc_r, cc_g), cc_b)
+            cc_sat = np.where(cc_mx > 0, (cc_mx - cc_mn) /
+                              np.maximum(cc_mx, 1e-6), 0.0)
+            row.append({
+                "x": round((x0 + x1) / 2.0 / w, 3),
+                "y": round((y0 + y1) / 2.0 / h, 3),
+                "luma": round(float(cc_l.mean()) / 255.0, 3),
+                "sat": round(float(cc_sat.mean()), 3),
+                "r": round(float(cc_r.mean()) / 255.0, 3),
+                "g": round(float(cc_g.mean()) / 255.0, 3),
+                "b": round(float(cc_b.mean()) / 255.0, 3),
+            })
+        cells.append(row)
+    return cells
+
+
+def _region_heuristics(arr) -> dict:
+    """启发式分区：天空/肤色占比 + 过曝/欠曝区域框（16×16 块聚类，粗粒度）。"""
+    import numpy as np
+    h, w = arr.shape[:2]
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+    luma = 0.299 * r + 0.587 * g + 0.114 * b
+    mx = np.maximum(np.maximum(r, g), b)
+    mn = np.minimum(np.minimum(r, g), b)
+    sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-6), 0.0)
+    out: dict = {"sky": None, "skin": None, "overexposed": [], "underexposed": []}
+
+    def _stats(mask, luma_arr, sat_arr):
+        if mask is None or not bool(mask.sum()):
+            return None
+        return {
+            "pct": round(float(mask.sum()) / float(mask.size) * 100.0, 2),
+            "luma": round(float(luma_arr[mask].mean()) / 255.0, 3),
+            "sat": round(float(sat_arr[mask].mean()), 3),
+        }
+
+    # 天空：上 30% 行、高亮低饱和
+    top = int(h * 0.3)
+    sky = (luma[:top] > 120) & (sat[:top] < 0.35)
+    if bool(sky.sum()):
+        out["sky"] = _stats(sky, luma[:top], sat[:top])
+    # 肤色：中饱和度 + 色相 10-45°
+    hue = _hue_deg_arr(r, g, b)
+    skin = (sat > 0.15) & (sat < 0.6) & (hue > 10) & (hue < 45)
+    if bool(skin.sum()):
+        out["skin"] = _stats(skin, luma, sat)
+
+    # 过曝/欠曝区域框：16×16 块占比 → 4 连通合并
+    blocks = 16
+    def _clusters(mask):
+        bh, bw = h // blocks, w // blocks
+        if bh < 1 or bw < 1:
+            return []
+        pct = np.zeros((blocks, blocks))
+        for y in range(blocks):
+            for x in range(blocks):
+                blk = mask[y * bh:(y + 1) * bh, x * bw:(x + 1) * bw]
+                pct[y, x] = float(blk.sum()) / max(blk.size, 1)
+        hot = pct > 0.5
+        seen = np.zeros_like(hot)
+        clusters = []
+        for y in range(blocks):
+            for x in range(blocks):
+                if not hot[y, x] or seen[y, x]:
+                    continue
+                stack = [(y, x)]
+                seen[y, x] = True
+                ys, xs = [], []
+                while stack:
+                    cy, cx = stack.pop()
+                    ys.append(cy)
+                    xs.append(cx)
+                    for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        ny, nx = cy + dy, cx + dx
+                        if 0 <= ny < blocks and 0 <= nx < blocks \
+                                and hot[ny, nx] and not seen[ny, nx]:
+                            seen[ny, nx] = True
+                            stack.append((ny, nx))
+                y0, y1 = min(ys) * bh / h, (max(ys) + 1) * bh / h
+                x0, x1 = min(xs) * bw / w, (max(xs) + 1) * bw / w
+                clusters.append({"x": round(x0, 3), "y": round(y0, 3),
+                                 "w": round(x1 - x0, 3), "h": round(y1 - y0, 3),
+                                 "pct": round(float(pct[ys, xs].mean()), 2)})
+        return clusters
+
+    out["overexposed"] = _clusters(luma >= 250)
+    out["underexposed"] = _clusters(luma <= 5)
+    return out
+
+
+def analyze_image(path: str, sample_size: int = 256, grid: int = 0) -> dict:
     """Perceptual image analysis for grading feedback loops.
 
     One call returns what an agent (or a future grading model) needs to
@@ -268,7 +393,7 @@ def analyze_image(path: str, sample_size: int = 256) -> dict:
     sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-6), 0.0)
 
     n = float(luma.size) or 1.0
-    return {
+    out = {
         "ok": True,
         "path": path,
         "size": [w, h],
@@ -303,3 +428,85 @@ def analyze_image(path: str, sample_size: int = 256) -> dict:
         },
         "blur_score": round(compute_blur_score(path, sample_size=128), 2),
     }
+    if grid in (4, 8):
+        out["grid"] = _grid_cells(arr, grid)
+        out["regions"] = _region_heuristics(arr)
+    return out
+
+
+# ---------------------------------------------------------------- v1.9.0 工具层
+
+def compare_images(path_a: str, path_b: str,
+                   sample_size: int = 256) -> dict:
+    """before/after 对比：PSNR / SSIM / 平均绝对差（``photo-s diff`` 数据核心）。"""
+    import numpy as np
+    try:
+        a = _load_sample_rgb(path_a, sample_size)
+        b = _load_sample_rgb(path_b, sample_size)
+        if a.size != b.size:
+            b = b.resize(a.size)
+        arr_a = np.asarray(a, dtype=np.float32)
+        arr_b = np.asarray(b, dtype=np.float32)
+        mad = float(np.abs(arr_a - arr_b).mean())
+    except Exception:
+        return {"ok": False, "path_a": path_a, "path_b": path_b,
+                "error": "unreadable image"}
+    psnr = compute_psnr(path_a, path_b, sample_size=min(sample_size, 256))
+    ssim = compute_ssim(path_a, path_b, sample_size=64)
+    return {
+        "ok": True, "path_a": path_a, "path_b": path_b,
+        "psnr": round(psnr, 2), "ssim": round(ssim, 4),
+        "mean_abs_diff": round(mad, 2),
+        "size": [a.size[0], a.size[1]],
+    }
+
+
+def _histogram_png(img) -> str:
+    """直方图 PNG（256×128，luma 白 + RGB 三色线）→ base64。"""
+    import base64
+    import io
+    import numpy as np
+    from PIL import Image as _PILImage
+    from PIL import ImageDraw
+    arr = np.asarray(img, dtype=np.float32)
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+    luma = 0.299 * r + 0.587 * g + 0.114 * b
+    im = _PILImage.new("RGB", (256, 128), (16, 16, 20))
+    d = ImageDraw.Draw(im)
+
+    def line(ch, color):
+        counts, _ = np.histogram(ch, bins=256, range=(0, 255))
+        m = float(counts.max()) or 1.0
+        pts = [(x, 127 - int(c / m * 124)) for x, c in enumerate(counts)]
+        d.line(pts, fill=color, width=1)
+
+    line(luma, (255, 255, 255))
+    line(r, (230, 60, 60))
+    line(g, (60, 200, 90))
+    line(b, (70, 110, 230))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def snapshot_image(path: str, max_dim: int = 1024,
+                   include_histogram: bool = True) -> dict:
+    """agent 视觉快照：缩放 JPEG base64 + 直方图 PNG base64。
+
+    多模态 agent 的「眼睛」——analyze 给统计数字，preview 直接给图。
+    ``jpeg_bytes`` = base64 长度（agent 可据此决定是否降采样）。
+    """
+    import base64
+    import io
+    try:
+        img = _load_sample_rgb(path, max_dim)
+    except Exception:
+        return {"ok": False, "path": path, "error": "unreadable image"}
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=85)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    out = {"ok": True, "path": path, "size": list(img.size), "format": "JPEG",
+           "jpeg_base64": b64, "jpeg_bytes": len(b64)}
+    if include_histogram:
+        out["histogram_png_base64"] = _histogram_png(img)
+    return out

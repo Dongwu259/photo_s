@@ -16,6 +16,7 @@
 | v1.6.0 | LR 方向调色 | `photo_s/grade.py` 11 算法（点曲线 PCHIP/手动色阶/自然饱和度/三向颜色分级/WB tint/HSL 分色/清晰度·纹理/去雾/暗角/颗粒，纯 numpy+PIL 零依赖）+ 3 个 LUT/MCP bug 修复 + 四层接线（CLI 11 flag/REST 自动/MCP 33 参数/GUI 11 控件）+ 紧凑字符串建模（REST/preset 零胶水）|
 | v1.6.1 | GUI 大增强 | Lightroom 式调色编辑器（可拖拽曲线 RGB+R/G/B/复位、3 色轮+亮度条、HSL 编辑器）+ 设置面板分类 Tab（输出/调整/效果/元数据/选项）+ 区块折叠 + 工具栏分组瘦身 + 缩略图（异步懒加载）/布局记忆/过滤框/进度 ETA/重做；color_grading 支持每区亮度 |
 | v1.7.0 | 局部调整 + 镜头矫正 + 感知反馈 | **已发布 2026-08-21**：`photo_s/mask.py` 命名蒙版（linear/radial/color 相对坐标 0-1，紧凑字符串 `masks`/`mask_adjust`，v1.8 AI/笔刷语法预留）+ 蒙版内 11 项标量局部调整；`point_color` 点颜色（取样色中心软掩码）；`photo_s/lens.py` 手动镜头矫正（畸变 k1/去暗角/消 CA，纯 numpy 双线性）；`analyze` 感知反馈（直方图/通道统计/色温估计/曝光/模糊，CLI+REST+MCP 19 工具）——`analyze → 调参 → process → analyze` 的 LLM 闭环；GUI 镜头/点颜色/蒙版编辑器（红色叠加预览）|
+| v1.7.1 | AI 修图基础设施（阶段 1+2 全落地） | **已发布 2026-08-21**：`photo_s/lrxmp.py` LR 数据桥接（XMP/catalog 明文快照解析 → ProcessOptions + 覆盖分类）+ `lr-scan`（自动发现 .lrcat/.xmp → 覆盖报告 + `--export-dir` 训练 JSONL + `--render-dir` rawpy before 图，一条命令产出完整训练包）+ `lr-train`/`lr-predict`（岭回归自动基调，纯 numpy）+ `lr-recipes`（KMeans 配方库）+ `lr-similar`（内容特征 kNN）+ `lr-eval`（教师评测集，PhotoS 自渲染 after）+ `diff`/`audit`/`preview`（版本对比/质量闸门/视觉快照）+ `analyze --grid` 区域反馈 + MCP `batch_start/status/cancel` 异步任务（19→25 工具）+ `batch --trace` 轨迹日志 |
 
 ## 规划中
 
@@ -34,24 +35,24 @@
 > **数据资产**：用户本人是摄影师，有海量 Lightroom 修图记录（RAW + XMP `crs:` 参数）——
 > before/after 与工具使用轨迹天然成对；PhotoS 紧凑字符串参数空间即轨迹记录格式。
 
-**阶段 1 — 工具层（纯工具，无模型）**：
+**阶段 1 — 工具层（纯工具，无模型）——v1.7.1 已全部落地（2026-08-21）**：
 
-- [ ] `preview`/`snapshot` 工具：缩放图 base64 + 直方图 PNG 进 MCP 结果（agent 视觉感知——analyze 数字之外直接看图）
-- [ ] `analyze` 区域反馈：grid 4×4/8×8 亮度/色偏 + 过曝/欠曝区域检测 + 启发式分区（天空/肤色）
-- [ ] MCP 异步 batch job（目录级 process + poll/cancel）
-- [ ] `diff` 版本对比（PSNR/SSIM）+ 参数快照回滚
-- [ ] `audit`/`quality-gate`（pass/fail + 原因——agent 的终止条件，无 stop 条件即无全自动）
-- [ ] **XMP `crs:` 桥接**（新 `photo_s/lrxmp.py`：LR 参数 ↔ ProcessOptions 互转；渐变滤镜 ↔ linear mask、径向 ↔ radial mask 映射）——个人数据管线，从远期提级
-- [ ] **轨迹日志**：process 自动记 before-analyze → params → after-analyze（即训练数据格式）
+- [x] `preview`/`snapshot` 工具：缩放图 base64 + 直方图 PNG 进 MCP 结果（agent 视觉感知——analyze 数字之外直接看图）
+- [x] `analyze` 区域反馈：grid 4×4/8×8 亮度/色偏 + 过曝/欠曝区域检测 + 启发式分区（天空/肤色）
+- [x] MCP 异步 batch job（目录级 process + poll/cancel：batch_start/status/cancel）
+- [x] `diff` 版本对比（PSNR/SSIM/MAD）；参数快照回滚 = 既有 `preset save/load`
+- [x] `audit`/`quality-gate`（pass/fail + 原因——agent 的终止条件，无 stop 条件即无全自动）
+- [x] **XMP `crs:` 桥接**（`photo_s/lrxmp.py`：LR 参数 ↔ ProcessOptions 互转；渐变滤镜 ↔ linear mask、径向 ↔ radial mask 映射）——个人数据管线，从远期提级
+- [x] **轨迹日志**：`batch --trace DIR` 记 before-analyze → params → after-analyze（即训练数据格式）
 
-**阶段 2 — 数据层（个人 LR 数据）**：
+**阶段 2 — 数据层（个人 LR 数据）——v1.7.1 已全部落地（2026-08-21）**：
 
-- [ ] LR 目录勾选「自动写入 XMP」→ lrxmp 批量解析 → 参数向量库
-- [ ] before 图生成：rawpy 默认渲染（无 develop 设置）即「修图前」，PhotoS 已有 rawpy
-- [ ] 编辑配方聚类：参数向量聚类 → 个人风格配方库，每配方 = PhotoS preset（零训练先落地）
-- [ ] 相似修图检索：CLIP embedding + kNN——新图找最像的既往修图 → 配方起点
-- [ ] 自动基调回归：内容特征 → 6-10 项全局参数（曝光/WB/影调）小 MLP，几千对可训
-- [ ] 教师评测集：大模型对 ~200 张打分，作为微调前后对比基准（评估先行）
+- [x] LR 目录勾选「自动写入 XMP」→ lrxmp 批量解析 → 参数向量库（lr-scan 自动发现 .lrcat+.xmp）
+- [x] before 图生成：`lr-scan --render-dir` rawpy 默认渲染（幂等）——一条命令产出完整训练包
+- [x] 编辑配方聚类：`lr-recipes` KMeans 参数空间 → 个人风格配方库，簇中心 = PhotoS options
+- [x] 相似修图检索：`lr-similar` 84 维内容特征 kNN（CLIP embedding 为升级路径，换特征即得）
+- [x] 自动基调回归：`lr-train`/`lr-predict` 岭回归（纯 numpy 零 torch，任何机器可训）9 项全局参数；CLIP+MLP/torch 为升级路径
+- [x] 教师评测集：`lr-eval` 采样 → before/after 渲染对（PhotoS 自渲染 after）+ 打分模板（评估先行）
 
 **阶段 3 — 模型层（数据到万级后）**：
 
