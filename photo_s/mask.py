@@ -83,7 +83,9 @@ class MaskSpec:
             base = self.params[0]
         elif self.kind == "brush":
             base = "|".join(
-                f"{_fmt_num(x)},{_fmt_num(y)},{_fmt_num(r)}"
+                (f"-{_fmt_num(x)},{_fmt_num(y)},{_fmt_num(-r)}"
+                 if r < 0 else
+                 f"{_fmt_num(x)},{_fmt_num(y)},{_fmt_num(r)}")
                 for x, y, r in self.params)
         elif self.kind == "combo":
             base = f"{self.params[0]}{self.params[1]}{self.params[2]}"
@@ -223,12 +225,20 @@ def _parse_brush(seg: str, name: str, params: str) -> MaskSpec:
     (0.05 = 5% of the short edge). Dots connect into a stroke (capsule
     union) at render time. '|' separates dots so ';' stays the mask-list
     separator.
+
+    A negative dot (``-x,y,r``) subtracts from the mask (v1.8 "subtract
+    from mask" mode): the rendered mask is ``pos_union - neg_union``.
+    Internally the negative radius is stored as ``-r`` so the spec tuple
+    stays (x, y, r) - no structural change.
     """
     dots = []
     for dot in params.split("|"):
         dot = dot.strip()
         if not dot:
             continue
+        subtract = dot.startswith("-")
+        if subtract:
+            dot = dot[1:]
         parts = dot.split(",")
         if len(parts) != 3:
             raise MaskError(
@@ -244,7 +254,7 @@ def _parse_brush(seg: str, name: str, params: str) -> MaskSpec:
         if r <= 0.0 or r > 0.5:
             raise MaskError(
                 f"brush radius must be in (0, 0.5] (got {dot!r} in {seg!r})")
-        dots.append((x, y, r))
+        dots.append((x, y, -r if subtract else r))
     if not dots:
         raise MaskError(f"brush mask needs at least one dot (got {seg!r})")
     return MaskSpec("brush", tuple(dots), 0.0, False, name)
@@ -475,27 +485,41 @@ def _brush_mask(spec: MaskSpec, w: int, h: int) -> np.ndarray:
     Dots are relative ``(x, y, r)``; radius is relative to the shorter
     image side. Each consecutive pair of dots forms a capsule (line swept
     by the brush) so fast strokes paint continuous paths.
+
+    Negative dots (radius stored as ``-r``) subtract from the result:
+    ``mask = pos_union - neg_union`` (v1.8 subtract-from-mask mode).
     """
     import numpy as np
     short = float(min(w, h))
     ys, xs = np.mgrid[0:h, 0:w]
     xs = xs.astype(np.float32)
     ys = ys.astype(np.float32)
-    out = np.zeros((h, w), dtype=np.float32)
+    pos = np.zeros((h, w), dtype=np.float32)
+    neg = np.zeros((h, w), dtype=np.float32)
     dots = spec.params
-    # Distance to each dot center (for isolated dots) and to each segment.
-    for i, (cx, cy, r) in enumerate(dots):
+
+    def _stroke(target, cx, cy, r):
         px, py = cx * max(1, w - 1), cy * max(1, h - 1)
         rad = max(0.5, r * short)
         d2 = (xs - px) ** 2 + (ys - py) ** 2
-        out = np.maximum(out, np.exp(-d2 / (2.0 * (rad * 0.5) ** 2)))
+        np.maximum(target, np.exp(-d2 / (2.0 * (rad * 0.5) ** 2)),
+                   out=target)
+
+    for i, (cx, cy, r) in enumerate(dots):
+        target = neg if r < 0 else pos
+        _stroke(target, cx, cy, abs(r))
         if i + 1 < len(dots):
             nx, ny, nr = dots[i + 1]
-            out = np.maximum(
-                out, _capsule(xs, ys, px, py,
-                              nx * max(1, w - 1), ny * max(1, h - 1),
-                              max(0.5, nr * short)))
-    return out
+            if (nr < 0) != (r < 0):
+                continue  # sign change: no capsule across the boundary
+            target = neg if nr < 0 else pos
+            np.maximum(
+                target, _capsule(xs, ys, cx * max(1, w - 1),
+                                 cy * max(1, h - 1),
+                                 nx * max(1, w - 1), ny * max(1, h - 1),
+                                 max(0.5, abs(nr) * short)),
+                out=target)
+    return np.clip(pos - neg, 0.0, 1.0)
 
 
 def _capsule(xs, ys, x0, y0, x1, y1, rad):

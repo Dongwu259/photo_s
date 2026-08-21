@@ -550,6 +550,12 @@ STRINGS = {
         "mask_hide": "隐藏",
         "mask_del": "删除蒙版",
         "mask_undo": "撤销 (⌘Z)",
+        "mask_mode_add": "A 添加",
+        "mask_mode_subtract": "B 减去",
+        "mask_mode_off": "◦ 新建",
+        "mask_up": "▲ 上移",
+        "mask_down": "▼ 下移",
+        "mask_drag_hint": "空白处拖动 = 绘制；拖拽蒙版内部 = 移动位置",
         "mask_ai_empty": "AI 未识别到该内容（蒙版为空）",
         "mask_tool": "工具",
         "mask_tool_linear": "线性渐变",
@@ -1148,6 +1154,12 @@ STRINGS = {
         "mask_hide": "Hide",
         "mask_del": "Delete mask",
         "mask_undo": "Undo (⌘Z)",
+        "mask_mode_add": "A Add",
+        "mask_mode_subtract": "B Subtract",
+        "mask_mode_off": "◦ New",
+        "mask_up": "▲ Up",
+        "mask_down": "▼ Down",
+        "mask_drag_hint": "Drag empty area = paint; drag inside a mask = move it",
         "mask_ai_empty": "AI found nothing (empty mask)",
         "mask_tool": "Tool",
         "mask_tool_linear": "Linear gradient",
@@ -3093,6 +3105,82 @@ class PhotoSApp:
                 text = text[:33] + "…"
             lbl.config(text=text)
 
+    # ── Shared photo reference (v1.8.0) ─────────────────────────────────
+
+    def _add_photo_reference(self, parent, on_pick=None, max_w=480,
+                             max_h=240):
+        """Embed a paged photo preview into an editor dialog.
+
+        Shows the first checked photo (fit into max_w x max_h), with
+        prev/next paging across all checked photos. ``on_pick(rgb)``, when
+        given, is called with the sampled pixel color on click (used by
+        the point-color editor). Returns a dict with ``get_index`` and
+        ``set_index`` so the caller can stay in sync.
+        """
+        from PIL import Image as PILImage, ImageTk
+        files = self._checked_files()
+        st = {"files": files, "idx": 0, "tk": None, "pil": None,
+              "scale": 1.0}
+        frame = tk.Frame(parent, bg=COLORS["bg"])
+        nav = tk.Frame(frame, bg=COLORS["bg"])
+        nav.pack(fill="x")
+        page = tk.Label(nav, text="", font=FONT_TINY,
+                        fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        page.pack(side="left")
+        img_lbl = tk.Label(frame, bg=COLORS["card"],
+                           width=max_w // 8, height=max_h // 16)
+        img_lbl.pack(fill="both", expand=True, pady=(4, 0))
+
+        def _load(i=None):
+            if i is not None:
+                st["idx"] = i % max(1, len(st["files"]))
+            if not st["files"]:
+                page.config(text=self._t("mask_no_check"))
+                return
+            path = st["files"][st["idx"]]
+            base = None
+            try:
+                base = PILImage.open(path).convert("RGB")
+                base.thumbnail((max_w, max_h), PILImage.LANCZOS)
+            except Exception:
+                base = PILImage.new("RGB", (max_w, max_h), (40, 40, 40))
+            st["pil"] = base
+            st["tk"] = ImageTk.PhotoImage(base)
+            img_lbl.config(image=st["tk"])
+            img_lbl.image = st["tk"]
+            page.config(text=self._t(
+                "mask_page", cur=st["idx"] + 1, total=len(st["files"])))
+
+        def _flip(delta):
+            st["idx"] = (st["idx"] + delta) % max(1, len(st["files"]))
+            _load()
+
+        def _pick(evt):
+            if on_pick is None or st["pil"] is None:
+                return
+            w, h = st["pil"].width, st["pil"].height
+            x = max(0, min(w - 1, int(evt.x / (img_lbl.winfo_width() or 1)
+                                      * w)))
+            y = max(0, min(h - 1, int(evt.y / (img_lbl.winfo_height() or 1)
+                                      * h)))
+            on_pick(st["pil"].getpixel((x, y)))
+
+        img_lbl.bind("<Button-1>", _pick)
+
+        btn_row = tk.Frame(frame, bg=COLORS["bg"])
+        btn_row.pack(fill="x", pady=(4, 0))
+        for text, cmd in ((self._t("mask_prev"), lambda: _flip(-1)),
+                          (self._t("mask_next"), lambda: _flip(1))):
+            FlatButton(btn_row, text=text, command=cmd,
+                       bg=COLORS["bg"], fg=COLORS["text"],
+                       hover_bg=COLORS["border"], font=FONT_SMALL,
+                       padx=6, pady=1, border_color=COLORS["border"]).pack(
+                side="left", padx=(0, 6))
+        _load()
+        return {"get_index": lambda: st["idx"],
+                "set_index": lambda i: _load(i), "frame": frame,
+                "files": st["files"]}
+
     def _open_curve_editor(self):
         """Draggable point-curve editor: RGB master + R/G/B tabs."""
         from .gui_widgets import CurveEditor
@@ -3103,7 +3191,7 @@ class PhotoSApp:
         win.title(self._t("dlt_curves"))
         win.configure(bg=COLORS["bg"])
         win.transient(self.root)
-        win.geometry("360x300")
+        win.geometry("480x560")
         cur = _parse_curves(self.curves.get()) if self.curves.get() else {}
         base = cur.get("rgb")
         nb = ttk.Notebook(win)
@@ -3117,6 +3205,9 @@ class PhotoSApp:
                              width=320, height=210)
             ed.pack(fill="both", expand=True, padx=8, pady=8)
             editors[ch] = ed
+        # photo reference strip (v1.8.0): see the checked photos while
+        # dragging curves
+        self._add_photo_reference(win)["frame"].pack(fill="x", padx=10)
         btns = tk.Frame(win, bg=COLORS["bg"])
         btns.pack(fill="x", padx=10, pady=(0, 10))
         FlatButton(btns, text=self._t("ok"),
@@ -3210,6 +3301,9 @@ class PhotoSApp:
                    hover_bg=COLORS["border"], font=FONT_SMALL,
                    padx=10, pady=3, border_color=COLORS["border"]).pack(
             side="right", padx=(0, 8))
+        # photo reference strip across the bottom (v1.8.0)
+        self._add_photo_reference(win, max_w=380, max_h=150)["frame"].pack(
+            fill="x", padx=10, pady=(0, 4))
 
     def _wheels_ok(self, win, wheels, lums=None):
         specs = []
@@ -3242,9 +3336,12 @@ class PhotoSApp:
                        "lum": self._t("hsl_lum")})
         panel = HSLPanel(win, labels=labels)
         panel.load(self.hsl.get())
-        panel.pack(padx=12, pady=12)
+        panel.pack(padx=12, pady=12, side="left")
+        # photo reference strip on the right (v1.8.0)
+        self._add_photo_reference(win, max_w=320, max_h=200)["frame"].pack(
+            side="left", fill="both", expand=True, padx=(0, 12))
         btns = tk.Frame(win, bg=COLORS["bg"])
-        btns.pack(fill="x", padx=12, pady=(0, 12))
+        btns.pack(fill="x", side="bottom", padx=12, pady=(0, 12))
         FlatButton(btns, text=self._t("ok"),
                    command=lambda: self._hsl_ok(win, panel),
                    bg=COLORS["bg"], fg=COLORS["text"],
@@ -3274,6 +3371,7 @@ class PhotoSApp:
         win.title(self._t("dlt_point_color"))
         win.configure(bg=COLORS["bg"])
         win.transient(self.root)
+        win.geometry("820x560")
 
         try:
             targets = list(_parse_point_color(self.point_color.get()))
@@ -3391,6 +3489,18 @@ class PhotoSApp:
                        hover_bg=COLORS["border"], font=FONT_SMALL,
                        padx=8, pady=2, border_color=COLORS["border"]).pack(
                 side="left", padx=(0, 6))
+
+        # photo reference strip: click the photo to sample its color
+        def _on_pick(rgb):
+            pc_r.set(str(rgb[0]))
+            pc_g.set(str(rgb[1]))
+            pc_b.set(str(rgb[2]))
+            _sync_swatch()
+
+        self._add_photo_reference(win, on_pick=_on_pick, max_w=300,
+                                  max_h=240)["frame"].pack(
+            side="left", fill="both", expand=True, padx=(12, 0),
+            pady=(0, 12))
 
         bottom = tk.Frame(win, bg=COLORS["bg"])
         bottom.pack(fill="x", padx=12, pady=(0, 12))
@@ -3904,6 +4014,15 @@ class PhotoSApp:
                          highlightbackground=COLORS["border"],
                          selectmode=tk.SINGLE)
         lst.pack(fill="both", expand=True)
+        order_bar = tk.Frame(lst_frame, bg=COLORS["bg"])
+        order_bar.pack(fill="x", pady=(4, 0))
+        for key, label in (("up", "mask_up"), ("down", "mask_down")):
+            FlatButton(order_bar, text=self._t(label),
+                       command=lambda k=key: _move_layer(k),
+                       bg=COLORS["bg"], fg=COLORS["text"],
+                       hover_bg=COLORS["border"], font=FONT_SMALL,
+                       padx=6, pady=1, border_color=COLORS["border"]).pack(
+                side="left", padx=(0, 6))
         vis_vars = {}  # name -> tk.BooleanVar
 
         def _specs():
@@ -3953,6 +4072,31 @@ class PhotoSApp:
                         lst.selection_clear(0, tk.END)
                         lst.selection_set(i)
                         break
+
+        def _move_layer(direction):
+            """Reorder the current mask in the layer stack (list order =
+            paint order: later entries paint on top)."""
+            sel = lst.curselection()
+            if not sel:
+                return
+            idx = sel[0]
+            specs = _specs()
+            if idx >= len(specs):
+                return
+            if direction == "up" and idx > 0:
+                _push_undo()
+                specs[idx], specs[idx - 1] = specs[idx - 1], specs[idx]
+                idx -= 1
+            elif direction == "down" and idx < len(specs) - 1:
+                _push_undo()
+                specs[idx], specs[idx + 1] = specs[idx + 1], specs[idx]
+                idx += 1
+            else:
+                return
+            name = specs[idx][0]
+            current["name"] = name
+            _refresh_list(select=name)
+            _draw_image()
 
         # center: big canvas
         canvas = tk.Canvas(body, width=700, height=460, bg=COLORS["card"],
@@ -4056,20 +4200,149 @@ class PhotoSApp:
 
         def _finish_paint(kind, params, feather=0.0, adjust=None):
             name = current["name"]
-            if not name or not any(s[0] == name for s in _specs()):
+            existing = next((s for s in _specs() if s[0] == name), None)
+            if not existing:
                 name = _new_spec_name(kind)
             # brush dots each carry their own radius; feather applies to
-            # every kind except color (color has tol, not feather)
+            # every kind except color (color has tol, not feather). When
+            # appending A/B strokes to an existing mask, keep its feather.
             if kind != "color":
-                feather = feather_v.get()
+                feather = feather_v.get() if existing is None \
+                    else existing[3]
             spec = (name, kind, list(params), feather, False)
             _set_current_mask(name, spec, adjust)
 
         # ── canvas drag handlers ─────────────────────────────────────────
         drag = {"active": False, "x0": 0, "y0": 0, "x1": 0, "y1": 0,
                 "dots": []}
+        mode = {"add": None}  # None = paint new; True/False = A add / B
+        # subtract strokes onto the current brush mask
+        move = {"active": False, "name": None, "dx0": 0, "dy0": 0,
+                "orig": None}  # Alt+drag moves an existing mask
+
+        def _mask_at(evt):
+            """Return the name of the topmost visible mask under the cursor,
+            or None.
+
+            Geometric/brush masks hit-test by distance to their centers/
+            axes (a brush stroke is easy to miss through the soft Gaussian
+            tail); AI masks hit-test on the rendered mask value (their
+            silhouette is the meaningful target).
+            """
+            base = _img_photo["pil"]
+            if base is None:
+                return None
+            x, y = _canvas_to_img(evt)
+            xi = max(0, min(base.width - 1, int(x)))
+            yi = max(0, min(base.height - 1, int(y)))
+            rx = x / base.width
+            ry = y / base.height
+            short = float(min(base.width, base.height))
+            for name, kind, params, feather, invert in reversed(_specs()):
+                if not _visible().get(name, True):
+                    continue
+                try:
+                    if kind in ("subject", "person", "object"):
+                        key = (files[idx[0]], name)
+                        if key not in ai_cache:
+                            ai_cache[key] = render_mask(
+                                MaskSpec(kind, tuple(params), feather,
+                                         invert),
+                                base.width, base.height, img=base)
+                        if ai_cache[key][yi, xi] > 0.3:
+                            return name
+                        continue
+                    if kind == "brush":
+                        if any((px - rx) ** 2 + (py - ry) ** 2
+                               <= (r * 1.5) ** 2
+                               for px, py, r in params if r >= 0):
+                            return name
+                        continue
+                    if kind == "linear":
+                        x0, y0, x1, y1 = params
+                        dx, dy = x1 - x0, y1 - y0
+                        l2 = dx * dx + dy * dy
+                        if l2 == 0:
+                            continue
+                        t = ((rx - x0) * dx + (ry - y0) * dy) / l2
+                        if 0.0 <= t <= 1.0:
+                            px = x0 + t * dx
+                            py = y0 + t * dy
+                            # 10% of short side, in normalized units
+                            tol = 0.1 * short / max(base.width, base.height)
+                            if (px - rx) ** 2 + (py - ry) ** 2 <= tol ** 2:
+                                return name
+                        continue
+                    if kind == "radial":
+                        cx, cy, rxx, ryy = params
+                        d = ((rx - cx) / rxx) ** 2 + ((ry - cy) / ryy) ** 2
+                        if d <= 1.0:
+                            return name
+                        continue
+                    # color masks don't move (no spatial center)
+                except MaskError:
+                    continue
+            return None
+
+        def _move_mask(evt):
+            """Live-move the mask under Alt+drag: shift params by the
+            pointer delta (in relative image coords)."""
+            dx_canvas = evt.x - move["dx0"]
+            dy_canvas = evt.y - move["dy0"]
+            scale = _img_photo["scale"]
+            base = _img_photo["pil"]
+            if base is None or scale <= 0:
+                return
+            drx = dx_canvas / scale / base.width
+            dry = dy_canvas / scale / base.height
+            name = move["name"]
+            for i, s in enumerate(_specs()):
+                if s[0] != name:
+                    continue
+                kind, params = s[1], move["orig"]
+                if kind == "brush":
+                    moved = [(max(0.0, min(1.0, x + drx)),
+                              max(0.0, min(1.0, y + dry)), r)
+                             for x, y, r in params]
+                elif kind == "linear":
+                    moved = [max(0.0, min(1.0, p + (drx if j % 2 == 0
+                                                     else dry)))
+                             for j, p in enumerate(params)]
+                elif kind == "radial":
+                    moved = [max(0.0, min(1.0, params[0] + drx)),
+                             max(0.0, min(1.0, params[1] + dry)),
+                             params[2], params[3]]
+                elif kind == "color":
+                    moved = list(params)  # color masks don't move
+                else:
+                    moved = list(params)
+                _specs()[i] = (s[0], kind, moved, s[3], s[4])
+                _refresh_list(select=name)
+                _draw_image()
+                return
 
         def _on_press(evt):
+            # Drag inside an existing mask moves it (LR-style). Exceptions:
+            # - A/B mode (user explicitly clicked A or B) with a current
+            #   brush mask: pressing paints strokes onto the mask instead
+            #   of moving it.
+            # - color tool: always picks a color.
+            painting = (tool.get() == "brush" and mode["add"] is not None
+                        and current["name"] is not None
+                        and any(s[0] == current["name"] and s[1] == "brush"
+                                for s in _specs()))
+            hit = None if painting or tool.get() == "color" \
+                else _mask_at(evt)
+            if hit:
+                for i, s in enumerate(_specs()):
+                    if s[0] == hit:
+                        move.update({"active": True, "name": hit,
+                                     "dx0": evt.x, "dy0": evt.y,
+                                     "orig": list(s[2])})
+                        current["name"] = hit
+                        _refresh_list(select=hit)
+                        _load_adjusts()
+                        return
             if tool.get() == "color":
                 x, y = _canvas_to_img(evt)
                 base = _img_photo["pil"]
@@ -4089,6 +4362,9 @@ class PhotoSApp:
                          "dots": [(evt.x, evt.y)]})
 
         def _on_drag(evt):
+            if move["active"]:
+                _move_mask(evt)
+                return
             if not drag["active"]:
                 return
             drag["x1"], drag["y1"] = evt.x, evt.y
@@ -4118,6 +4394,11 @@ class PhotoSApp:
                                        outline="", tags="guide")
 
         def _on_release(evt):
+            if move["active"]:
+                # moving is undoable as one step
+                move["active"] = False
+                _push_undo()
+                return
             if not drag["active"]:
                 return
             drag["active"] = False
@@ -4129,6 +4410,21 @@ class PhotoSApp:
                     rx, ry = _img_to_rel(x, y)
                     dots.append((rx, ry, brush_r.get()))
                 if not dots:
+                    return
+                # A/B modes: append to the current brush mask instead of
+                # replacing it (subtract dots get a negative radius).
+                cur = current["name"]
+                cur_spec = None
+                for s in _specs():
+                    if s[0] == cur and s[1] == "brush":
+                        cur_spec = s
+                        break
+                if cur_spec is not None and mode["add"] is False:
+                    neg = [(x, y, -r) for x, y, r in dots]
+                    _finish_paint("brush", list(cur_spec[2]) + neg)
+                    return
+                if cur_spec is not None and mode["add"]:
+                    _finish_paint("brush", list(cur_spec[2]) + dots)
                     return
                 _finish_paint("brush", dots)
             elif tool.get() == "linear":
@@ -4207,6 +4503,23 @@ class PhotoSApp:
                  fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(anchor="w")
         ttk.Entry(right, textvariable=ai_label, font=FONT_BODY,
                   width=12).pack(fill="x", pady=(0, 6))
+        mode_frame = tk.Frame(right, bg=COLORS["bg"])
+        mode_frame.pack(fill="x", pady=(0, 6))
+        for key, label in (("add", "mask_mode_add"),
+                           ("subtract", "mask_mode_subtract")):
+            FlatButton(mode_frame, text=self._t(label),
+                       command=lambda k=key: mode.__setitem__(
+                           "add", k == "add"),
+                       bg=COLORS["bg"], fg=COLORS["text"],
+                       hover_bg=COLORS["border"], font=FONT_SMALL,
+                       padx=8, pady=2, border_color=COLORS["border"]).pack(
+                side="left", padx=(0, 6))
+        FlatButton(mode_frame, text=self._t("mask_mode_off"),
+                   command=lambda: mode.__setitem__("add", None),
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=8, pady=2, border_color=COLORS["border"]).pack(
+            side="left")
         tk.Label(right, text=self._t("mask_brush_size"), font=FONT_TINY,
                  fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(anchor="w")
         ttk.Scale(right, from_=0.01, to=0.3, variable=brush_r).pack(
@@ -4440,6 +4753,9 @@ class PhotoSApp:
             side="right", padx=(0, 8))
 
         tk.Label(win, text=self._t("mask_overlay_hint"), font=FONT_TINY,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
+            fill="x", padx=12, pady=(0, 2))
+        tk.Label(win, text=self._t("mask_drag_hint"), font=FONT_TINY,
                  fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
             fill="x", padx=12, pady=(0, 8))
 

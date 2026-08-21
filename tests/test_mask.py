@@ -466,3 +466,23 @@ def test_workflow_ai_mask_pipeline_end_to_end(tmp_path, monkeypatch):
     import numpy as np
     out = np.asarray(Image.open(res.output_path).convert("RGB"))
     assert out.mean() > 105  # brightened under full-subject mask
+
+
+def test_brush_negative_dots_subtract():
+    """v1.8 subtract mode: -x,y,r dots carve out of the positive union."""
+    spec = parse_masks("m:brush:0.3,0.5,0.08|-0.3,0.5,0.03")[0]
+    m = render_mask(spec, 100, 100)
+    assert m[50, 30] < 0.1          # center carved by negative dot
+    assert m[50, 33] > 0.5          # positive ring outside the carve
+    assert m[50, 10] < 0.05         # far away
+    # negative dot alone without positive: nothing painted (clip to 0)
+    spec2 = parse_masks("n:brush:-0.5,0.5,0.05")[0]
+    m2 = render_mask(spec2, 100, 100)
+    assert m2.max() == 0.0
+
+
+def test_brush_negative_roundtrip():
+    spec = parse_masks("m:brush:0.5,0.5,0.08|-0.4,0.6,0.03")[0]
+    again = parse_masks(spec.to_string())[0]
+    assert again.params == spec.params
+    assert again.params[1][2] < 0   # negative dot marked by -r

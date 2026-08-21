@@ -31,7 +31,7 @@
 > `photo_s/releases/download/v1.8.0/*.onnx`，sha256 已 pin）。
 
 - [x] **AI 分割蒙版**：`subject:`（U2Netp 显著性）/ `person:`（PP-HumanSeg 人像）/ `object:label`（YOLOv8n-seg，COCO 80 类）三类；新 `photo_s/segmask.py`（cv2.dnn 惰性导入 + modelstore 下载/校验/缓存 + 纯 numpy YOLO mask 解码+NMS）；**OpenCV 5.x 新图引擎 forward 失败自动回退经典引擎**（Paddle 导出模型 residual bug）；缺 cv2/权重抛清晰错误不静默。
-- [x] **笔刷蒙版**：`brush:x,y,r|x,y,r|...`（`|` 分隔点，避免与 masks 的 `;` 冲突）；渲染为点间胶囊并集（纯 numpy）；**GUI LR 式画布蒙版工作流**（勾选照片大图 + 多蒙版叠加分色半透明 overlay + 笔刷/线性/径向/颜色/AI 工具画布绘制 + ◀▶ 翻页 + per-photo 蒙版经 `batch_process(per_file_options=)` 逐文件注入，未编辑照片自动回落全局蒙版）。
+- [x] **笔刷蒙版**：`brush:x,y,r|x,y,r|...`（`|` 分隔点，避免与 masks 的 `;` 冲突）；渲染为点间胶囊并集（纯 numpy）；**负点**（`-x,y,r` = 从蒙版减去，A/B 模式）；**GUI LR 式画布蒙版工作流**（勾选照片大图 + 多蒙版叠加分色半透明 overlay + 笔刷/线性/径向/颜色/AI 工具画布绘制 + **拖拽蒙版内部 = 移动位置** + **图层上移/下移排序** + A/B 添加/减去模式 + ◀▶ 翻页 + per-photo 蒙版经 `batch_process(per_file_options=)` 逐文件注入，未编辑照片自动回落全局蒙版）。**其他调色对话框（曲线/色轮/HSL/点颜色）内嵌照片预览条 + 翻页（点颜色支持点击取色）**。
 - [x] 蒙版组合算子：`combo:A&B`（交集）/ `combo:A-B`（差集），引用已命名蒙版并替换之；`render_mask` 加 `refs` 参数，engine/GUI 传入全部 spec。
 - [x] 复杂字符串参数局部化：`mask_adjust` 值支持 `curves={...}`/`hsl={...}`/`color_grading={...}`/`vignette={...}`/`grain={...}`（`{}` 包裹避免分隔符冲突，复用 grade.py 函数，蒙版内与全局数值一致）。
 
