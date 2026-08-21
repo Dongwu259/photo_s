@@ -65,8 +65,10 @@ photo-s lr-predict new.jpg --model auto_tone.npz        # → 9 项全局参数
 ### 3.1 升级：CLIP + MLP（torch，16GB 显存分钟级）
 
 冻结 `open_clip` ViT-L/14 → 768 维 embedding → MLP(768→256→9)，MSELoss，
-lr 1e-3，AdamW，几十 epoch。参考实现 `tools/train_tone_torch.py`
-（train 子命令训练存 npz，predict 子命令推理，open_clip 按需安装）。
+lr 1e-3，AdamW，几十 epoch。参考实现 `tools/train_tone_torch.py`（train 子命令
+训练存 npz）。**推理开箱即用**：`photo-s lr-predict IMG --model tone_clip.npz`
+自动识别 CLIP+MLP 格式（含旧版转置权重兼容），无需独立脚本；torch/open-clip
+按需安装（`pip install torch open-clip-torch`），缺失时报清晰错误而非崩溃。
 
 ## 4. 模型 B：小 VLM LoRA（数据 1000+ 后，全功能近似）
 

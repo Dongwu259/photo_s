@@ -10,27 +10,21 @@
         --images data/before --out tone_clip.npz --epochs 40
     python3 tools/train_tone_torch.py --predict new.jpg --model tone_clip.npz
 
-输出 npz：W (768, 9) + b (9,) + targets，与 lrxmp.TARGETS 同序。
+输出 npz：W (hidden, emb) + b (hidden,) + W2 (9, hidden) + b2 (9,) + targets，
+与 lrxmp.TARGETS 同序；`photo-s lr-predict` 自动识别该格式（含旧版转置兼容）。
+
+推理建议直接用 `photo-s lr-predict IMG --model tone_clip.npz`
+（本脚本 predict 子命令亦委托 photo_s.lrxmp，保证单一实现）。
 """
 
 import argparse
 import json
-import os
 import sys
 
 
 def _records(data: str) -> list:
     with open(data, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
-
-
-def _load_model(model_path: str):
-    import numpy as np
-    m = np.load(model_path)
-    if tuple(m["targets"]) != tuple(__import__("photo_s.lrxmp",
-                                              fromlist=["TARGETS"]).TARGETS):
-        raise SystemExit("模型目标不匹配，请用当前版本的 lrxmp 重训")
-    return m
 
 
 def train(args) -> None:
@@ -104,33 +98,17 @@ def train(args) -> None:
     W2 = head[3].weight.detach().numpy()
     b2 = head[3].bias.detach().numpy()
     np.savez(args.out, W=W, b=b0, W2=W2, b2=b2, targets=np.array(TARGETS),
-             emb_dim=emb_dim, clip_model=args.clip_model, r2=float(r2),
+             emb_dim=emb_dim, clip_model=args.clip_model,
+             clip_pretrained=args.clip_pretrained, r2=float(r2),
              n_samples=n)
     print(f"已存 {args.out}  R²={r2:.3f}")
 
 
 def predict(args) -> None:
-    try:
-        import torch
-        import open_clip
-    except ImportError:
-        raise SystemExit("需要 torch + open-clip-torch")
-    import numpy as np
-    from PIL import Image
-    from photo_s.lrxmp import _target_options
+    from photo_s.lrxmp import predict_auto_tone
 
-    m = _load_model(args.model)
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        str(m["clip_model"]), pretrained="openai")
-    model.eval()
-    img = Image.open(args.predict).convert("RGB")
-    with torch.no_grad():
-        f = model.encode_image(preprocess(img).unsqueeze(0)).squeeze(0).numpy()
-    h = np.maximum(f @ m["W"] + m["b"], 0)
-    vec = h @ m["W2"] + m["b2"]
-    print(json.dumps({"path": args.predict,
-                      "options": _target_options(vec)}, ensure_ascii=False,
-                     indent=2))
+    print(json.dumps(predict_auto_tone(args.predict, args.model),
+                     ensure_ascii=False, indent=2))
 
 
 def main() -> None:

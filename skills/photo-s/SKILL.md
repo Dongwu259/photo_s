@@ -70,7 +70,7 @@ pip install "photo-s-tools[mcp]"     # + MCP server (Python 3.10+)
 | Version compare | `photo-s diff A.jpg B.jpg --json` | PSNR / SSIM / MAD between before/after |
 | LR training package | `photo-s lr-scan [--export-dir DIR --render-dir DIR --sanitize]` | discover .lrcat/.xmp → coverage report + JSONL labels + before images |
 | Auto-tone train | `photo-s lr-train --data lr_records.jsonl --images before/ --out m.npz` | ridge regression, pure numpy, 9 global params (needs >=30 edited photos) |
-| Auto-tone predict | `photo-s lr-predict IMG --model m.npz` | image → 9 global params for batch |
+| Auto-tone predict | `photo-s lr-predict IMG --model m.npz` | image → 9 global params (auto-detect ridge / CLIP+MLP npz) |
 | Recipe clustering | `photo-s lr-recipes --data lr_records.jsonl` | your personal style signatures as PhotoS options |
 | Similar-edit search | `photo-s lr-similar IMG --data lr_records.jsonl --images before/` | content-feature kNN → past edit as starting point |
 | Eval set prep | `photo-s lr-eval --data ... --out eval.json --sample 200` | before/after render pairs + teacher scoring template |

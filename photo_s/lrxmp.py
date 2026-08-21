@@ -1183,17 +1183,69 @@ def train_auto_tone(records: Sequence[Dict[str, Any]],
     return {"samples": n, "dims": d, "r2": round(r2, 3), "out": out_path}
 
 
+def _predict_clip_mlp(img, model) -> np.ndarray:
+    """CLIP+MLP 前向（tools/train_tone_torch.py 产物）。
+
+    格式自适应：新版保存 W (emb, hidden) / W2 (hidden, 9)；旧版为转置存储。
+    npz 内的 clip_model/clip_pretrained 缺省 ViT-L-14/openai。torch/open_clip
+    惰性导入，缺失抛清晰 LrError（区别于岭回归分支的零依赖）。
+    """
+    import numpy as np
+    try:
+        import torch
+        import open_clip
+    except ImportError:
+        raise LrError(
+            "CLIP+MLP 模型需要 torch + open-clip-torch（pip install torch "
+            "open-clip-torch），或改用 photo-s lr-train 岭回归模型（零依赖）")
+    emb_dim = int(model["emb_dim"]) if "emb_dim" in model.files else None
+    W, b, W2, b2 = model["W"], model["b"], model["W2"], model["b2"]
+    clip_model = (str(model["clip_model"])
+                  if "clip_model" in model.files else "ViT-L-14")
+    pretrained = (str(model["clip_pretrained"])
+                  if "clip_pretrained" in model.files else "openai")
+    clip, _, preprocess = open_clip.create_model_and_transforms(
+        clip_model, pretrained=pretrained)
+    clip.eval()
+    with torch.no_grad():
+        f = clip.encode_image(preprocess(img.convert("RGB")).unsqueeze(0))
+        f = np.asarray(f.squeeze(0).numpy(), dtype=np.float64)
+    # 权重方向自适应：emb_dim 键优先，否则按特征维推断（新旧格式兼容）
+    if emb_dim is not None:
+        if W.shape[0] == emb_dim:
+            pass
+        elif W.shape[1] == emb_dim:
+            W, W2 = W.T, W2.T
+        else:
+            raise LrError(f"模型权重维度不匹配 emb_dim={emb_dim}, W={W.shape}")
+    elif W.shape[1] == f.shape[0]:
+        W, W2 = W.T, W2.T
+    elif W.shape[0] != f.shape[0]:
+        raise LrError(f"模型权重维度不匹配特征 {f.shape[0]}, W={W.shape}")
+    h = np.maximum(f @ W + b, 0.0)
+    return h @ W2 + b2
+
+
 def predict_auto_tone(image_path: str, model_path: str) -> Dict[str, Any]:
-    """模型推理：图片 → 9 项全局参数 options。"""
+    """模型推理：图片 → 9 项全局参数 options。
+
+    自动识别两种模型格式：
+    - 岭回归（photo-s lr-train 输出）：84 维内容特征 @ W，纯 numpy 零依赖
+    - CLIP+MLP（tools/train_tone_torch.py 输出，含 W2/b2）：768 维 CLIP
+      embedding + 双层 MLP，需 torch + open-clip-torch（缺依赖报清晰 LrError）
+    """
     import numpy as np
     from PIL import Image
     model = np.load(model_path)
-    W, targets = model["W"], model["targets"]
+    targets = model["targets"]
     if tuple(targets) != TARGETS:
         raise LrError(f"模型目标不匹配 {tuple(targets)} != {TARGETS}")
     img = Image.open(image_path)
-    x = np.asarray(_content_features(img), dtype=np.float64)
-    vec = x @ W
+    if "W2" in model.files and "b2" in model.files:
+        vec = _predict_clip_mlp(img, model)
+    else:
+        x = np.asarray(_content_features(img), dtype=np.float64)
+        vec = x @ model["W"]
     opts = _target_options(vec)
     return {"path": image_path, "options": opts}
 

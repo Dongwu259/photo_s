@@ -7,6 +7,7 @@ XMP sidecar），数值为真实修图数据。
 import json
 import os
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
@@ -259,6 +260,129 @@ def test_train_predict_roundtrip(tmp_path):
     assert res["samples"] == 40
     assert 0.0 <= res["r2"] <= 1.0
     assert lrxmp.predict_auto_tone(str(tmp_path / "p5.jpg"), model)["options"]
+
+
+# ---------------------------------------------------------------- CLIP+MLP 分支
+
+def _clip_weights(emb=4, hidden=3, transposed=False, rng=42):
+    import numpy as np
+    r = np.random.RandomState(rng)
+    W = r.randn(hidden, emb)          # 旧格式 (hidden, emb)
+    b = r.randn(hidden)
+    W2 = r.randn(len(lrxmp.TARGETS), hidden)
+    b2 = r.randn(len(lrxmp.TARGETS))
+    if transposed:                    # 新格式 (emb, hidden)
+        W, W2 = W.T, W2.T
+    return W, b, W2, b2
+
+
+def _fake_clip_modules(monkeypatch, feats):
+    """注入假 torch/open_clip（无需真实安装）——encode_image 返回固定特征。"""
+    import types
+    import numpy as np
+    from contextlib import nullcontext
+
+    class _T:
+        def __init__(self, arr):
+            self._a = np.asarray(arr, dtype=np.float32)
+
+        def unsqueeze(self, _d):
+            return self
+
+        def squeeze(self, _d):
+            return self
+
+        def numpy(self):
+            return self._a
+
+    class _Clip:
+        def __init__(self, feats):
+            self._feats = np.asarray(feats, dtype=np.float32)
+
+        def eval(self):
+            return self
+
+        def encode_image(self, x):
+            return _T(self._feats)
+
+    class _Preproc:
+        def __call__(self, img):
+            return _T(np.zeros((3, 224, 224), dtype=np.float32))
+
+    torch_mod = types.ModuleType("torch")
+    torch_mod.no_grad = lambda: nullcontext()
+    open_clip_mod = types.ModuleType("open_clip")
+    open_clip_mod.create_model_and_transforms = (
+        lambda name, pretrained: (_Clip(feats), None, _Preproc()))
+    monkeypatch.setitem(sys.modules, "torch", torch_mod)
+    monkeypatch.setitem(sys.modules, "open_clip", open_clip_mod)
+
+
+def _clip_model_file(tmp_path, name, transposed=False):
+    import numpy as np
+    emb, hidden = 4, 3
+    W, b, W2, b2 = _clip_weights(emb, hidden, transposed)
+    path = tmp_path / name
+    np.savez(path, W=W, b=b, W2=W2, b2=b2, emb_dim=emb,
+             clip_model="ViT-L-14", clip_pretrained="openai",
+             targets=np.array(lrxmp.TARGETS))
+    return str(path)
+
+
+def _expected_clip_options(emb=4, hidden=3, transposed=False, feats=(0.5, 1.0, 1.5, 2.0)):
+    import numpy as np
+    W, b, W2, b2 = _clip_weights(emb, hidden, transposed)
+    h = np.maximum(np.asarray(feats, dtype=np.float64) @ W + b, 0.0)
+    vec = h @ W2 + b2
+    return vec
+
+
+def test_predict_clip_mlp_new_format(tmp_path, monkeypatch):
+    from PIL import Image
+    from photo_s.lrxmp import TARGETS, _target_options
+    feats = (0.5, 1.0, 1.5, 2.0)
+    _fake_clip_modules(monkeypatch, feats)
+    img = tmp_path / "x.jpg"
+    Image.new("RGB", (64, 64), (120, 140, 160)).save(img)
+    model = _clip_model_file(tmp_path, "clip.npz", transposed=True)
+    res = lrxmp.predict_auto_tone(str(img), model)
+    assert set(res["options"]) == set(TARGETS)
+    vec = _expected_clip_options(transposed=True, feats=feats)
+    expect = _target_options(vec)
+    for t in TARGETS:
+        assert res["options"][t] == expect[t]
+
+
+def test_predict_clip_mlp_legacy_transpose(tmp_path, monkeypatch):
+    """旧脚本存 (hidden, emb)：emb_dim 键存在时按转置兼容。"""
+    from PIL import Image
+    feats = (0.25, 0.5, 0.75, 1.0)
+    _fake_clip_modules(monkeypatch, feats)
+    img = tmp_path / "y.jpg"
+    Image.new("RGB", (64, 64), (80, 90, 100)).save(img)
+    model = _clip_model_file(tmp_path, "legacy.npz", transposed=False)
+    res = lrxmp.predict_auto_tone(str(img), model)
+    assert "exposure" in res["options"]
+    assert "wb_temp" in res["options"]
+
+
+def test_predict_clip_mlp_missing_deps(tmp_path, monkeypatch):
+    """无 torch/open_clip 时报清晰 LrError（不静默、不 TypeError）。"""
+    import builtins
+    from PIL import Image
+    img = tmp_path / "z.jpg"
+    Image.new("RGB", (16, 16), (10, 20, 30)).save(img)
+    model = _clip_model_file(tmp_path, "no_deps.npz")
+    real_import = builtins.__import__
+
+    def _no_torch(name, *a, **k):
+        if name.split(".")[0] in ("torch", "open_clip"):
+            raise ImportError("simulate missing")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", _no_torch)
+    with pytest.raises(LrError, match="open-clip-torch"):
+        lrxmp.predict_auto_tone(str(img), model)
 
 
 def test_train_too_few_samples(tmp_path):
