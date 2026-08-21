@@ -4330,7 +4330,10 @@ class PhotoSApp:
         def _finish_paint(kind, params, feather=0.0, adjust=None):
             name = current["name"]
             existing = next((s for s in _specs() if s[0] == name), None)
-            if not existing:
+            # 只在与新蒙版同类型时复用名字（A/B 笔画追加）；异类工具
+            # 必须新建——否则选中 radial 切 linear 拖一笔会把 radial
+            # 静默替换（取色/AI 同理）
+            if not existing or existing[1] != kind:
                 name = _new_spec_name(kind)
             # brush dots each carry their own radius; feather applies to
             # every kind except color (color has tol, not feather). When
@@ -4594,8 +4597,11 @@ class PhotoSApp:
                     messagebox.showwarning(
                         self._t("mask_ai_empty"), self._t("mask_ai_empty"))
                     return
+                # 仅同类型蒙版才复用名字（重跑同一分割）；异类蒙版
+                # 被选中时新建，防静默替换
                 name = current["name"] if current["name"] and any(
-                    s[0] == current["name"] for s in _specs()) else None
+                    s[0] == current["name"] and s[1] == kind
+                    for s in _specs()) else None
                 if not name:
                     name = _new_spec_name(kind)
                 ai_cache.pop((files[idx[0]], name), None)
