@@ -357,6 +357,29 @@ def test_object_label_allows_spaces():
             parse_masks(f"x:object:{bad}")
 
 
+def test_mask_adjust_duplicate_name_rejected():
+    with pytest.raises(MaskError, match="duplicate"):
+        parse_mask_adjust("a:exposure=-0.5; a:brightness=0.2")
+
+
+def test_combo_operand_with_hyphen_rejected():
+    with pytest.raises(MaskError, match="must not contain '-'"):
+        parse_masks("c:combo:x-y&z")
+
+
+def test_unknown_kind_render_raises_clear_error():
+    from photo_s.mask import MaskSpec
+    with pytest.raises(MaskError, match="unknown mask kind"):
+        render_mask(MaskSpec("warp", (), 0.0, False, "w"), 8, 8)
+
+
+def test_feather_keyword_wins_over_positional():
+    s = parse_masks("r:linear:0,0,1,1,0.9,feather=0.2")[0]
+    assert s.feather == pytest.approx(0.2)
+    s2 = parse_masks("r:linear:0,0,1,1,0.9")[0]
+    assert s2.feather == pytest.approx(0.9)
+
+
 def test_v18_types_accept_feather_invert_keywords():
     # to_string/GUI 对所有 kind 追加 ,feather=/,invert（render 也支持）；
     # parser 此前只认几何类型 → round-trip 断裂、GUI 蒙版静默丢失。

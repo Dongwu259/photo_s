@@ -236,12 +236,14 @@ def _parse_mask_segment(seg: str, index: int) -> MaskSpec:
             raise MaskError(f"bad numeric param {tok!r} in mask {seg!r}") from None
 
     feather = max(0.0, min(1.0, feather))
+    feather_kw = feather > 0.0 or "feather=" in params.lower()
     if mtype == "linear":
         if len(positional) < 4:
             raise MaskError(f"linear mask needs x0,y0,x1,y1 (got {seg!r})")
         if len(positional) > 5:
             raise MaskError(f"too many params in mask {seg!r}")
-        if len(positional) == 5:  # positional 5th = feather
+        if len(positional) == 5 and not feather_kw:
+            # positional 5th = feather；关键字显式给出时优先
             feather = max(0.0, min(1.0, positional[4]))
         vals = tuple(max(0.0, min(1.0, v)) for v in positional[:4])
         if vals[0] == vals[2] and vals[1] == vals[3]:
@@ -252,7 +254,7 @@ def _parse_mask_segment(seg: str, index: int) -> MaskSpec:
             raise MaskError(f"radial mask needs cx,cy,rx,ry (got {seg!r})")
         if len(positional) > 5:
             raise MaskError(f"too many params in mask {seg!r}")
-        if len(positional) == 5:
+        if len(positional) == 5 and not feather_kw:
             feather = max(0.0, min(1.0, positional[4]))
         cx, cy = max(0.0, min(1.0, positional[0])), max(0.0, min(1.0, positional[1]))
         rx, ry = positional[2], positional[3]
@@ -337,6 +339,10 @@ def _parse_combo(seg: str, name: str, params: str) -> MaskSpec:
             if name in (a, b):
                 raise MaskError(
                     f"combo {name!r} cannot reference itself (got {seg!r})")
+            if "-" in a or "-" in b:
+                raise MaskError(
+                    f"combo operand names must not contain '-' "
+                    f"(ambiguous with the A-B operator, got {seg!r})")
             return MaskSpec("combo", (a, op, b), feather, invert, name)
     raise MaskError(
         f"combo needs 'A&B' or 'A-B' (got {seg!r})")
@@ -451,6 +457,10 @@ def parse_mask_adjust(s: str) -> dict:
                     f"(got {val!r})") from None
         if not name or not adjust:
             raise MaskError(f"bad mask_adjust segment {seg!r}")
+        if name in out:
+            raise MaskError(
+                f"duplicate mask_adjust name {name!r} "
+                f"(merge into one segment; parse_masks rejects dupes too)")
         out[name] = adjust
     return out
 
@@ -525,11 +535,15 @@ def render_mask(spec: MaskSpec, w: int, h: int,
         feather = spec.feather if spec.feather > 0 else 0.05
         inner = max(0.0, 1.0 - feather)
         mask = np.clip((1.0 - d) / (1.0 - inner), 0.0, 1.0)
-    else:  # color
+    elif spec.kind == "color":
         if img is None:
             raise MaskError(
                 "color mask needs the image to measure against")
         mask = _color_mask(img, spec)
+    else:
+        # GUI 直接构造 MaskSpec 时可能拼错 kind —— 明确报错而非
+        # 落入 color 分支给出误导信息
+        raise MaskError(f"unknown mask kind {spec.kind!r}")
     if spec.feather > 0 and spec.kind not in ("color", "combo"):
         mask = _feather_mask(mask, spec.feather, w, h)
     if spec.invert:
@@ -553,6 +567,9 @@ def _ai_mask(img: Image.Image, spec: MaskSpec) -> np.ndarray:
     except (ImportError, RuntimeError) as e:
         raise MaskError(
             f"AI mask {spec.name!r} ({spec.kind}): {e}") from e
+    except Exception as e:  # cv2.error / 形状异常：per-file 契约要清晰错误
+        raise MaskError(
+            f"AI mask {spec.name!r} ({spec.kind}) failed: {e}") from e
 
 
 def _brush_mask(spec: MaskSpec, w: int, h: int) -> np.ndarray:

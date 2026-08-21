@@ -123,7 +123,12 @@ def _load_net(kind: str, force_classic: bool = False):
     with _LOCK:
         if kind in _NETS:
             return _NETS[kind]
-        path = _model_path(kind)
+    # 权重下载/校验（首次可达 30s）在锁外进行——持锁会让所有并行
+    # worker 串行排队；modelstore.ensure 自身线程安全
+    path = _model_path(kind)
+    with _LOCK:
+        if kind in _NETS:      # 另一 worker 可能已缓存
+            return _NETS[kind]
         kwargs = {}
         if force_classic and hasattr(cv2.dnn, "ENGINE_CLASSIC"):
             kwargs["engine"] = cv2.dnn.ENGINE_CLASSIC
@@ -165,8 +170,10 @@ def segment(img, kind: str, label: str = None) -> np.ndarray:
     cv2 = _cv2()
     h, w = img.height, img.width
     try:
+        # _load_net 自管理锁（下载在锁外）；forward 全程持锁
+        # （cv2 Net 非线程安全）
+        net = _load_net(kind)
         with _LOCK:
-            net = _load_net(kind)
             if kind == "subject":
                 return _u2netp_forward(cv2, net, img, h, w)
             if kind == "person":
@@ -250,13 +257,21 @@ def _yolo_forward(cv2, net, img, h, w, class_id) -> np.ndarray:
         outs = net.forward()
         if not isinstance(outs, (list, tuple)):
             outs = [outs]
+        if len(outs) < 2:
+            raise RuntimeError(
+                f"YOLO model has {len(outs)} output(s), expected 2 "
+                f"(output0 + output1)") from None
         preds, proto = outs[0], outs[1]
     preds = np.asarray(preds, dtype=np.float32)  # [1, 116, 8400] (or [1,8400,116])
-    if preds.shape[1] == 8400 and preds.shape[2] > 4:
+    if preds.ndim == 3 and preds.shape[1] == 8400 and preds.shape[2] > 4:
         preds = np.transpose(preds, (0, 2, 1))   # -> [1, 116, 8400]
+    elif preds.ndim != 3:
+        raise RuntimeError(f"unexpected YOLO output shape {preds.shape}")
     proto = np.asarray(proto, dtype=np.float32)  # [1, 32, 160, 160]
     if proto.ndim == 4:
         proto = proto[0]                          # [32, 160, 160]
+    if proto.ndim != 3:
+        raise RuntimeError(f"unexpected YOLO proto shape {proto.shape}")
 
     p = preds[0]                                  # [116, 8400]
     boxes = p[:4]                                 # xywh in 640 space
