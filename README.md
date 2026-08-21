@@ -25,7 +25,7 @@ JSON contract (`schema_version`, additive-only — upgrades never break a consum
 
 | Path | Entry point |
 |---|---|
-| **MCP server** — 19 tools (process / select / hdr / blurfaces / dedup / …) | `claude mcp add photo-s -- photo-s mcp` |
+| **MCP server** — 25 tools (process / select / hdr / blurfaces / dedup / …) | `claude mcp add photo-s -- photo-s mcp` |
 | **Packaged SKILL.md** — skill-capable agents, zero extras | `cp -r skills/photo-s ~/.claude/skills/` |
 | **REST API** — async tasks + SSE progress | `photo-s serve --port 0 --token auto --ready-file x.json` |
 | **Python library** — no IPC overhead | `from photo_s.engine import batch_process` |
@@ -53,7 +53,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | 3-way color grading | ✅ | ✅ | Shadows/midtones/highlights hue + sat zones |
 | HSL split | ✅ | ✅ | 8 color domains, hue/sat/lum shifts |
 | Point color | ✅ | ✅ | Targeted hue/sat/lum around a sampled color + range |
-| Local masks | ✅ | ✅ | Named linear/radial/color-range masks, 11 local adjustments under each |
+| Local masks | ✅ | ✅ | Named linear/radial/color-range masks + v1.8 AI segmentation (`subject`/`person`/`object:class`), brush strokes (subtract mode), combos (A&B / A-B); 11 scalar + 5 string local adjustments under each |
 | Lens correction | ✅ | ✅ | Manual distortion k1, vignette fix, CA fix (pure numpy) |
 | Perceptual analysis | ✅ | ✅ | Histograms / channel stats / WB lean / exposure / blur (`analyze`) |
 | Vibrance / clarity / texture | ✅ | ✅ | Natural saturation, local contrast |
@@ -101,7 +101,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | REST API | — | ✅ | HTTP server for agents (async tasks + SSE progress) |
 | Plugin system | — | ✅ | Third-party plugin support |
 | Official plugin manager | — | ✅ | list/install/info/fetch + pip install |
-| MCP server | — | ✅ | 19 tools to MCP clients (Claude Desktop / Claude Code / any MCP client) |
+| MCP server | — | ✅ | 25 tools to MCP clients (Claude Desktop / Claude Code / any MCP client) |
 | Batch benchmark | — | ✅ | Worker-scaling measurement |
 
 > ¹ Denoise / auto-straighten / HDR / face blur need an optional dependency:

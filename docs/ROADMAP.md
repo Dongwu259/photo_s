@@ -17,15 +17,15 @@
 | v1.6.1 | GUI 大增强 | Lightroom 式调色编辑器（可拖拽曲线 RGB+R/G/B/复位、3 色轮+亮度条、HSL 编辑器）+ 设置面板分类 Tab（输出/调整/效果/元数据/选项）+ 区块折叠 + 工具栏分组瘦身 + 缩略图（异步懒加载）/布局记忆/过滤框/进度 ETA/重做；color_grading 支持每区亮度 |
 | v1.7.0 | 局部调整 + 镜头矫正 + 感知反馈 | **已发布 2026-08-21**：`photo_s/mask.py` 命名蒙版（linear/radial/color 相对坐标 0-1，紧凑字符串 `masks`/`mask_adjust`，v1.8 AI/笔刷语法预留）+ 蒙版内 11 项标量局部调整；`point_color` 点颜色（取样色中心软掩码）；`photo_s/lens.py` 手动镜头矫正（畸变 k1/去暗角/消 CA，纯 numpy 双线性）；`analyze` 感知反馈（直方图/通道统计/色温估计/曝光/模糊，CLI+REST+MCP 19 工具）——`analyze → 调参 → process → analyze` 的 LLM 闭环；GUI 镜头/点颜色/蒙版编辑器（红色叠加预览）|
 | v1.7.1 | AI 修图基础设施（阶段 1+2 全落地） | **已发布 2026-08-21**：`photo_s/lrxmp.py` LR 数据桥接（XMP/catalog 明文快照解析 → ProcessOptions + 覆盖分类）+ `lr-scan`（自动发现 .lrcat/.xmp → 覆盖报告 + `--export-dir` 训练 JSONL + `--render-dir` rawpy before 图，一条命令产出完整训练包）+ `lr-train`/`lr-predict`（岭回归自动基调，纯 numpy；**lr-predict 自动识别 CLIP+MLP npz**）+ `lr-recipes`（KMeans 配方库）+ `lr-similar`（内容特征 kNN）+ `lr-eval`（教师评测集，PhotoS 自渲染 after）+ `diff`/`audit`/`preview`（版本对比/质量闸门/视觉快照）+ `analyze --grid` 区域反馈 + MCP `batch_start/status/cancel` 异步任务（19→25 工具）+ `batch --trace` 轨迹日志 |
-| v1.8.0 | AI 识别蒙版 + 笔刷 + 组合算子 + LR 数据管线 | **发布就绪未发版（2026-08-21）**：`photo_s/segmask.py`（U2Netp subject / PP-HumanSeg person / YOLOv8n-seg object:label，cv2.dnn + modelstore 权重下载校验，OpenCV 5 引擎自动回退）+ 笔刷蒙版 `brush:x,y,r|x,y,r`（GUI 画布绘制）+ 组合算子 `combo:A&B`/`combo:A-B` + 复杂字符串参数局部化（curves/hsl/color_grading/vignette/grain 进 mask_adjust，`{}` 包裹）+ GUI LR 式画布蒙版工作流（拖拽移动/图层排序/A/B 加减/羽化/undo/翻页/per-photo 注入）+ 调色对话框实时预览。另含 `lr-merge` 多机数据包合并 + `lr-scan --sanitize` 脱敏导出 + TRAINING.md/tools 训练管线。**1072 测试全绿**（发布前修复 12 项 Critical/Major + 25 项 Minor） |
+| v1.8.0 | AI 识别蒙版 + 笔刷 + 组合算子 + LR 数据管线 | **发布就绪未发版（2026-08-21）**：`photo_s/segmask.py`（U2Netp subject / PP-HumanSeg person / YOLOv8n-seg object:label，cv2.dnn + modelstore 权重下载校验，OpenCV 5 引擎自动回退）+ 笔刷蒙版 `brush:x,y,r|x,y,r`（GUI 画布绘制）+ 组合算子 `combo:A&B`/`combo:A-B` + 复杂字符串参数局部化（curves/hsl/color_grading/vignette/grain 进 mask_adjust，`{}` 包裹）+ GUI LR 式画布蒙版工作流（拖拽移动/图层排序/A/B 加减/羽化/undo/翻页/per-photo 注入）+ 调色对话框实时预览。另含 `lr-merge` 多机数据包合并 + `lr-scan --sanitize` 脱敏导出 + TRAINING.md/tools 训练管线。**1075 测试全绿**（发布前扫描修复 2 Critical + 10 Major + 33 Minor） |
 
 ## 规划中
 
 ### v1.8.0（AI 识别蒙版 + 笔刷 -- 主题：智能局部调整，方向已定）
 
-> **实施（2026-08-21，发布就绪未发版）**：四项 + GUI 工作流全部落地，**1072 测试全绿**。
-> 发布前全面扫描修复 12 项 Critical/Major（mask_adjust 字符串键、exposure→ev 别名、
-> combo 循环、per-photo 泄漏、NaN 静默黑图等）+ 25 项 Minor。
+> **实施（2026-08-21，发布就绪未发版）**：四项 + GUI 工作流全部落地，**1075 测试全绿**。
+> 发布前全面扫描修复 2 Critical + 10 Major（mask_adjust 字符串键、exposure→ev 别名、
+> combo 循环、per-photo 泄漏、NaN 静默黑图等）+ 33 Minor。
 > 权重已选定并算好 sha256：U2Netp 4.6MB + PP-HumanSeg 6.2MB + YOLOv8n-seg
 > **fp16 7.0MB**（EdgeFirst fp32 13.9MB 超网络切断线，转 fp16 后安全；cv2.dnn
 > 实测 fp16 可用，结果与 fp32 一致）。**发布时须上传三个 onnx 到 v1.8.0
@@ -78,7 +78,7 @@
 > 需求来源：商业软件 LensPilot 以 photo_s 为底层图像管线，功能摸底（2026-08-18）指出
 > 向 Lightroom 方向增强调色能力。定位约束不变：**批量/交付导向管线，不做交互式局部修图**。
 > 全部 P0/P1 为**单图全局调整算法，纯 numpy/PIL 可实现，零新依赖**（打包环境已有 numpy/cv2/onnxruntime）。
-> **实施（2026-08-18，已 push 未发版）**：P0+P1 全部落地进 `photo_s/grade.py`（11 函数）+ 3 个 bug 修复 + 四层接线（CLI 11 flag / REST 自动 / MCP 33 参数 / GUI 11 控件），899 测试全绿。
+> **实施（2026-08-18，已发布 v1.6.0）**：P0+P1 全部落地进 `photo_s/grade.py`（11 函数）+ 3 个 bug 修复 + 四层接线（CLI 11 flag / REST 自动 / MCP 33 参数 / GUI 11 控件），899 测试全绿。
 > **关键设计决策**：ROADMAP 原议 `curves/color_grading/hsl` 用 dict 字段——实施时改**紧凑字符串**（如 `curves="r:0,0;128,140;255,255"`、`color_grading="shadows:120,0.3"`），
 > 与现有 `crop/pad/print_size` 同形态：REST `_scalar_groups` / preset `asdict` **零手工接线**（已验证）。
 

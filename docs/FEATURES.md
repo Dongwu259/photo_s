@@ -1,6 +1,6 @@
 # PhotoS 功能清单 — Feature Inventory
 
-> 以代码实际为准（v1.5.1），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
+> 以代码实际为准（v1.8.0），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
 ## 1. CLI 命令（33 个）
@@ -36,7 +36,7 @@
 | `config` | TOML 配置文件管理 |
 | `info` | 格式/环境探测（`--json`） |
 | `serve` | REST API（AI agent 集成，含 `/process/stream` SSE 进度） |
-| `mcp` | MCP server（stdio，19 工具，py3.10+） |
+| `mcp` | MCP server（stdio，25 工具，py3.10+） |
 | `plugin` | 插件管理 install/list/info/fetch/**scaffold** |
 | `bench` | 批量基准：`--dir -j 1,2,4,8 --denoise` 实测各并发耗时/加速比；每阶段计时（load/process/save）；`--evaluate` 输出质量（PSNR/SSIM 对比源图）；输出写临时目录跑完自动清理，不污染源目录 |
 
@@ -101,7 +101,7 @@
 - 无 token 时 CSRF Origin 防护（拒绝跨域浏览器请求）
 - **`POST /process/stream`**：text/event-stream 实时进度（每文件一条 `data:` 帧 + 结束 `done` 帧），agent 免轮询
 
-## 5. MCP server（19 工具）
+## 5. MCP server（25 工具）
 
 `process` `info` `exif` `dedup` `cull` `select` `hdr` `blurfaces` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` `bench` `watch` `watch_status` `watch_stop` `analyze` — dedup 默认 dry_run 安全；`select` 双阈值分拣、`hdr` 曝光融合、`blurfaces` 人脸模糊均需对应 extra；模块级零 mcp import
 
