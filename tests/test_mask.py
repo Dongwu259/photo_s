@@ -271,6 +271,55 @@ def test_adjust_keys_cover_documented_set():
         "clarity", "texture", "sharpen", "temp", "tint", "blur"}
 
 
+# ── String-parameter adjustments (v1.8) ─────────────────────────────────────
+
+STRING_CASES = {
+    "hsl": "red:0.1,0.2,0.0",
+    "color_grading": "shadows:30,0.5,0.1;highlights:-20,-0.3",
+    "vignette": "0.5,0.5,0.5",
+    "grain": "0.1,1.0",
+    "curves": "r:0,0;128,140;255,255",
+}
+
+
+def test_apply_local_string_keys_parse_and_apply():
+    # The 5 string-parameter keys take the same compact strings as the
+    # global grade options; mask_adjust wraps them in {} so their own
+    # ;/, separators do not collide (regression: 4/5 used to pass the raw
+    # string into functions expecting parsed structures).
+    img = _solid(16, 16)
+    mask = np.ones((16, 16), dtype=np.float32)
+    for key, val in STRING_CASES.items():
+        adj = parse_mask_adjust(f"m:{key}={{{val}}}")["m"]
+        out = apply_local(img, mask, adj)
+        assert out.size == img.size
+        assert out.mode == "RGB"
+        arr = np.asarray(out)
+        assert arr.min() >= 0 and arr.max() <= 255
+
+
+def test_apply_local_string_keys_blend_by_mask():
+    img = _solid(16, 16, color=(128, 128, 128))
+    mask = np.zeros((16, 16), dtype=np.float32)
+    mask[8:, :] = 1.0  # bottom half
+    adj = parse_mask_adjust("m:vignette={0.5,0.5,0.5}")["m"]
+    out = apply_local(img, mask, adj)
+    arr = np.asarray(out)
+    assert np.allclose(arr[:8], 128)          # top half untouched
+    assert arr[8:].mean() < 127.9             # bottom half darkened
+
+
+def test_apply_local_string_keys_bad_strings_raise_maskerror():
+    img = _solid(8, 8)
+    mask = np.ones((8, 8), dtype=np.float32)
+    for key, val in (("hsl", "bogus"), ("color_grading", "nope:1,2"),
+                     ("vignette", "abc"), ("grain", "xyz"),
+                     ("curves", "r:0,0;oops")):
+        adj = parse_mask_adjust(f"m:{key}={{{val}}}")["m"]
+        with pytest.raises(MaskError, match="bad "):
+            apply_local(img, mask, adj)
+
+
 # ── v1.8: brush / combo / string adjustments ─────────────────────────────────
 
 def test_brush_renders_stroke_union():

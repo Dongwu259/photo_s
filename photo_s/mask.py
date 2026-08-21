@@ -593,6 +593,16 @@ def combine(masks) -> np.ndarray:
 
 # ── Local adjustments ────────────────────────────────────────────────────────
 
+def _parse_adjust_string(key: str, value: str, parser):
+    """Parse a string-parameter adjustment (same compact strings as the
+    global grade options); failures become :class:`MaskError` with the key
+    name so per-file errors stay actionable."""
+    try:
+        return parser(value)
+    except (ValueError, TypeError) as e:
+        raise MaskError(f"bad {key} string: {e}") from None
+
+
 def apply_local(img: Image.Image, mask: np.ndarray,
                 adjust: dict) -> Image.Image:
     """Apply scalar adjustments under a mask: ``out = mix(orig, adjusted)``.
@@ -644,19 +654,30 @@ def apply_local(img: Image.Image, mask: np.ndarray,
     # global grade options, localized under the mask.
     if adjust.get("curves"):
         from .grade import apply_curves, _parse_curves
-        out = apply_curves(out, _parse_curves(adjust["curves"]))
+        out = apply_curves(
+            out, _parse_adjust_string("curves", adjust["curves"],
+                                      _parse_curves))
     if adjust.get("hsl"):
-        from .grade import apply_hsl
-        out = apply_hsl(out, adjust["hsl"])
+        from .grade import apply_hsl, _parse_hsl
+        out = apply_hsl(
+            out, _parse_adjust_string("hsl", adjust["hsl"], _parse_hsl))
     if adjust.get("color_grading"):
-        from .grade import apply_color_grading
-        out = apply_color_grading(out, adjust["color_grading"])
+        from .grade import apply_color_grading, _parse_color_grading
+        z = _parse_adjust_string("color_grading", adjust["color_grading"],
+                                 _parse_color_grading)
+        out = apply_color_grading(
+            out, shadows=z.get("shadows"), midtones=z.get("midtones"),
+            highlights=z.get("highlights"))
     if adjust.get("vignette"):
-        from .grade import apply_vignette
-        out = apply_vignette(out, adjust["vignette"])
+        from .grade import apply_vignette, _parse_vignette
+        out = apply_vignette(
+            out, *_parse_adjust_string("vignette", adjust["vignette"],
+                                       _parse_vignette))
     if adjust.get("grain"):
-        from .grade import apply_grain
-        out = apply_grain(out, adjust["grain"])
+        from .grade import apply_grain, _parse_grain
+        out = apply_grain(
+            out, *_parse_adjust_string("grain", adjust["grain"],
+                                       _parse_grain))
     if adjust.get("blur", 0) > 0:
         radius = max(0.1, min(50.0, adjust["blur"]))
         if out.mode not in ("RGB", "RGBA", "L"):
