@@ -1128,7 +1128,9 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
                     raise MaskError(
                         f"mask_adjust references unknown mask {name!r} "
                         f"(defined: {','.join(specs) or 'none'})")
-                m = render_mask(spec, img.width, img.height, img=img)
+                # refs: combo masks (v1.8) resolve their referenced names
+                m = render_mask(spec, img.width, img.height, img=img,
+                                refs=specs)
                 img = apply_local(img, m, adjust)
 
         # ── Denoise (SCUNet plugin provider preferred, else opencv NLM) ─────

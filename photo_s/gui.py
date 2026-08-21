@@ -537,6 +537,9 @@ STRINGS = {
         "mask_linear": "线性渐变",
         "mask_radial": "径向椭圆",
         "mask_color": "颜色范围",
+        "mask_brush": "笔刷",
+        "mask_brush_size": "笔刷半径（相对短边）",
+        "mask_brush_clear": "清空笔迹",
         "mask_feather": "羽化",
         "mask_invert": "反相",
         "mask_params": "参数",
@@ -1108,6 +1111,9 @@ STRINGS = {
         "mask_linear": "Linear gradient",
         "mask_radial": "Radial ellipse",
         "mask_color": "Color range",
+        "mask_brush": "Brush",
+        "mask_brush_size": "Brush radius (rel. short side)",
+        "mask_brush_clear": "Clear strokes",
         "mask_feather": "Feather",
         "mask_invert": "Invert",
         "mask_params": "Params",
@@ -3426,7 +3432,8 @@ class PhotoSApp:
                                 state="readonly", values=(
                                     self._t("mask_linear"),
                                     self._t("mask_radial"),
-                                    self._t("mask_color")))
+                                    self._t("mask_color"),
+                                    self._t("mask_brush")))
         type_box.grid(row=1, column=1, sticky="w", padx=(8, 0))
 
         param_lbls = [tk.Label(editor, text="", font=FONT_SMALL,
@@ -3446,18 +3453,67 @@ class PhotoSApp:
             "color": ("r", "g", "b", "tol"),
         }
 
+        # ── brush: draw on a small canvas, dots stored as (x, y, r) ──
+        m_brush_points = []  # list of (x_rel, y_rel, r_rel)
+        _brush_r = tk.DoubleVar(value=0.06)  # radius as fraction of short side
+        _brush_canvas = None
+
         def _type_key():
             for key, label in (("linear", "mask_linear"),
                                ("radial", "mask_radial"),
-                               ("color", "mask_color")):
+                               ("color", "mask_color"),
+                               ("brush", "mask_brush")):
                 if m_type.get() == self._t(label):
                     return key
             return "linear"
 
         def _sync_type(*_):
             key = _type_key()
+            if key == "brush":
+                for w in param_widgets + param_lbls:
+                    w.grid_remove()
+                _brush_canvas.grid()
+                return
+            for w in param_widgets + param_lbls:
+                w.grid()
+            _brush_canvas.grid_remove()
             for i, lbl in enumerate(_PARAM_LABELS[key]):
                 param_lbls[i].config(text=lbl)
+
+        def _brush_paint(evt):
+            """Collect a dot at the canvas position (relative 0-1 coords)."""
+            cw = max(1, _brush_canvas.winfo_width())
+            ch = max(1, _brush_canvas.winfo_height())
+            x, y = evt.x / cw, evt.y / ch
+            x, y = max(0.0, min(1.0, x)), max(0.0, min(1.0, y))
+            r = max(0.005, min(0.5, _brush_r.get()))
+            m_brush_points.append((round(x, 4), round(y, 4), r))
+            rad = max(2, r * min(cw, ch))
+            _brush_canvas.create_oval(evt.x - rad, evt.y - rad,
+                                      evt.x + rad, evt.y + rad,
+                                      fill="#ff4444", outline="")
+
+        def _brush_clear():
+            m_brush_points.clear()
+            _brush_canvas.delete("all")
+
+        _brush_canvas = tk.Canvas(editor, width=180, height=120,
+                                  bg=COLORS["card"], highlightthickness=1,
+                                  highlightbackground=COLORS["border"])
+        _brush_canvas.grid(row=2, column=0, columnspan=2, sticky="w")
+        _brush_canvas.bind("<B1-Motion>", _brush_paint)
+        _brush_canvas.bind("<Button-1>", _brush_paint)
+        tk.Label(editor, text=self._t("mask_brush_size"), font=FONT_TINY,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=3, column=0, sticky="w")
+        ttk.Scale(editor, from_=0.01, to=0.3, variable=_brush_r).grid(
+            row=3, column=1, sticky="ew", padx=(8, 0))
+        FlatButton(editor, text=self._t("mask_brush_clear"),
+                   command=_brush_clear,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=6, pady=1, border_color=COLORS["border"]).grid(
+            row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         type_box.bind("<<ComboboxSelected>>", _sync_type)
         _sync_type()
@@ -3513,18 +3569,25 @@ class PhotoSApp:
                 base = PILImage.new("RGB", (360, 240), (60, 60, 60))
             try:
                 key = _type_key()
-                vals = []
-                for var in m_params:
-                    v = float(var.get())
-                    vals.append(v)
-                params = (int(round(vals[0])), int(round(vals[1])),
-                          int(round(vals[2])),
-                          max(0.02, vals[3] if len(vals) > 3 else 0.15)) \
-                    if key == "color" else tuple(vals[:4])
-                from .mask import MaskSpec
-                spec = MaskSpec(key, params,
-                                feather=m_feather.get() / 100.0,
-                                invert=m_invert.get())
+                if key == "brush":
+                    if not m_brush_points:
+                        raise ValueError("no dots")
+                    from .mask import MaskSpec
+                    spec = MaskSpec("brush", tuple(m_brush_points),
+                                    feather=0.0, invert=m_invert.get())
+                else:
+                    vals = []
+                    for var in m_params:
+                        v = float(var.get())
+                        vals.append(v)
+                    params = (int(round(vals[0])), int(round(vals[1])),
+                              int(round(vals[2])),
+                              max(0.02, vals[3] if len(vals) > 3 else 0.15)) \
+                        if key == "color" else tuple(vals[:4])
+                    from .mask import MaskSpec
+                    spec = MaskSpec(key, params,
+                                    feather=m_feather.get() / 100.0,
+                                    invert=m_invert.get())
                 m = render_mask(spec, base.width, base.height, img=base)
                 overlay = PILImage.new("RGB", base.size, (255, 40, 40))
                 out = PILImage.blend(base, overlay, 0.45)
@@ -3552,6 +3615,12 @@ class PhotoSApp:
 
         def _read_form():
             key = _type_key()
+            if key == "brush":
+                if not m_brush_points:
+                    raise ValueError("no brush dots")
+                return (m_name.get().strip() or f"mask{len(specs) + 1}",
+                        "brush", list(m_brush_points), 0.0, m_invert.get(),
+                        {})
             vals = [float(v.get()) for v in m_params]
             if key == "color":
                 params = (int(round(max(0, min(255, vals[0])))),
@@ -3582,8 +3651,20 @@ class PhotoSApp:
             m_name.set(name)
             m_type.set(self._t({"linear": "mask_linear",
                                 "radial": "mask_radial",
-                                "color": "mask_color"}[kind]))
+                                "color": "mask_color",
+                                "brush": "mask_brush"}[kind]))
             _sync_type()
+            if kind == "brush":
+                m_brush_points[:] = [tuple(p) for p in params]
+                _brush_canvas.delete("all")
+                for x, y, r in m_brush_points:
+                    cw = max(1, _brush_canvas.winfo_width())
+                    ch = max(1, _brush_canvas.winfo_height())
+                    rad = max(2, r * min(cw, ch))
+                    _brush_canvas.create_oval(x * cw - rad, y * ch - rad,
+                                              x * cw + rad, y * ch + rad,
+                                              fill="#ff4444", outline="")
+                return
             for i in range(4):
                 m_params[i].set(str(params[i]) if i < len(params) else "0")
             m_feather.set(feather * 100)
@@ -3592,7 +3673,10 @@ class PhotoSApp:
                 var.set(adjusts.get(name, {}).get(k, 0.0))
 
         def _add():
-            name, key, params, feather, invert, adjust = _read_form()
+            try:
+                name, key, params, feather, invert, adjust = _read_form()
+            except ValueError:
+                return
             specs.append((name, key, params, feather, invert))
             if adjust:
                 adjusts[name] = adjust
@@ -3604,8 +3688,11 @@ class PhotoSApp:
             sel = lst.curselection()
             if not sel:
                 return
-            old = specs[sel[0]][0]
-            name, key, params, feather, invert, adjust = _read_form()
+            try:
+                old = specs[sel[0]][0]
+                name, key, params, feather, invert, adjust = _read_form()
+            except ValueError:
+                return
             specs[sel[0]] = (name, key, params, feather, invert)
             if old in adjusts:
                 del adjusts[old]
@@ -3656,7 +3743,11 @@ class PhotoSApp:
             return str(int(v)) if v == int(v) else str(v)
         mask_segs = []
         for name, kind, params, feather, invert in specs:
-            seg = f"{name}:{kind}:" + ",".join(_n(p) for p in params)
+            if kind == "brush":
+                seg = (f"{name}:brush:" + "|".join(
+                    f"{_n(x)},{_n(y)},{_n(r)}" for x, y, r in params))
+            else:
+                seg = f"{name}:{kind}:" + ",".join(_n(p) for p in params)
             if feather:
                 seg += f",feather={_n(feather)}"
             if invert:

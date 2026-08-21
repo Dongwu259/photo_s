@@ -16,16 +16,24 @@
 | v1.6.0 | LR 方向调色 | `photo_s/grade.py` 11 算法（点曲线 PCHIP/手动色阶/自然饱和度/三向颜色分级/WB tint/HSL 分色/清晰度·纹理/去雾/暗角/颗粒，纯 numpy+PIL 零依赖）+ 3 个 LUT/MCP bug 修复 + 四层接线（CLI 11 flag/REST 自动/MCP 33 参数/GUI 11 控件）+ 紧凑字符串建模（REST/preset 零胶水）|
 | v1.6.1 | GUI 大增强 | Lightroom 式调色编辑器（可拖拽曲线 RGB+R/G/B/复位、3 色轮+亮度条、HSL 编辑器）+ 设置面板分类 Tab（输出/调整/效果/元数据/选项）+ 区块折叠 + 工具栏分组瘦身 + 缩略图（异步懒加载）/布局记忆/过滤框/进度 ETA/重做；color_grading 支持每区亮度 |
 | v1.7.0 | 局部调整 + 镜头矫正 + 感知反馈 | **已发布 2026-08-21**：`photo_s/mask.py` 命名蒙版（linear/radial/color 相对坐标 0-1，紧凑字符串 `masks`/`mask_adjust`，v1.8 AI/笔刷语法预留）+ 蒙版内 11 项标量局部调整；`point_color` 点颜色（取样色中心软掩码）；`photo_s/lens.py` 手动镜头矫正（畸变 k1/去暗角/消 CA，纯 numpy 双线性）；`analyze` 感知反馈（直方图/通道统计/色温估计/曝光/模糊，CLI+REST+MCP 19 工具）——`analyze → 调参 → process → analyze` 的 LLM 闭环；GUI 镜头/点颜色/蒙版编辑器（红色叠加预览）|
-| v1.7.1 | AI 修图基础设施（阶段 1+2 全落地） | **已发布 2026-08-21**：`photo_s/lrxmp.py` LR 数据桥接（XMP/catalog 明文快照解析 → ProcessOptions + 覆盖分类）+ `lr-scan`（自动发现 .lrcat/.xmp → 覆盖报告 + `--export-dir` 训练 JSONL + `--render-dir` rawpy before 图，一条命令产出完整训练包）+ `lr-train`/`lr-predict`（岭回归自动基调，纯 numpy）+ `lr-recipes`（KMeans 配方库）+ `lr-similar`（内容特征 kNN）+ `lr-eval`（教师评测集，PhotoS 自渲染 after）+ `diff`/`audit`/`preview`（版本对比/质量闸门/视觉快照）+ `analyze --grid` 区域反馈 + MCP `batch_start/status/cancel` 异步任务（19→25 工具）+ `batch --trace` 轨迹日志 |
+| v1.7.1 | AI 修图基础设施（阶段 1+2 全落地） | **已发布 2026-08-21**：`photo_s/lrxmp.py` LR 数据桥接（XMP/catalog 明文快照解析 → ProcessOptions + 覆盖分类）+ `lr-scan`（自动发现 .lrcat/.xmp → 覆盖报告 + `--export-dir` 训练 JSONL + `--render-dir` rawpy before 图，一条命令产出完整训练包）+ `lr-train`/`lr-predict`（岭回归自动基调，纯 numpy；**lr-predict 自动识别 CLIP+MLP npz**）+ `lr-recipes`（KMeans 配方库）+ `lr-similar`（内容特征 kNN）+ `lr-eval`（教师评测集，PhotoS 自渲染 after）+ `diff`/`audit`/`preview`（版本对比/质量闸门/视觉快照）+ `analyze --grid` 区域反馈 + MCP `batch_start/status/cancel` 异步任务（19→25 工具）+ `batch --trace` 轨迹日志 |
+| v1.8.0 | AI 识别蒙版 + 笔刷 + 组合算子 | **代码完成未发版（2026-08-21）**：`photo_s/segmask.py`（U2Netp subject / PP-HumanSeg person / YOLOv8n-seg object:label，cv2.dnn + modelstore 权重下载校验，OpenCV 5 引擎自动回退）+ 笔刷蒙版 `brush:x,y,r|x,y,r`（GUI 画布绘制）+ 组合算子 `combo:A&B`/`combo:A-B` + 复杂字符串参数局部化（curves/hsl/color_grading/vignette/grain 进 mask_adjust，`{}` 包裹）。1049 测试全绿 |
 
 ## 规划中
 
 ### v1.8.0（AI 识别蒙版 + 笔刷 -- 主题：智能局部调整，方向已定）
 
-- [ ] **AI 分割蒙版**：`subject:` / `person:` / `object:label` 三类，**opencv DNN + ONNX 小权重**（复用 enhance extra 的 cv2.dnn 推理，不引新依赖；权重经 modelstore 下载+sha256+缓存，候选 U2Netp ~4.7MB / PP-HumanSeg ~5MB / YOLOv8n-seg ~6.7MB，均在用户网络安全线内）。蒙版语法 v1.7 已预留（解析即报清晰错误）。
-- [ ] **笔刷蒙版**：`brush:x,y,r;x,y,r;...` 折线序列化，GUI 画布绘制 -> 紧凑字符串，批量语义同几何蒙版。
-- [ ] 蒙版组合算子：多 mask 交集（`&`）/差集；v1.7 仅并集 + invert。
-- [ ] 复杂字符串参数局部化（curves/HSL 进蒙版内调整，v1.7 局部调整仅标量集）。
+> **实施（2026-08-21，已 push 未发版）**：四项全部落地，**1049 测试全绿**。
+> 权重已选定并算好 sha256：U2Netp 4.6MB + PP-HumanSeg 6.2MB + YOLOv8n-seg
+> **fp16 7.0MB**（EdgeFirst fp32 13.9MB 超网络切断线，转 fp16 后安全；cv2.dnn
+> 实测 fp16 可用，结果与 fp32 一致）。**发布时须上传三个 onnx 到 v1.8.0
+> GitHub release 附件**（URL 已在 segmask.py WEIGHTS 写死为
+> `photo_s/releases/download/v1.8.0/*.onnx`，sha256 已 pin）。
+
+- [x] **AI 分割蒙版**：`subject:`（U2Netp 显著性）/ `person:`（PP-HumanSeg 人像）/ `object:label`（YOLOv8n-seg，COCO 80 类）三类；新 `photo_s/segmask.py`（cv2.dnn 惰性导入 + modelstore 下载/校验/缓存 + 纯 numpy YOLO mask 解码+NMS）；**OpenCV 5.x 新图引擎 forward 失败自动回退经典引擎**（Paddle 导出模型 residual bug）；缺 cv2/权重抛清晰错误不静默。
+- [x] **笔刷蒙版**：`brush:x,y,r|x,y,r|...`（`|` 分隔点，避免与 masks 的 `;` 冲突）；渲染为点间胶囊并集（纯 numpy）；GUI 蒙版编辑器加笔刷画布（拖动绘制 -> 相对坐标紧凑字符串，可清空/调半径）。
+- [x] 蒙版组合算子：`combo:A&B`（交集）/ `combo:A-B`（差集），引用已命名蒙版并替换之；`render_mask` 加 `refs` 参数，engine/GUI 传入全部 spec。
+- [x] 复杂字符串参数局部化：`mask_adjust` 值支持 `curves={...}`/`hsl={...}`/`color_grading={...}`/`vignette={...}`/`grain={...}`（`{}` 包裹避免分隔符冲突，复用 grade.py 函数，蒙版内与全局数值一致）。
 
 ### v1.9.0+（AI 智能修图 —— 主题：个人修图数据驱动的全自动调色，方向已定 2026-08-21）
 

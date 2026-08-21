@@ -61,7 +61,7 @@ pip install "photo-s-tools[mcp]"     # + MCP server (Python 3.10+)
 | Presets | `photo-s preset save NAME --quality 80 ...` then `photo-s batch ... --preset NAME` | saves full option set |
 | Speed benchmark | `photo-s bench --dir DIR -j 1,2,4,8 [--evaluate]` | temp output, source untouched |
 | LR-style grading | `photo-s batch PATHS... --curves "0,0;128,140;255,255" [--levels --vibrance --hsl --point-color --clarity --dehaze]` | compact-string params, see `batch --help` |
-| Local masks + adjustments | `photo-s batch PATHS... --masks "sky:linear:0.5,0,0.5,1,feather=0.3" --mask-adjust "sky:exposure=-0.7"` | named linear/radial/color masks, relative 0-1 coords |
+| Local masks + adjustments | `photo-s batch PATHS... --masks "sky:linear:0.5,0,0.5,1,feather=0.3" --mask-adjust "sky:exposure=-0.7"` | named linear/radial/color/brush masks + AI masks (`subject` / `person` / `object:car`) + combos (`combo:A&B`); mask_adjust also takes curves/hsl/vignette strings `{...}` |
 | Lens correction | `photo-s batch PATHS... --lens-distort 0.15 [--lens-vignette "0.3,0.4" --lens-ca "0.999,1.001"]` | manual distortion / vignette / CA fix |
 | Perceptual analysis | `photo-s analyze PATHS... --json` | histograms, channel stats, WB lean, exposure, blur - the feedback half of closed-loop grading |
 | Visual snapshot | `photo-s preview IMG [--max-dim 1024] [--json]` | downscaled JPEG + histogram PNG (base64) - pixels for multimodal agents |

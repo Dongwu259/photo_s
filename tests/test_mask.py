@@ -58,12 +58,33 @@ def test_parse_color_defaults_and_tol_kw():
     assert s2.params[3] == pytest.approx(0.4)
 
 
-def test_parse_rejects_bad_type_and_v18_reserved():
+def test_parse_rejects_bad_type():
     with pytest.raises(MaskError, match="unknown mask type"):
         parse_masks("linearx:0,0,0,1")
-    for t in ("subject", "person", "object", "brush"):
-        with pytest.raises(MaskError, match="v1.8"):
-            parse_masks(f"{t}:whatever")
+    with pytest.raises(MaskError, match="unknown mask type"):
+        parse_masks("gradient:0,0,1,0")
+
+
+def test_v18_types_parse():
+    # v1.8 types now parse (AI/brush/combo); params are validated per type.
+    assert parse_masks("main:subject")[0].kind == "subject"
+    assert parse_masks("people:person")[0].kind == "person"
+    assert parse_masks("car:object:car")[0].params == ("car",)
+    b = parse_masks("stroke:brush:0.5,0.5,0.05|0.6,0.5,0.05")[0]
+    assert b.kind == "brush" and len(b.params) == 2
+    c = parse_masks("both:combo:a&b")[0]
+    assert c.kind == "combo" and c.params == ("a", "&", "b")
+    d = parse_masks("diff:combo:a-b")[0]
+    assert d.params == ("a", "-", "b")
+    # invalid params per type still raise
+    with pytest.raises(MaskError, match="takes no params"):
+        parse_masks("subject:x")
+    with pytest.raises(MaskError, match="COCO label"):
+        parse_masks("object:")
+    with pytest.raises(MaskError, match="needs at least one dot"):
+        parse_masks("brush:")
+    with pytest.raises(MaskError, match="needs 'A&B' or 'A-B'"):
+        parse_masks("combo:abc")
 
 
 def test_parse_rejects_missing_params():
@@ -248,6 +269,76 @@ def test_adjust_keys_cover_documented_set():
     assert set(ADJUST_KEYS) == {
         "exposure", "brightness", "contrast", "saturation", "vibrance",
         "clarity", "texture", "sharpen", "temp", "tint", "blur"}
+
+
+# ── v1.8: brush / combo / string adjustments ─────────────────────────────────
+
+def test_brush_renders_stroke_union():
+    spec = parse_masks("stroke:brush:0.5,0.5,0.05|0.6,0.5,0.05")[0]
+    m = render_mask(spec, 100, 100)
+    assert m.shape == (100, 100)
+    assert m[50, 50] > 0.9       # first dot center
+    assert m[50, 55] > 0.9       # second dot center
+    assert m[50, 52] > 0.3       # capsule between dots
+    assert m[5, 5] < 0.05        # far away
+
+
+def test_brush_bad_dot_raises():
+    with pytest.raises(MaskError, match="must be 'x,y,r'"):
+        parse_masks("brush:0.5,0.5")
+    with pytest.raises(MaskError, match="radius must be in"):
+        parse_masks("brush:0.5,0.5,0.9")
+    with pytest.raises(MaskError, match="out of range"):
+        parse_masks("brush:1.5,0.5,0.05")
+
+
+def test_combo_intersection_and_difference():
+    specs = parse_masks("a:linear:0,0,1,0; b:linear:0,1,1,1; both:combo:a&b")
+    refs = {s.name: s for s in specs}
+    a = render_mask(refs["a"], 50, 50, refs=refs)
+    b = render_mask(refs["b"], 50, 50, refs=refs)
+    both = render_mask(refs["both"], 50, 50, refs=refs)
+    assert both[25, 25] == pytest.approx(min(a[25, 25], b[25, 25]))
+    diff = parse_masks("d:combo:a-b")
+    d = render_mask(diff[0], 50, 50, refs={**refs, "d": diff[0]})
+    assert d[25, 25] == pytest.approx(max(a[25, 25] - b[25, 25], 0.0))
+
+
+def test_combo_unknown_reference_raises():
+    specs = parse_masks("both:combo:a&b; x:linear:0,0,1,0")
+    refs = {s.name: s for s in specs if s.name == "x"}
+    with pytest.raises(MaskError, match="unknown mask"):
+        render_mask(specs[0], 10, 10, refs=refs)
+
+
+def test_v18_to_string_roundtrip():
+    for s in ("main:subject", "people:person", "car:object:car",
+              "stroke:brush:0.5,0.5,0.05|0.6,0.5,0.05",
+              "both:combo:a&b", "diff:combo:a-b"):
+        spec = parse_masks(s)[0]
+        assert parse_masks(spec.to_string())[0].to_string() == spec.to_string()
+
+
+def test_mask_adjust_string_values():
+    d = parse_mask_adjust(
+        "sky:curves={r:0,0;128,140;255,255},hsl={red:0.1,0.2,0.0}")
+    assert d["sky"]["curves"] == "r:0,0;128,140;255,255"
+    assert d["sky"]["hsl"] == "red:0.1,0.2,0.0"
+    # plain scalars still work alongside
+    d2 = parse_mask_adjust("sky:exposure=-0.5,curves={r:0,0;255,255}")
+    assert d2["sky"]["exposure"] == -0.5
+    assert d2["sky"]["curves"] == "r:0,0;255,255"
+    # missing braces: ';' inside value would split - reject as unknown key
+    with pytest.raises(MaskError):
+        parse_mask_adjust("sky:curves=r:0,0;128,140")
+
+
+def test_apply_local_curves_under_mask():
+    img = _solid(8, 8)
+    mask = np.full((8, 8), 1.0, dtype=np.float32)
+    # curves pushing highlights down: 120 -> darker under full mask
+    out = apply_local(img, mask, {"curves": "r:0,0;200,100;255,255"})
+    assert np.asarray(out)[0, 0, 0] < 110
 
 
 # ── Engine pipeline integration ──────────────────────────────────────────────
