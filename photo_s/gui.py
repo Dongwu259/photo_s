@@ -3206,7 +3206,9 @@ class PhotoSApp:
             path = st["files"][st["idx"]]
             base = None
             try:
-                base = PILImage.open(path).convert("RGB")
+                # _open_image_safe：PIL 开不了 RAW（.ARW 等），
+                # 回退引擎加载器（rawpy/HEIC）——摄影师工作流主力格式
+                base = _open_image_safe(path).convert("RGB")
                 base.thumbnail((max_w, max_h), PILImage.LANCZOS)
             except Exception:
                 base = PILImage.new("RGB", (max_w, max_h), (40, 40, 40))
@@ -4301,7 +4303,9 @@ class PhotoSApp:
             path = files[idx[0]]
             base = None
             try:
-                base = PILImage.open(path).convert("RGB")
+                # _open_image_safe：RAW 回退引擎加载器（rawpy），
+                # 摄影师工作流主力格式在画布上正常显示
+                base = _open_image_safe(path).convert("RGB")
                 base.thumbnail((700, 460), PILImage.LANCZOS)
             except Exception:
                 base = PILImage.new("RGB", (700, 460), (40, 40, 40))

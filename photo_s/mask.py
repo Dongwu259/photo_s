@@ -546,7 +546,9 @@ def render_mask(spec: MaskSpec, w: int, h: int,
         # GUI 直接构造 MaskSpec 时可能拼错 kind —— 明确报错而非
         # 落入 color 分支给出误导信息
         raise MaskError(f"unknown mask kind {spec.kind!r}")
-    if spec.feather > 0 and spec.kind not in ("color", "combo"):
+    # radial 的软边已由其椭圆公式（inner = 1 - feather）承担——再加
+    # 高斯会双倍羽化；linear/brush/AI 的 feather 由这里的高斯承担
+    if spec.feather > 0 and spec.kind not in ("color", "combo", "radial"):
         mask = _feather_mask(mask, spec.feather, w, h)
     if spec.invert:
         mask = 1.0 - mask

@@ -1233,8 +1233,14 @@ def _predict_clip_mlp(img, model) -> np.ndarray:
                   if "clip_model" in model.files else "ViT-L-14")
     pretrained = (str(model["clip_pretrained"])
                   if "clip_pretrained" in model.files else "openai")
-    clip, _, preprocess = open_clip.create_model_and_transforms(
-        clip_model, pretrained=pretrained)
+    try:
+        clip, _, preprocess = open_clip.create_model_and_transforms(
+            clip_model, pretrained=pretrained)
+    except Exception as e:
+        # open_clip 预训练权重首次使用联网下载，失败是裸 urllib 异常
+        raise LrError(
+            f"CLIP 预训练权重加载失败（{clip_model}/{pretrained}，"
+            f"首次使用需联网下载）: {e}") from None
     clip.eval()
     with torch.no_grad():
         f = clip.encode_image(preprocess(img.convert("RGB")).unsqueeze(0))

@@ -36,7 +36,12 @@ def train(args) -> None:
                          "pip install torch open-clip-torch")
     import numpy as np
     from PIL import Image
-    from photo_s.lrxmp import TARGETS, load_training_data
+    try:
+        from photo_s.lrxmp import TARGETS, load_training_data
+    except ModuleNotFoundError:
+        raise SystemExit(
+            "需要 photo-s-tools 包：pip install photo-s-tools "
+            "（或从仓库根目录运行：python tools/train_tone_torch.py）")
 
     recs = _records(args.data)
     X, Y, metas, _stats = load_training_data(recs, args.images)
@@ -105,7 +110,12 @@ def train(args) -> None:
 
 
 def predict(args) -> None:
-    from photo_s.lrxmp import predict_auto_tone
+    try:
+        from photo_s.lrxmp import predict_auto_tone
+    except ModuleNotFoundError:
+        raise SystemExit(
+            "需要 photo-s-tools 包：pip install photo-s-tools "
+            "（或从仓库根目录运行：python tools/train_tone_torch.py）")
 
     print(json.dumps(predict_auto_tone(args.predict, args.model),
                      ensure_ascii=False, indent=2))

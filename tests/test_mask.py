@@ -374,6 +374,18 @@ def test_unknown_kind_render_raises_clear_error():
         render_mask(MaskSpec("warp", (), 0.0, False, "w"), 8, 8)
 
 
+def test_radial_feather_single_soft_edge():
+    # radial 的软边由其椭圆公式（inner = 1 - feather）承担，不叠加
+    # 高斯模糊（双倍羽化会与 linear/brush 的 feather 语义不一致）
+    img = _solid(100, 100)
+    spec = parse_masks("r:radial:0.5,0.5,0.3,0.3,feather=0.3")[0]
+    m = render_mask(spec, 100, 100, img=img)
+    assert m[50, 50] == 1.0               # 圆心全值
+    assert m[0, 0] < 0.01                 # 角落近 0
+    band = m[(m > 0.05) & (m < 0.95)]
+    assert band.size > 0                  # 有平滑过渡带
+
+
 def test_feather_keyword_wins_over_positional():
     s = parse_masks("r:linear:0,0,1,1,0.9,feather=0.2")[0]
     assert s.feather == pytest.approx(0.2)
