@@ -194,3 +194,40 @@ def test_scan_catalog(tmp_path):
 def test_scan_catalog_missing_db():
     with pytest.raises(LrError):
         scan_catalog("/nonexistent/x.lrcat")
+
+
+# ---------------------------------------------------------------- 发现 + 报告
+
+def test_discover_inputs(tmp_path):
+    cat = tmp_path / "sub" / "1.lrcat"
+    cat.parent.mkdir()
+    cat.write_text("")
+    (tmp_path / "a.xmp").write_text("")
+    (tmp_path / ".hidden").mkdir()
+    (tmp_path / ".hidden" / "b.xmp").write_text("")
+    catalogs, xmp = lrxmp.discover_inputs([str(tmp_path)], max_depth=3)
+    assert catalogs == [str(cat)]
+    assert xmp == [str(tmp_path / "a.xmp")]  # 隐藏目录跳过
+    assert lrxmp.discover_inputs([str(cat)])[0] == [str(cat)]  # 文件直收
+
+
+def test_scan_and_report_end_to_end(tmp_path):
+    db = _make_catalog(tmp_path)
+    (tmp_path / "b.xmp").write_text(XMP)
+    report, records = lrxmp.scan_and_report([str(tmp_path)])
+    s = report["summary"]
+    assert s["photos"] == 1
+    assert s["xmp_photos"] == 1
+    assert s["edited"] == 2  # catalog 已编辑 1 + XMP 已编辑 1
+    assert report["param_usage"]["Exposure2012"] == 2
+    assert isinstance(report["unmapped"], dict)
+    # 训练记录：catalog 记录带 options
+    cat_recs = [r for r in records if r["source"] == "catalog"]
+    assert len(cat_recs) == 1
+    assert cat_recs[0]["options"]["exposure"] == pytest.approx(0.5)
+    assert cat_recs[0]["edited"] is True
+    # 导出
+    out = lrxmp.write_export(records, str(tmp_path / "out"))
+    lines = open(out, encoding="utf-8").read().strip().splitlines()
+    assert len(lines) == 2
+    assert '"edited": true' in lines[0]

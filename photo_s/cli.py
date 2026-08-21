@@ -1670,6 +1670,22 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___json'),
     )
 
+    # ── lr-scan subcommand (Lightroom data bridge report, v1.9.0) ──────────
+    lr_scan_parser = subparsers.add_parser(
+        "lr-scan", help=_t('cmd_lr_scan'),
+    )
+    lr_scan_parser.add_argument(
+        "paths", nargs="*", help=_t('help___lr_paths'),
+    )
+    lr_scan_parser.add_argument(
+        "--export-dir", type=str, default=None, metavar="DIR",
+        help=_t('help___lr_export'),
+    )
+    lr_scan_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
     # ── bench subcommand ────────────────────────────────────────────────────
     bench_parser = subparsers.add_parser(
         "bench", help=_t('cmd_bench'),
@@ -1765,7 +1781,7 @@ def run_cli(args: List[str] = None) -> int:
                  info_parser, rename_parser, check_parser, sheet_parser,
                  cull_parser, select_parser, hdr_parser, blurfaces_parser,
                  hash_parser, gallery_parser, bench_parser, config_parser,
-                 serve_parser, mcp_parser,
+                 serve_parser, mcp_parser, analyze_parser, lr_scan_parser,
                  preset_save, preset_load, preset_delete,
                  plugin_install, plugin_uninstall, plugin_info, plugin_fetch,
                  config_init, config_show):
@@ -2555,6 +2571,44 @@ def run_cli(args: List[str] = None) -> int:
                       f"  kelvin~{wb['kelvin_estimate']}"
                       f"  over={ex['overexposed_pct']}%"
                       f"  under={ex['underexposed_pct']}%")
+        return 0
+
+    if parsed.command == "lr-scan":
+        from .lrxmp import scan_and_report, write_export
+        import json
+        import time
+        t0 = time.monotonic()
+        report, records = scan_and_report(parsed.paths)
+        export_path = None
+        if getattr(parsed, 'export_dir', None):
+            export_path = write_export(records, parsed.export_dir)
+        if getattr(parsed, 'json', False):
+            print(json.dumps(versioned(report), indent=2, ensure_ascii=False))
+        else:
+            s = report["summary"]
+            print(_t("msg_lr_header").format(sec=round(time.monotonic() - t0, 1)))
+            print(_t("msg_lr_catalogs"))
+            for c in report["catalogs"]:
+                print(f"  {c['name']:<10}{c['photos']:>6}{c['edited']:>7}"
+                      f"{c['v1_8']:>6}{c['point_color']:>7}")
+            print(_t("msg_lr_summary").format(
+                photos=s["photos"], xmp=s["xmp_photos"], edited=s["edited"]))
+            print(_t("msg_lr_params"))
+            for k, v in list(report["param_usage"].items())[:15]:
+                print(f"  {k:<30} {v:>4}")
+            if report["mask_kinds"]:
+                print(_t("msg_lr_masks"))
+                for k, v in report["mask_kinds"].items():
+                    print(f"  {k:<10} {v:>4}")
+            print(_t("msg_lr_tools"))
+            for k, v in list(report["tool_usage"].items())[:12]:
+                print(f"  {k:<26} {v:>5}")
+            if report["unmapped"]:
+                print(_t("msg_lr_unmapped"))
+                for k, v in report["unmapped"].items():
+                    print(f"  {k:<28} {v:>4}")
+            if export_path:
+                print(_t("msg_lr_export").format(path=export_path))
         return 0
 
     if parsed.command == "bench":

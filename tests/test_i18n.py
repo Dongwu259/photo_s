@@ -242,7 +242,7 @@ class TestCliRendering:
         for cmd in ("compress", "convert", "batch", "exif", "preset", "plugin",
                     "watch", "dedup", "info", "rename", "check", "contact-sheet",
                     "cull", "select", "hdr", "blurfaces", "hash", "gallery",
-                    "analyze", "bench", "config", "serve", "mcp"):
+                    "analyze", "lr-scan", "bench", "config", "serve", "mcp"):
             capsys.readouterr()  # drain
             with pytest.raises(SystemExit):
                 run_cli([cmd, "--language", "en", "--help"])

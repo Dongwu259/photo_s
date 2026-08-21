@@ -1,5 +1,9 @@
 """photo_s/lrxmp.py — Lightroom 数据桥接（个人修图数据管线，v1.9.0 阶段 1）
 
+CLI 入口：``photo-s lr-scan [paths...] [--export-dir DIR] [--json]``——自动发现
+catalog/XMP、聚合覆盖报告、可选导出训练数据 JSONL（每张已编辑照片的
+``options`` = PhotoS 参数即训练标签）。
+
 纯 stdlib 零依赖。四层：
 
 1. :func:`parse_xmp_sidecar` — XMP sidecar 解析（LR 目录勾选「自动写入 XMP」
@@ -55,6 +59,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -64,7 +69,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 __all__ = [
     "LrError", "parse_xmp_sidecar", "parse_develop_blob", "scan_catalog",
-    "crs_to_options", "coverage", "HSL_COLORS", "LOCAL_MAP",
+    "crs_to_options", "coverage", "scan_and_report", "discover_inputs",
+    "write_export", "HSL_COLORS", "LOCAL_MAP",
 ]
 
 _XMP_CRS = "{http://ns.adobe.com/camera-raw-settings/1.0/}"
@@ -496,6 +502,15 @@ _STRUCTURAL_KEYS = frozenset((
     "UprightVersion", "UprightTransformCount",
     "DefringePurpleHueLo", "DefringePurpleHueHi", "DefringeGreenHueLo",
     "DefringeGreenHueHi",
+    # XMP 侧格式支持字段（蒙版几何/相机配置/元数据）
+    "AlreadyApplied", "RawFileName", "Copyright", "Name", "Amount",
+    "ConvertToGrayscale", "LookTable", "OverrideLookVignette",
+    "LensProfileIsEmbedded", "MaskVersion", "ModelVersion", "ReferencePoint",
+    "InputDigest", "InputDigestVersion", "LocalInputDigest",
+    "LocalInputDigestVersion", "MaskDigest", "WholeImageArea", "Origin",
+    "FullMaskSize", "MaskSubType", "MaskSubCategoryID",
+    "ZeroX", "ZeroY", "FullX", "FullY", "Radius", "Flow",
+    "LocalCurveRefineSaturation",
 ))
 # 常写默认值（不等于"编辑"）
 _DEFAULT_VALUES: Dict[str, float] = {
@@ -505,6 +520,7 @@ _DEFAULT_VALUES: Dict[str, float] = {
     "ParametricHighlightSplit": 75.0, "ColorGradeBlending": 50.0,
     "VignetteMidpoint": 50.0, "LuminanceSmoothing": 0.0,
     "SharpenRadius": 1.0, "GrainSize": 25.0,
+    "ColorNoiseReductionDetail": 50.0, "ColorNoiseReductionSmoothness": 50.0,
 }
 
 # 直接映射（→ ProcessOptions 字段）
@@ -528,6 +544,11 @@ _APPROX_KEYS = frozenset((
 _PARTIAL_KEYS = frozenset((
     "LocalPointColors", "LensProfileEnable", "LensProfileName",
     "AutoLateralCA",
+    # XMP 顶层局部调整（真实编辑；与蒙版几何的配对结构待标定）
+    "LocalExposure2012", "LocalBrightness", "LocalContrast2012",
+    "LocalSaturation", "LocalVibrance", "LocalClarity", "LocalTexture",
+    "LocalSharpness", "LocalTemperature", "LocalTint", "LocalShadows2012",
+    "LocalBlacks2012", "LocalHighlights2012", "LocalWhites2012",
 ))
 # 无对应（缺口）
 _UNMAPPED_KEYS = frozenset((
@@ -566,7 +587,7 @@ def coverage(settings: Dict[str, Any], *,
             out["v1_8"].append(f"{name} ({';'.join(kinds) or 'composite'})")
 
     for key, value in settings.items():
-        if key in _STRUCTURAL_KEYS:
+        if key in _STRUCTURAL_KEYS or key.startswith("crd_"):
             continue
         if key in _DEFAULT_VALUES and _f(settings, key) == _DEFAULT_VALUES[key]:
             continue
@@ -683,3 +704,215 @@ def scan_catalog(db_path: str, *, with_history: bool = True,
             rec["settings"] = {}
         records.append(rec)
     return records
+
+
+# ---------------------------------------------------------------- 发现 + 报告
+
+def discover_inputs(paths: Optional[Sequence[str]] = None,
+                    max_depth: int = 5) -> Tuple[List[str], List[str]]:
+    """展开输入为 (.lrcat, .xmp) 列表。
+
+    文件直接采纳；目录递归发现（跳过隐藏目录）。无参数时默认扫
+    ``~/Pictures`` 与 ``~/Desktop``（LR 常见位置），其他机器零配置可跑。
+    """
+    catalogs: List[str] = []
+    xmp: List[str] = []
+    if paths:
+        roots = [os.path.abspath(os.path.expanduser(p)) for p in paths]
+    else:
+        roots = [os.path.join(os.path.expanduser("~"), d)
+                 for d in ("Pictures", "Desktop")]
+    for root in roots:
+        if os.path.isfile(root):
+            if root.endswith(".lrcat"):
+                catalogs.append(root)
+            elif root.lower().endswith(".xmp"):
+                xmp.append(root)
+            continue
+        if not os.path.isdir(root):
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            depth = dirpath[len(root):].count(os.sep)
+            if depth >= max_depth:
+                dirnames[:] = []
+                continue
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            for fn in filenames:
+                if fn.endswith(".lrcat"):
+                    catalogs.append(os.path.join(dirpath, fn))
+                elif fn.lower().endswith(".xmp"):
+                    xmp.append(os.path.join(dirpath, fn))
+    return sorted(set(catalogs)), sorted(set(xmp))
+
+
+def _export_record(r: Dict[str, Any], source: str) -> Dict[str, Any]:
+    """一张照片的训练数据记录：path + options（PhotoS 参数即标签）。"""
+    s = r.get("settings") or {}
+    if s:
+        c = coverage(s, white_balance=r.get("white_balance"))
+        o = crs_to_options(
+            s,
+            image_size=tuple(r["image_size"]) if r.get("image_size") else None,
+            white_balance=r.get("white_balance"))
+    else:
+        c, o = {"edited": False, "mapped": [], "approximate": [],
+                "partial": [], "unmapped": [], "v1_8": []}, {}
+    return {
+        "source": source,
+        "catalog": r.get("catalog"),
+        "path": r["path"],
+        "edited": bool(c["edited"]),
+        "options": o,
+        "image_size": list(r["image_size"]) if r.get("image_size") else None,
+        "white_balance": r.get("white_balance"),
+        "history": r.get("history"),
+        "coverage": {k: len(v) for k, v in c.items()
+                     if isinstance(v, (list, tuple))},
+    }
+
+
+def aggregate_report(catalog_records: Sequence[Dict[str, Any]],
+                     xmp_records: Sequence[Dict[str, Any]],
+                     catalog_paths: Sequence[str]) -> Dict[str, Any]:
+    """聚合覆盖报告（JSON 安全）——lr-scan 的数据核心。"""
+    from collections import Counter
+    param_usage: Counter = Counter()
+    tool_usage: Counter = Counter()
+    mask_kinds: Counter = Counter()
+    approx: Counter = Counter()
+    unmapped: Counter = Counter()
+    total = edited = v18 = pc = failed = 0
+    cat_totals: Dict[str, Dict[str, int]] = {}
+    for cat in catalog_paths:
+        cat_totals[cat] = {"photos": 0, "edited": 0, "v1_8": 0,
+                           "point_color": 0, "failed": 0}
+    # 统计（catalog 记录）
+    for r in catalog_records:
+        total += 1
+        ct = cat_totals.get(r.get("catalog", ""))
+        if ct:
+            ct["photos"] += 1
+        s = r.get("settings")
+        if not s:
+            failed += 1
+            if ct:
+                ct["failed"] += 1
+            continue
+        c = coverage(s, white_balance=r.get("white_balance"))
+        if c["edited"]:
+            edited += 1
+            if ct:
+                ct["edited"] += 1
+        for k in c["mapped"]:
+            if k.startswith("mask:") or k.startswith("local:"):
+                continue
+            param_usage[k] += 1
+        if c["mapped"]:
+            o = crs_to_options(
+                s, image_size=tuple(r["image_size"])
+                if r.get("image_size") else None,
+                white_balance=r.get("white_balance"))
+            for m in o.get("masks", "").split(";"):
+                if m:
+                    mask_kinds[m.split(":")[1]] += 1
+        for k in c["approximate"]:
+            approx[k] += 1
+        for k in c["unmapped"]:
+            unmapped[k] += 1
+        if c["v1_8"]:
+            v18 += 1
+            if ct:
+                ct["v1_8"] += 1
+        if _point_color_tuples(s):
+            pc += 1
+            if ct:
+                ct["point_color"] += 1
+        if r.get("history"):
+            for h in r["history"]:
+                if h["name"] and not h["name"].startswith("导入"):
+                    tool_usage[h["name"]] += 1
+    # 统计（XMP 记录）
+    xmp_edited = 0
+    for r in xmp_records:
+        s = r.get("settings") or {}
+        c = coverage(s, white_balance=r.get("white_balance"))
+        if c["edited"]:
+            xmp_edited += 1
+            edited += 1
+        for k in c["mapped"]:
+            if not (k.startswith("mask:") or k.startswith("local:")):
+                param_usage[k] += 1
+        for k in c["approximate"]:
+            approx[k] += 1
+        for k in c["unmapped"]:
+            unmapped[k] += 1
+        if _point_color_tuples(s):
+            pc += 1
+    return {
+        "inputs": {"catalogs": list(catalog_paths), "xmp_files": len(xmp_records)},
+        "catalogs": [{"name": os.path.basename(os.path.dirname(
+            os.path.dirname(cat))) or cat, **cat_totals[cat]}
+            for cat in catalog_paths],
+        "param_usage": dict(param_usage.most_common()),
+        "tool_usage": dict(tool_usage.most_common()),
+        "mask_kinds": dict(mask_kinds.most_common()),
+        "approximate": dict(approx.most_common()),
+        "unmapped": dict(unmapped.most_common()),
+        "summary": {
+            "photos": total,
+            "xmp_photos": len(xmp_records),
+            "edited": edited,
+            "xmp_edited": xmp_edited,
+            "v1_8_photos": v18,
+            "point_color_photos": pc,
+            "failed": failed,
+            "mapped_fields": sum(param_usage.values()),
+        },
+    }
+
+
+def scan_and_report(paths: Optional[Sequence[str]] = None
+                    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """发现输入 → 扫描/解析 → (报告 dict, 训练数据记录 list)。
+
+    报告与记录均为 JSON 安全（list/tuple 已转）。失败项记入统计不中断。
+    """
+    catalogs, xmp_files = discover_inputs(paths)
+    catalog_records: List[Dict[str, Any]] = []
+    for cat in catalogs:
+        try:
+            recs = scan_catalog(cat)
+        except LrError:
+            recs = [{"path": cat, "settings": None, "history": None,
+                     "image_size": None, "white_balance": None,
+                     "has_masks": False, "has_ai_masks": False,
+                     "has_point_color": False}]
+        for rec in recs:
+            rec["catalog"] = cat
+            catalog_records.append(rec)
+    xmp_records: List[Dict[str, Any]] = []
+    for p in xmp_files:
+        try:
+            s = parse_xmp_sidecar(p)
+        except LrError:
+            s = {}
+        xmp_records.append({
+            "path": p[:-4] if p.lower().endswith(".xmp") else p,
+            "image_size": None, "white_balance": s.get("WhiteBalance"),
+            "settings": s, "history": None,
+            "has_masks": False, "has_ai_masks": False, "has_point_color": False,
+        })
+    report = aggregate_report(catalog_records, xmp_records, catalogs)
+    records = ([_export_record(r, "catalog") for r in catalog_records]
+               + [_export_record(r, "xmp") for r in xmp_records])
+    return report, records
+
+
+def write_export(records: Sequence[Dict[str, Any]], out_dir: str) -> str:
+    """写训练数据 JSONL（每行一张照片：path + options）→ 返回文件路径。"""
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, "lr_records.jsonl")
+    with open(out, "w", encoding="utf-8") as f:
+        for rec in records:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return out
