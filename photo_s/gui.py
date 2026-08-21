@@ -4465,6 +4465,8 @@ class PhotoSApp:
             if hit:
                 for i, s in enumerate(_specs()):
                     if s[0] == hit:
+                        # 先存旧蒙版的滑杆编辑再切换，防静默丢失
+                        _save_adjusts()
                         move.update({"active": True, "name": hit,
                                      "dx0": evt.x, "dy0": evt.y,
                                      "orig": list(s[2])})
@@ -4762,7 +4764,8 @@ class PhotoSApp:
                     adj_vars[k].set(v)
 
         lst.bind("<<ListboxSelect>>",
-                 lambda e: (_select_from_list(), _load_adjusts()))
+                 lambda e: (_save_adjusts(), _select_from_list(),
+                            _load_adjusts()))
 
         # ── paging ───────────────────────────────────────────────────────
         def _page(delta):
