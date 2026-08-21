@@ -106,7 +106,7 @@ lora_alpha: 128
 
 1. `photo-s lr-eval --data data/lr_records.jsonl --images data/before --out eval/ --sample 200`
    → eval_before_*/eval_after_* 对（after 由 PhotoS 用真实 options 渲染）+ 打分模板
-2. 预测参数渲染后：`photo-s batch new.jpg --exposure ... ` 或 lr-predict → batch
+2. 预测参数渲染后：`photo-s batch new.jpg --ev <EV>`（lr-predict 输出的 options 键与 ProcessOptions 字段一致，可直接套用）或 lr-predict → batch
 3. 对比：`photo-s diff before.jpg result.jpg`（PSNR/SSIM）+
    `photo-s audit result.jpg`（质量闸门 pass/fail）+ 教师打分（eval_prompt.md）
 

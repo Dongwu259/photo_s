@@ -1033,16 +1033,21 @@ def _target_vector(options: Dict[str, Any]) -> List[float]:
 
 
 def _target_options(vec: Sequence[float]) -> Dict[str, Any]:
+    """预测向量 → ProcessOptions 可消费的 options dict。
+
+    输出键直接对齐 ``ProcessOptions`` 字段（exposure 的字段名是 ``ev``，
+    训练命名空间仍用 LR 的 "exposure"）——REST/MCP/CLI 拿到后零映射可套用。
+    """
     out = {}
     for t, x in zip(TARGETS, vec):
         x = float(x)
         if t == "wb_temp":
             x = x * _WB_SCALE + 5250.0
             out[t] = int(round(x))
-        elif t in ("contrast", "saturation"):
-            out[t] = round(x, 3)
         else:
             out[t] = round(x, 3)
+    if "exposure" in out:
+        out["ev"] = out.pop("exposure")
     return out
 
 
@@ -1378,7 +1383,12 @@ def prep_eval_set(records: Sequence[Dict[str, Any]], out_path: str,
                 img.thumbnail((1024, 1024))
                 img.save(before, "JPEG", quality=88)
             if not os.path.exists(after):
-                fields = {k: v for k, v in (rec.get("options") or {}).items()
+                rec_opts = dict(rec.get("options") or {})
+                # 记录是 LR 命名空间（exposure）；ProcessOptions 字段是 ev——
+                # 不映射会被 dataclass 过滤静默丢弃，after 渲染缺曝光编辑
+                if "exposure" in rec_opts and "ev" not in rec_opts:
+                    rec_opts["ev"] = rec_opts.pop("exposure")
+                fields = {k: v for k, v in rec_opts.items()
                           if k in ProcessOptions.__dataclass_fields__}
                 fields["output_dir"] = out_dir  # 中间产物不污染源目录
                 res = process_image(src, ProcessOptions(**fields))

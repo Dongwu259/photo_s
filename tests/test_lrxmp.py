@@ -346,10 +346,12 @@ def test_predict_clip_mlp_new_format(tmp_path, monkeypatch):
     Image.new("RGB", (64, 64), (120, 140, 160)).save(img)
     model = _clip_model_file(tmp_path, "clip.npz", transposed=True)
     res = lrxmp.predict_auto_tone(str(img), model)
-    assert set(res["options"]) == set(TARGETS)
+    # 输出键 = TARGETS 中 exposure 换成 ProcessOptions 字段名 ev
+    expected_keys = {("ev" if t == "exposure" else t) for t in TARGETS}
+    assert set(res["options"]) == expected_keys
     vec = _expected_clip_options(transposed=True, feats=feats)
     expect = _target_options(vec)
-    for t in TARGETS:
+    for t in expected_keys:
         assert res["options"][t] == expect[t]
 
 
@@ -362,7 +364,8 @@ def test_predict_clip_mlp_legacy_transpose(tmp_path, monkeypatch):
     Image.new("RGB", (64, 64), (80, 90, 100)).save(img)
     model = _clip_model_file(tmp_path, "legacy.npz", transposed=False)
     res = lrxmp.predict_auto_tone(str(img), model)
-    assert "exposure" in res["options"]
+    assert "ev" in res["options"]          # 消费层输出对齐 ProcessOptions 字段
+    assert "exposure" not in res["options"]
     assert "wb_temp" in res["options"]
 
 
@@ -396,7 +399,7 @@ def test_cluster_recipes(tmp_path):
     res = lrxmp.cluster_recipes(recs, k=4)
     assert res["k"] == 4
     assert sum(c["size"] for c in res["clusters"]) == 40
-    assert all(c["options"]["exposure"] is not None
+    assert all(c["options"]["ev"] is not None
                for c in res["clusters"])
 
 
