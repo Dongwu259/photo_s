@@ -908,6 +908,71 @@ def scan_and_report(paths: Optional[Sequence[str]] = None
     return report, records
 
 
+def merge_packages(pkg_dirs: Sequence[str], out_dir: str) -> Dict[str, Any]:
+    """合并多机数据包 → 合并后的 lr_records.jsonl + before/ 图集。
+
+    每个 pkg 目录 = 一台电脑的 ``lr-scan --export-dir --render-dir`` 产出。
+    按 basename 去重（LR 文件名天然唯一）；before 图幂等复制；
+    记录加 ``source_pkg`` 溯源。返回合并报告（JSON 安全）。
+    """
+    import shutil
+    os.makedirs(out_dir, exist_ok=True)
+    out_before = os.path.join(out_dir, "before")
+    records: List[Dict[str, Any]] = []
+    seen: set = set()
+    dupes: List[str] = []
+    conflicts: List[str] = []
+    images_copied = 0
+    for pkg in pkg_dirs:
+        pkg = os.path.abspath(pkg)
+        name = os.path.basename(pkg)
+        jsonl = os.path.join(pkg, "lr_records.jsonl")
+        if not os.path.exists(jsonl):
+            conflicts.append(f"{name}: 缺 lr_records.jsonl")
+            continue
+        src_before = os.path.join(pkg, "before")
+        for line in open(jsonl, encoding="utf-8"):
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                conflicts.append(f"{name}: 坏行")
+                continue
+            stem = os.path.splitext(os.path.basename(rec.get("path") or ""))[0]
+            if not stem:
+                continue
+            if stem in seen:
+                dupes.append(stem)
+                continue
+            seen.add(stem)
+            img = rec.get("image")
+            if img:
+                img_name = os.path.basename(img)
+                src_img = os.path.join(src_before, img_name)
+                if os.path.exists(src_img):
+                    dst = os.path.join(out_before, img_name)
+                    if not os.path.exists(dst):
+                        os.makedirs(out_before, exist_ok=True)
+                        shutil.copy2(src_img, dst)
+                        images_copied += 1
+                    rec["image"] = dst  # 绝对路径，训练侧零配置
+            rec["source_pkg"] = name
+            records.append(rec)
+    with open(os.path.join(out_dir, "lr_records.jsonl"), "w",
+              encoding="utf-8") as f:
+        for rec in records:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return {
+        "packages": len(pkg_dirs),
+        "records": len(records),
+        "edited": sum(1 for r in records if r.get("edited")),
+        "images_copied": images_copied,
+        "duplicates": dupes,
+        "conflicts": conflicts,
+    }
+
+
 def write_export(records: Sequence[Dict[str, Any]], out_dir: str,
                  images: Optional[Dict[str, str]] = None,
                  sanitize: bool = False) -> str:

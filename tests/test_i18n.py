@@ -243,7 +243,7 @@ class TestCliRendering:
                     "watch", "dedup", "info", "rename", "check", "contact-sheet",
                     "cull", "select", "hdr", "blurfaces", "hash", "gallery",
                     "analyze", "lr-scan", "lr-train", "lr-predict",
-                    "lr-recipes", "lr-similar", "lr-eval",
+                    "lr-recipes", "lr-similar", "lr-eval", "lr-merge",
                     "diff", "audit", "preview",
                     "bench", "config", "serve", "mcp"):
             capsys.readouterr()  # drain

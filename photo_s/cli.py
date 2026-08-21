@@ -1797,6 +1797,22 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___lr_sample'),
     )
 
+    lr_merge_parser = subparsers.add_parser(
+        "lr-merge", help=_t('cmd_lr_merge'),
+    )
+    lr_merge_parser.add_argument(
+        "packages", nargs="+", metavar="PKG",
+        help=_t('help___lr_packages'),
+    )
+    lr_merge_parser.add_argument(
+        "--out", type=str, default="merged", metavar="DIR",
+        help=_t('help___lr_merge_out'),
+    )
+    lr_merge_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
     # ── diff / audit / preview (v1.9.0 tool layer, agent feedback) ─────────
     diff_parser = subparsers.add_parser(
         "diff", help=_t('cmd_diff'),
@@ -1953,7 +1969,7 @@ def run_cli(args: List[str] = None) -> int:
                  hash_parser, gallery_parser, bench_parser, config_parser,
                  serve_parser, mcp_parser, analyze_parser, lr_scan_parser,
                  lr_train_parser, lr_predict_parser, lr_recipes_parser,
-                 lr_similar_parser, lr_eval_parser,
+                 lr_similar_parser, lr_eval_parser, lr_merge_parser,
                  diff_parser, audit_parser, preview_parser,
                  preset_save, preset_load, preset_delete,
                  plugin_install, plugin_uninstall, plugin_info, plugin_fetch,
@@ -2796,6 +2812,26 @@ def run_cli(args: List[str] = None) -> int:
                     print(f"  {k:<28} {v:>4}")
             if export_path:
                 print(_t("msg_lr_export").format(path=export_path))
+        return 0
+
+    if parsed.command == "lr-merge":
+        import json
+        from .lrxmp import merge_packages
+        try:
+            res = merge_packages(parsed.packages, parsed.out)
+        except OSError as e:
+            print(f"❌ {e}")
+            return 1
+        if getattr(parsed, 'json', False):
+            print(json.dumps(versioned(res), indent=2, ensure_ascii=False))
+        else:
+            print(_t("msg_lr_merged").format(
+                p=res["packages"], n=res["records"], e=res["edited"],
+                img=res["images_copied"], out=os.path.abspath(parsed.out)))
+            for d in res["duplicates"][:10]:
+                print(f"  重复跳过: {d}")
+            for c in res["conflicts"]:
+                print(f"  ⚠ {c}")
         return 0
 
     if parsed.command in ("lr-train", "lr-predict", "lr-recipes",

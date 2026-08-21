@@ -4,6 +4,7 @@
 XMP sidecar），数值为真实修图数据。
 """
 
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -313,3 +314,35 @@ def test_write_export_sanitize(tmp_path):
     assert '"catalog": "8-2"' in line
     mapping = open(tmp_path / "lr_paths.json", encoding="utf-8").read()
     assert "/secret/千岛湖/x.ARW" in mapping  # 原始映射仅存本地
+
+
+def test_merge_packages(tmp_path):
+    from PIL import Image
+    # 两个"机器"数据包
+    pkgs = []
+    for mi, stem in enumerate(("DSC0001", "DSC0002")):
+        pkg = tmp_path / f"pkg{mi}"
+        before = pkg / "before"
+        before.mkdir(parents=True)
+        Image.new("RGB", (32, 32), (100 + mi, 100, 100)).save(before / f"{stem}.jpg")
+        with open(pkg / "lr_records.jsonl", "w", encoding="utf-8") as f:
+            f.write(json.dumps({"path": f"/x/{stem}.ARW", "image": f"before/{stem}.jpg",
+                                "edited": True, "options": {"exposure": 0.3}}) + "\n")
+        pkgs.append(str(pkg))
+    # 第三包：与第一包重复 stem + 缺 before
+    pkg3 = tmp_path / "pkg3"
+    pkg3.mkdir()
+    with open(pkg3 / "lr_records.jsonl", "w", encoding="utf-8") as f:
+        f.write(json.dumps({"path": f"/y/DSC0001.ARW", "edited": False,
+                            "options": {}}) + "\n")
+    pkgs.append(str(pkg3))
+
+    res = lrxmp.merge_packages(pkgs, str(tmp_path / "merged"))
+    assert res["records"] == 2      # DSC0001 重复被去
+    assert res["edited"] == 2
+    assert res["images_copied"] == 2
+    assert res["duplicates"] == ["DSC0001"]
+    merged = open(tmp_path / "merged" / "lr_records.jsonl",
+                  encoding="utf-8").read()
+    assert '"source_pkg": "pkg0"' in merged
+    assert (tmp_path / "merged" / "before" / "DSC0001.jpg").exists()

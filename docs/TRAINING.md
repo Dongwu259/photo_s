@@ -26,7 +26,29 @@ pip install -U photo-s-tools        # 任意电脑
 photo-s lr-scan --export-dir ./data --render-dir ./data/before --sanitize
 # → data/lr_records.jsonl + data/lr_paths.json + data/before/*.jpg（已编辑照片才渲染）
 ```
-合并多机：直接拼接 JSONL + 合并 before/ 目录（basename 冲突极少，LR 文件名天然唯一）。
+
+## 2.1 传输（多机 → 训练机）
+
+数据包 = JSONL（几十 KB）+ before 图（每张 ~200-500KB）——整包通常几十 MB：
+
+```bash
+# 局域网（推荐，私有不落第三方）
+rsync -av data/ user@5080-machine:~/photo_data/mac1/     # 每台电脑一个子目录
+# 或 scp / AirDrop / U 盘（单次批量）
+```
+> 隐私：JSONL 必须 `--sanitize` 过（路径脱敏）；before 图是你自己的照片，
+> 走私有通道，勿上传公有云/网盘。
+
+## 2.2 合并（训练机上一条命令）
+
+```bash
+photo-s lr-merge ~/photo_data/mac1 ~/photo_data/mac2 ~/photo_data/mac3 \
+    --out ./data --json
+# → data/lr_records.jsonl（去重 + source_pkg 溯源 + image 绝对路径）
+#   data/before/*.jpg（幂等复制，重复文件不重复拷贝）
+#   data/lr_paths.json（如有 sanitize 映射）
+```
+之后直接 `photo-s lr-train --data data/lr_records.jsonl --images data/before`。
 
 ## 3. 模型 A：自动基调回归（先做，纯 numpy 零 torch）
 
