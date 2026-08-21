@@ -4320,8 +4320,13 @@ class PhotoSApp:
             _img_photo.update({"pil": base, "scale": scale,
                                "ox": ox, "oy": oy})
             # overlay: blend each visible mask with its color
+            specs = _specs()
+            # combo 蒙版按名引用其他蒙版——refs + name 缺一不可，
+            # 否则 render_mask 报"需要完整蒙版列表"（并误触发 AI 警告）
+            refs = {s[0]: MaskSpec(s[1], tuple(s[2]), s[3], s[4], s[0])
+                    for s in specs}
             over = np.asarray(disp, dtype=np.float32).copy()
-            for i, (name, kind, params, feather, invert) in enumerate(_specs()):
+            for i, (name, kind, params, feather, invert) in enumerate(specs):
                 if not _visible().get(name, True):
                     continue
                 try:
@@ -4330,13 +4335,15 @@ class PhotoSApp:
                         if key not in ai_cache:
                             ai_cache[key] = render_mask(
                                 MaskSpec(kind, tuple(params), feather,
-                                         invert),
-                                base.width, base.height, img=base)
+                                         invert, name),
+                                base.width, base.height, img=base,
+                                refs=refs)
                         m = ai_cache[key]
                     else:
                         m = render_mask(MaskSpec(kind, tuple(params),
-                                                 feather, invert),
-                                        base.width, base.height, img=base)
+                                                 feather, invert, name),
+                                        base.width, base.height, img=base,
+                                        refs=refs)
                     m = np.asarray(
                         PILImage.fromarray(
                             (m * 255).astype(np.uint8), "L")
@@ -4845,11 +4852,15 @@ class PhotoSApp:
             name = current["name"]
             if not name:
                 return
-            adjust = {}
+            # 从既有 dict 合并而非整体替换：滑杆只覆盖标量键，
+            # 字符串键（curves/hsl/... 来自 CLI/预设）不被静默丢掉
+            adjust = _adjusts().get(name, {})
             for k, var in adj_vars.items():
                 v = round(var.get(), 3)
                 if v != 0.0:
                     adjust[k] = v
+                else:
+                    adjust.pop(k, None)
             _adjusts()[name] = adjust
 
         def _load_adjusts():
