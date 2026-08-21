@@ -160,7 +160,9 @@ def _download(spec: WeightSpec, dest: str, timeout: int) -> None:
                 digest.update(chunk)
                 f.write(chunk)
     except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
-        raise RuntimeError("download failed for {}: {}".format(spec.name, e))
+        raise RuntimeError(
+            "download failed for {}: {} (manual download: {})"
+            .format(spec.name, e, spec.url))
     if digest.hexdigest().lower() != spec.sha256.lower():
         raise RuntimeError(
             "sha256 mismatch for {}: expected {} got {}"

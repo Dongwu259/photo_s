@@ -394,6 +394,26 @@ def test_train_too_few_samples(tmp_path):
         lrxmp.train_auto_tone(recs, str(tmp_path / "m.npz"))
 
 
+def test_predict_clear_errors_for_bad_inputs(tmp_path):
+    """缺模型/缺图/坏 npz → 清晰 LrError（非裸 KeyError/ValueError）。"""
+    from PIL import Image
+    img = tmp_path / "y.jpg"
+    Image.new("RGB", (32, 32), (80, 90, 100)).save(img)
+    with pytest.raises(LrError, match="模型文件不存在"):
+        lrxmp.predict_auto_tone(str(img), str(tmp_path / "none.npz"))
+    with pytest.raises(LrError, match="图片不存在"):
+        lrxmp.predict_auto_tone(str(tmp_path / "none.jpg"),
+                                str(tmp_path / "none.npz"))
+    import numpy as np
+    np.savez(tmp_path / "no_targets.npz", W=np.zeros((84, 9)))
+    with pytest.raises(LrError, match="targets"):
+        lrxmp.predict_auto_tone(str(img), str(tmp_path / "no_targets.npz"))
+    np.savez(tmp_path / "bad_w.npz", W=np.zeros((10, 9)),
+             targets=np.array(lrxmp.TARGETS))
+    with pytest.raises(LrError, match="维度不匹配"):
+        lrxmp.predict_auto_tone(str(img), str(tmp_path / "bad_w.npz"))
+
+
 def test_sanitize_package_loads_with_image_dir(tmp_path):
     """sanitize 包内 image 是 basename：--images 按目录解析（原 0 样本）。"""
     from PIL import Image

@@ -1120,6 +1120,9 @@ def render_before_images(records: Sequence[Dict[str, Any]], out_dir: str,
                 if img.mode != "RGB":
                     img = img.convert("RGB")
             img.thumbnail((max_side, max_side))
+            # 隐私：显式剥 EXIF（Pillow 版本差异——旧版默认从 info 拷贝
+            # exif，可能把原片 GPS 带进训练图集；不依赖默认行为）
+            img.info.pop("exif", None)
             img.save(out, "JPEG", quality=90)
             images[p] = out
             rendered += 1
@@ -1221,6 +1224,10 @@ def _predict_clip_mlp(img, model) -> np.ndarray:
             "CLIP+MLP 模型需要 torch + open-clip-torch（pip install torch "
             "open-clip-torch），或改用 photo-s lr-train 岭回归模型（零依赖）")
     emb_dim = int(model["emb_dim"]) if "emb_dim" in model.files else None
+    for key in ("W", "b", "W2", "b2"):
+        if key not in model.files:
+            raise LrError(
+                f"CLIP+MLP 模型缺少 {key} 键（损坏或不完整 npz）")
     W, b, W2, b2 = model["W"], model["b"], model["W2"], model["b2"]
     clip_model = (str(model["clip_model"])
                   if "clip_model" in model.files else "ViT-L-14")
@@ -1258,7 +1265,19 @@ def predict_auto_tone(image_path: str, model_path: str) -> Dict[str, Any]:
     """
     import numpy as np
     from PIL import Image
-    model = np.load(model_path)
+    if not os.path.exists(model_path):
+        raise LrError(
+            f"模型文件不存在: {model_path}（先 photo-s lr-train，"
+            f"或 --model 指定 npz）")
+    if not os.path.exists(image_path):
+        raise LrError(f"图片不存在: {image_path}")
+    try:
+        model = np.load(model_path)
+    except Exception as e:
+        raise LrError(f"模型加载失败 {model_path}: {e}") from None
+    if "targets" not in model.files:
+        raise LrError(
+            f"模型缺少 targets 键（{model_path} 不是 lr-train 产物）")
     targets = model["targets"]
     if tuple(targets) != TARGETS:
         raise LrError(f"模型目标不匹配 {tuple(targets)} != {TARGETS}")
@@ -1266,8 +1285,14 @@ def predict_auto_tone(image_path: str, model_path: str) -> Dict[str, Any]:
     if "W2" in model.files and "b2" in model.files:
         vec = _predict_clip_mlp(img, model)
     else:
+        if "W" not in model.files:
+            raise LrError(f"模型缺少 W 键（{model_path}）")
         x = np.asarray(_content_features(img), dtype=np.float64)
-        vec = x @ model["W"]
+        W = model["W"]
+        if W.ndim != 2 or W.shape[0] != len(x):
+            raise LrError(
+                f"模型权重维度不匹配特征 {len(x)} 维, W={W.shape}")
+        vec = x @ W
     opts = _target_options(vec)
     return {"path": image_path, "options": opts}
 
