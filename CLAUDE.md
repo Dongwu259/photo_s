@@ -15,7 +15,7 @@
 
 ## 架构速览
 
-- `engine.py` — `ProcessOptions` dataclass + `process_image` + `batch_process`（核心）
+- `engine.py` — `ProcessOptions` dataclass + `process_image` + `batch_process`（核心，含 `per_file_options(path, opts)` 钩子——GUI per-photo 蒙版经此逐文件注入，在输出路径预分配前调用）
 - `cli.py` — argparse，子命令：compress/convert/batch/exif/preset/watch/dedup/info/rename/config/serve/mcp/check/contact-sheet/cull/select/hdr/blurfaces/hash/gallery/bench/plugin（含 plugin scaffold）/analyze/lr-scan/lr-train/lr-predict/lr-recipes/lr-similar/lr-eval/diff/audit/preview；`--language {en,zh,auto}` 全局 flag（`_pre_parse_language` 两段式解析：先 resolve 语言再建 parser，argparse 构造时定死 help 文本）
 - `contract.py` — JSON 输出契约：`SCHEMA_VERSION = 1` + `versioned(payload)`（加性顶层键 `schema_version`，非信封）；CLI `--json`/REST `_send_json`/MCP 工具三处复用，零项目 import
 - `i18n.py` — 国际化共享模块：`detect_system_language()`（三平台：env LANG/LC_ALL → macOS `defaults read -g AppleLanguages` → Windows `GetUserDefaultUILanguage` LCID → `locale.getlocale()`，每级 try/except 永不崩，`_system_language()` 记忆化）；`resolve_language()` 优先级 **flag > `PHOTO_S_LANG` env > config `language` > persisted(GUI) > 系统检测 > "en"**；`CURRENT_LANG` 模块变量 + `_t(key, lang, **kwargs)`（.format 只允许命名占位符）；CLI `STRINGS` 表（zh/en parity 测试强制）；GUI 持久化 `~/.photos/language`。**注意：检测层绝不调 `locale.setlocale`**（进程级副作用会污染后续 `open()` 默认编码）

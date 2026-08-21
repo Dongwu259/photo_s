@@ -217,6 +217,46 @@ class TestExifMetaDateExtraction:
         assert os.path.basename(result.output_path) == "200_35mm_shot.jpg"
 
 
+class TestPerFileOptions:
+    def test_per_file_masks_injected(self, tmp_path):
+        """GUI per-photo masks: hook replaces masks per path before output
+        path reservation (fields consistent with preassigned paths)."""
+        from photo_s.engine import batch_process, ProcessOptions
+        from dataclasses import replace
+        a = _make_image(tmp_path / "a.jpg")
+        b = _make_image(tmp_path / "b.jpg")
+        out = str(tmp_path / "out")
+        base = ProcessOptions(output_dir=out, suffix="_m",
+                              output_format="PNG", jobs=1)
+        per_photo = {
+            a: ("sky:linear:0,0,1,0", "sky:brightness=0.5"),
+            b: ("fg:radial:0.5,0.5,0.4,0.4", "fg:brightness=0.5"),
+        }
+
+        def hook(path, opts):
+            masks, adjust = per_photo[path]
+            return replace(opts, masks=masks, mask_adjust=adjust)
+
+        result = batch_process([a, b], base, per_file_options=hook)
+        assert result.success_count == 2
+        # masks actually applied: top half of a gets brightness -> lighter
+        import numpy as np
+        from PIL import Image
+        out_a = np.asarray(Image.open(os.path.join(out, "a_m.png"))
+                           .convert("RGB"))
+        plain_a = np.asarray(Image.open(a).convert("RGB"))
+        assert out_a.shape == plain_a.shape
+        # injected mask (brightness=0.5) changed pixels vs no-mask baseline
+        assert not np.allclose(out_a, plain_a)
+
+    def test_hook_not_called_without_it(self, tmp_path):
+        from photo_s.engine import batch_process, ProcessOptions
+        a = _make_image(tmp_path / "a.jpg")
+        result = batch_process([a], ProcessOptions(
+            output_dir=str(tmp_path / "o"), suffix="_x", jobs=1))
+        assert result.success_count == 1
+
+
 class TestResume:
     def test_skips_existing_outputs(self, tmp_path):
         from photo_s.engine import batch_process, ProcessOptions

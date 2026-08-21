@@ -540,6 +540,29 @@ STRINGS = {
         "mask_brush": "笔刷",
         "mask_brush_size": "笔刷半径（相对短边）",
         "mask_brush_clear": "清空笔迹",
+        "mask_workflow": "画布蒙版（LR 式）",
+        "mask_prev": "◀ 上一张",
+        "mask_next": "下一张 ▶",
+        "mask_page": "第 {cur}/{total} 张",
+        "mask_add": "新建蒙版",
+        "mask_list": "蒙版列表",
+        "mask_show": "显示",
+        "mask_hide": "隐藏",
+        "mask_del": "删除蒙版",
+        "mask_ai_empty": "AI 未识别到该内容（蒙版为空）",
+        "mask_tool": "工具",
+        "mask_tool_linear": "线性渐变",
+        "mask_tool_radial": "径向椭圆",
+        "mask_tool_brush": "笔刷",
+        "mask_tool_color": "颜色取样",
+        "mask_tool_subject": "AI 主体",
+        "mask_tool_person": "AI 人物",
+        "mask_tool_object": "AI 对象",
+        "mask_ai_label": "对象类别（COCO）",
+        "mask_overlay_hint": "画布上拖动绘制蒙版；红色/彩色半透明区域 = 蒙版生效区（叠加显示所有可见蒙版）",
+        "mask_apply_all": "应用到全部勾选照片",
+        "mask_empty_hint": "勾选文件后在画布上绘制蒙版",
+        "mask_no_check": "请先勾选要编辑的照片",
         "mask_feather": "羽化",
         "mask_invert": "反相",
         "mask_params": "参数",
@@ -1114,6 +1137,29 @@ STRINGS = {
         "mask_brush": "Brush",
         "mask_brush_size": "Brush radius (rel. short side)",
         "mask_brush_clear": "Clear strokes",
+        "mask_workflow": "Canvas masks (LR-style)",
+        "mask_prev": "◀ Prev",
+        "mask_next": "Next ▶",
+        "mask_page": "{cur}/{total}",
+        "mask_add": "New mask",
+        "mask_list": "Masks",
+        "mask_show": "Show",
+        "mask_hide": "Hide",
+        "mask_del": "Delete mask",
+        "mask_ai_empty": "AI found nothing (empty mask)",
+        "mask_tool": "Tool",
+        "mask_tool_linear": "Linear gradient",
+        "mask_tool_radial": "Radial ellipse",
+        "mask_tool_brush": "Brush",
+        "mask_tool_color": "Color pick",
+        "mask_tool_subject": "AI subject",
+        "mask_tool_person": "AI person",
+        "mask_tool_object": "AI object",
+        "mask_ai_label": "Object class (COCO)",
+        "mask_overlay_hint": "Drag on the canvas to paint; colored translucent areas = mask active (all visible masks overlaid)",
+        "mask_apply_all": "Apply to all checked photos",
+        "mask_empty_hint": "Check photos, then paint masks on the canvas",
+        "mask_no_check": "Check the photos you want to edit first",
         "mask_feather": "Feather",
         "mask_invert": "Invert",
         "mask_params": "Params",
@@ -1638,6 +1684,7 @@ class PhotoSApp:
         # Local adjustments + lens correction (v1.7.0) - blank = off
         self.point_color = tk.StringVar(value="")
         self.masks = tk.StringVar(value="")
+        self._photo_masks = {}  # per-photo masks (path -> {masks, mask_adjust})
         self.mask_adjust = tk.StringVar(value="")
         self.lens_distort = tk.StringVar(value="")
         self.lens_vignette = tk.StringVar(value="")
@@ -2881,7 +2928,7 @@ class PhotoSApp:
              "grade_hsl_val"),
             ("point_color", "point_color_hint", "edit_point_color",
              "_open_point_color_dialog", "grade_point_color_val"),
-            ("masks", "masks_hint", "edit_masks", "_open_mask_dialog",
+            ("masks", "masks_hint", "edit_masks", "_open_mask_workflow",
              "grade_masks_val"),
         ]
         for off, (var_key, hint_key) in enumerate(_grade_widgets):
@@ -3764,6 +3811,559 @@ class PhotoSApp:
         self._refresh_grade_value_labels()
         if win is not None:
             win.destroy()
+
+    # ── LR-style canvas mask workflow (v1.8.0) ───────────────────────────
+
+    def _open_mask_workflow(self):
+        """Canvas mask editor over checked photos, Lightroom-style.
+
+        Big image + per-photo masks (each photo keeps its own spec list),
+        brush/linear/radial/color/AI tools painted on the canvas with a
+        translucent colored overlay, prev/next paging across checked files,
+        multiple masks stacked with per-mask visibility and color.
+
+        Per-photo state lives in ``self._photo_masks`` (path -> dict of
+        masks/mask_adjust strings) and is injected into batch processing
+        via the engine's ``per_file_options`` hook.
+        """
+        if self._dlg_cooldown_active():
+            return
+        files = self._checked_files()
+        if not files:
+            self._flash(self._t("mask_no_check"))
+            return
+        from .mask import (MaskError, MaskSpec, parse_masks,
+                           parse_mask_adjust, render_mask)
+        win = tk.Toplevel(self.root)
+        win.title(self._t("mask_workflow"))
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+        win.geometry("980x680")
+        win.minsize(760, 520)
+
+        # ── per-photo state ──────────────────────────────────────────────
+        # photo[path] = {"specs": [(name, kind, params, feather, invert)],
+        #                "adjusts": {name: {key: val}},
+        #                "visible": {name: bool}}
+        photo = {}
+        for f in files:
+            pm = (self._photo_masks or {}).get(f)
+            masks_s = (pm or {}).get("masks", self.masks.get())
+            adj_s = (pm or {}).get("mask_adjust", self.mask_adjust.get())
+            try:
+                specs = [(s.name, s.kind, list(s.params), s.feather,
+                          s.invert) for s in parse_masks(masks_s)]
+            except MaskError:
+                specs = []
+            try:
+                adjusts = {k: dict(v) for k, v in
+                           parse_mask_adjust(adj_s).items()}
+            except MaskError:
+                adjusts = {}
+            photo[f] = {"specs": specs, "adjusts": adjusts,
+                        "visible": {s[0]: True for s in specs}}
+        idx = [0]
+        current = {"name": None}  # selected mask name
+        tool = tk.StringVar(value="brush")
+        brush_r = tk.DoubleVar(value=0.06)
+        ai_label = tk.StringVar(value="car")
+        color_vals = [tk.StringVar(value=v) for v in ("255", "60", "60")]
+        _img_photo = {"tk": None, "pil": None, "scale": 1.0,
+                      "ox": 0, "oy": 0}  # canvas->image mapping
+        _MASK_COLORS = [(255, 70, 70), (70, 140, 255), (70, 220, 110),
+                        (250, 200, 60), (220, 90, 240), (90, 230, 230)]
+
+        top = tk.Frame(win, bg=COLORS["bg"])
+        top.pack(fill="x", padx=12, pady=(10, 4))
+        page_lbl = tk.Label(top, text="", font=FONT_SMALL,
+                            fg=COLORS["text_secondary"], bg=COLORS["bg"])
+        page_lbl.pack(side="left")
+        tk.Label(top, text="", font=FONT_SMALL, bg=COLORS["bg"],
+                 fg=COLORS["text_secondary"]).pack(side="left", padx=8)
+
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=12)
+
+        # left: mask list
+        lst_frame = tk.Frame(body, bg=COLORS["bg"])
+        lst_frame.pack(side="left", fill="y", padx=(0, 12))
+        tk.Label(lst_frame, text=self._t("mask_list"),
+                 font=FONT_SECTION, fg=COLORS["text"],
+                 bg=COLORS["bg"]).pack(anchor="w")
+        lst = tk.Listbox(lst_frame, width=26, height=14, font=FONT_SMALL,
+                         exportselection=False, bg=COLORS["card"],
+                         fg=COLORS["text"], relief="flat",
+                         highlightthickness=1,
+                         highlightbackground=COLORS["border"],
+                         selectmode=tk.SINGLE)
+        lst.pack(fill="both", expand=True)
+        vis_vars = {}  # name -> tk.BooleanVar
+
+        def _specs():
+            return photo[files[idx[0]]]["specs"]
+
+        def _adjusts():
+            return photo[files[idx[0]]]["adjusts"]
+
+        def _visible():
+            return photo[files[idx[0]]]["visible"]
+
+        def _refresh_list(select=None):
+            lst.delete(0, tk.END)
+            for name, kind, params, feather, invert in _specs():
+                lst.insert(tk.END, f"{name}  [{kind}]"
+                                   f"  {'✓' if _visible().get(name) else ''}")
+            if select is not None:
+                for i, s in enumerate(_specs()):
+                    if s[0] == select:
+                        lst.selection_clear(0, tk.END)
+                        lst.selection_set(i)
+                        break
+
+        # center: big canvas
+        canvas = tk.Canvas(body, width=700, height=460, bg=COLORS["card"],
+                           highlightthickness=1,
+                           highlightbackground=COLORS["border"],
+                           cursor="crosshair")
+        canvas.pack(side="left", fill="both", expand=True)
+        # AI mask cache: (path, mask_name) -> float32 hxw mask; AI inference
+        # is slow, so overlay redraws reuse it instead of re-segmenting.
+        ai_cache = {}
+
+        def _draw_image():
+            """Fit the current photo into the canvas, with overlay."""
+            canvas.delete("all")
+            import numpy as np
+            from PIL import Image as PILImage, ImageTk
+            path = files[idx[0]]
+            base = None
+            try:
+                base = PILImage.open(path).convert("RGB")
+                base.thumbnail((700, 460), PILImage.LANCZOS)
+            except Exception:
+                base = PILImage.new("RGB", (700, 460), (40, 40, 40))
+            cw, ch = canvas.winfo_width(), canvas.winfo_height()
+            if cw < 50 or ch < 50:  # canvas not laid out yet
+                cw, ch = 700, 460
+            scale = min(cw / base.width, ch / base.height)
+            disp = base.resize((max(1, int(base.width * scale)),
+                                max(1, int(base.height * scale))),
+                               PILImage.LANCZOS)
+            ox, oy = (cw - disp.width) // 2, (ch - disp.height) // 2
+            _img_photo.update({"pil": base, "scale": scale,
+                               "ox": ox, "oy": oy})
+            # overlay: blend each visible mask with its color
+            over = np.asarray(disp, dtype=np.float32).copy()
+            for i, (name, kind, params, feather, invert) in enumerate(_specs()):
+                if not _visible().get(name, True):
+                    continue
+                try:
+                    if kind in ("subject", "person", "object"):
+                        key = (path, name)
+                        if key not in ai_cache:
+                            ai_cache[key] = render_mask(
+                                MaskSpec(kind, tuple(params), feather,
+                                         invert),
+                                base.width, base.height, img=base)
+                        m = ai_cache[key]
+                    else:
+                        m = render_mask(MaskSpec(kind, tuple(params),
+                                                 feather, invert),
+                                        base.width, base.height, img=base)
+                    m = np.asarray(
+                        PILImage.fromarray(
+                            (m * 255).astype(np.uint8), "L")
+                        .resize(disp.size)).astype(np.float32) / 255.0
+                    c = _MASK_COLORS[i % len(_MASK_COLORS)]
+                    for k in range(3):
+                        over[..., k] = over[..., k] * (1 - 0.55 * m) \
+                            + c[k] * 0.55 * m
+                except MaskError:
+                    continue
+            out = PILImage.fromarray(np.clip(over, 0, 255).astype(np.uint8))
+            _img_photo["tk"] = ImageTk.PhotoImage(out)
+            canvas.create_image(ox, oy, image=_img_photo["tk"],
+                                anchor="nw")
+
+        def _canvas_to_img(evt):
+            return ((evt.x - _img_photo["ox"]) / _img_photo["scale"],
+                    (evt.y - _img_photo["oy"]) / _img_photo["scale"])
+
+        def _img_to_rel(x, y):
+            base = _img_photo["pil"]
+            if base is None:
+                return 0.0, 0.0
+            return (max(0.0, min(1.0, x / base.width)),
+                    max(0.0, min(1.0, y / base.height)))
+
+        def _new_spec_name(kind):
+            base = kind if kind != "color" else "color"
+            existing = {s[0] for s in _specs()}
+            i = 1
+            while f"{base}{i}" in existing:
+                i += 1
+            return f"{base}{i}"
+
+        def _set_current_mask(name, spec, adjust=None):
+            """Replace or append the named mask in the current photo."""
+            specs = _specs()
+            for i, s in enumerate(specs):
+                if s[0] == name:
+                    specs[i] = spec
+                    break
+            else:
+                specs.append(spec)
+            _visible()[name] = True
+            if adjust is not None:
+                _adjusts()[name] = adjust
+            current["name"] = name
+            _refresh_list(select=name)
+
+        def _finish_paint(kind, params, feather=0.0, adjust=None):
+            name = current["name"]
+            if not name or not any(s[0] == name for s in _specs()):
+                name = _new_spec_name(kind)
+            spec = (name, kind, list(params), feather, False)
+            _set_current_mask(name, spec, adjust)
+
+        # ── canvas drag handlers ─────────────────────────────────────────
+        drag = {"active": False, "x0": 0, "y0": 0, "x1": 0, "y1": 0,
+                "dots": []}
+
+        def _on_press(evt):
+            if tool.get() == "color":
+                x, y = _canvas_to_img(evt)
+                base = _img_photo["pil"]
+                if base is None:
+                    return
+                px = base.getpixel((max(0, min(base.width - 1, int(x))),
+                                    max(0, min(base.height - 1, int(y)))))
+                color_vals[0].set(str(px[0]))
+                color_vals[1].set(str(px[1]))
+                color_vals[2].set(str(px[2]))
+                _finish_paint("color",
+                              (px[0], px[1], px[2], 0.15))
+                _draw_image()
+                return
+            drag.update({"active": True, "x0": evt.x, "y0": evt.y,
+                         "x1": evt.x, "y1": evt.y,
+                         "dots": [(evt.x, evt.y)]})
+
+        def _on_drag(evt):
+            if not drag["active"]:
+                return
+            drag["x1"], drag["y1"] = evt.x, evt.y
+            if tool.get() == "brush":
+                drag["dots"].append((evt.x, evt.y))
+            canvas.delete("guide")
+            if tool.get() in ("linear", "radial"):
+                canvas.create_line(drag["x0"], drag["y0"], evt.x, evt.y,
+                                   fill="#ffffff", width=1, tags="guide",
+                                   dash=(4, 3))
+            elif tool.get() == "brush":
+                for px, py in drag["dots"]:
+                    r = max(2, brush_r.get() * 30)
+                    canvas.create_oval(px - r, py - r, px + r, py + r,
+                                       fill="#ff4444", stipple="gray50",
+                                       outline="", tags="guide")
+
+        def _on_release(evt):
+            if not drag["active"]:
+                return
+            drag["active"] = False
+            canvas.delete("guide")
+            if tool.get() == "brush":
+                dots = []
+                for px, py in drag["dots"]:
+                    x, y = _canvas_to_img(type("E", (), {"x": px, "y": py})())
+                    rx, ry = _img_to_rel(x, y)
+                    dots.append((rx, ry, brush_r.get()))
+                if not dots:
+                    return
+                _finish_paint("brush", dots)
+            elif tool.get() == "linear":
+                x0, y0 = _img_to_rel(*_canvas_to_img(
+                    type("E", (), {"x": drag["x0"], "y": drag["y0"]})()))
+                x1, y1 = _img_to_rel(*_canvas_to_img(
+                    type("E", (), {"x": drag["x1"], "y": drag["y1"]})()))
+                _finish_paint("linear", (x0, y0, x1, y1))
+            elif tool.get() == "radial":
+                cx, cy = _img_to_rel(*_canvas_to_img(
+                    type("E", (), {"x": drag["x0"], "y": drag["y0"]})()))
+                ex, ey = _img_to_rel(*_canvas_to_img(
+                    type("E", (), {"x": drag["x1"], "y": drag["y1"]})()))
+                rx = max(0.01, abs(ex - cx))
+                ry = max(0.01, abs(ey - cy))
+                _finish_paint("radial", (cx, cy, rx, ry))
+            _draw_image()
+
+        canvas.bind("<Button-1>", _on_press)
+        canvas.bind("<B1-Motion>", _on_drag)
+        canvas.bind("<ButtonRelease-1>", _on_release)
+
+        def _ai_mask(kind, label=None):
+            """Add an AI mask (subject/person/object) to the current photo."""
+            try:
+                from .segmask import segment
+                base = _img_photo["pil"]
+                if base is None:
+                    return
+                m = segment(base, kind, label=label)
+                if m.max() < 0.01:
+                    messagebox.showwarning(
+                        self._t("mask_ai_empty"), self._t("mask_ai_empty"))
+                    return
+                name = current["name"] if current["name"] and any(
+                    s[0] == current["name"] for s in _specs()) else None
+                if not name:
+                    name = _new_spec_name(kind)
+                ai_cache.pop((files[idx[0]], name), None)
+                _set_current_mask(name, (name, kind, [label] if label
+                                         else [], 0.0, False))
+                _refresh_list(select=name)
+                _draw_image()
+            except (ImportError, RuntimeError) as e:
+                messagebox.showwarning(self._t("mask_tool"), f"AI: {e}")
+
+        # right: tools + adjustments
+        right = tk.Frame(body, bg=COLORS["bg"])
+        right.pack(side="right", fill="y", padx=(12, 0))
+        tk.Label(right, text=self._t("mask_tool"), font=FONT_SECTION,
+                 fg=COLORS["text"], bg=COLORS["bg"]).pack(anchor="w")
+        tools = (("brush", "mask_tool_brush"), ("linear", "mask_tool_linear"),
+                 ("radial", "mask_tool_radial"), ("color", "mask_tool_color"),
+                 ("subject", "mask_tool_subject"),
+                 ("person", "mask_tool_person"),
+                 ("object", "mask_tool_object"))
+        for key, label in tools:
+            if key in ("subject", "person", "object"):
+                FlatButton(
+                    right, text=self._t(label),
+                    command=lambda k=key: _ai_mask(
+                        k, ai_label.get().strip() if k == "object" else None),
+                    bg=COLORS["bg"], fg=COLORS["text"],
+                    hover_bg=COLORS["border"], font=FONT_SMALL,
+                    padx=8, pady=2, border_color=COLORS["border"]).pack(
+                    fill="x", pady=(0, 4))
+            else:
+                FlatButton(right, text=self._t(label),
+                           command=lambda k=key: tool.set(k),
+                           bg=COLORS["bg"], fg=COLORS["text"],
+                           hover_bg=COLORS["border"], font=FONT_SMALL,
+                           padx=8, pady=2,
+                           border_color=COLORS["border"]).pack(
+                    fill="x", pady=(0, 4))
+        tk.Label(right, text=self._t("mask_ai_label"), font=FONT_TINY,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(anchor="w")
+        ttk.Entry(right, textvariable=ai_label, font=FONT_BODY,
+                  width=12).pack(fill="x", pady=(0, 6))
+        tk.Label(right, text=self._t("mask_brush_size"), font=FONT_TINY,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(anchor="w")
+        ttk.Scale(right, from_=0.01, to=0.3, variable=brush_r).pack(
+            fill="x", pady=(0, 8))
+        FlatButton(right, text=self._t("mask_add"), command=lambda:
+                   current.__setitem__("name", None),
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=8, pady=2, border_color=COLORS["border"]).pack(
+            fill="x", pady=(0, 4))
+        FlatButton(right, text=self._t("mask_del"),
+                   command=lambda: _delete_current(),
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=8, pady=2, border_color=COLORS["border"]).pack(
+            fill="x", pady=(0, 4))
+
+        def _delete_current():
+            name = current["name"]
+            if not name:
+                return
+            _specs()[:] = [s for s in _specs() if s[0] != name]
+            _adjusts().pop(name, None)
+            _visible().pop(name, None)
+            current["name"] = None
+            _refresh_list()
+            _draw_image()
+
+        def _toggle_visible(name):
+            _visible()[name] = not _visible().get(name, True)
+            _refresh_list(select=name)
+            _draw_image()
+
+        lst.bind("<<ListboxSelect>>", lambda e: _select_from_list())
+        lst.bind("<space>", lambda e: _toggle_visible(
+            current["name"]) if current["name"] else None)
+
+        def _select_from_list():
+            sel = lst.curselection()
+            if sel and sel[0] < len(_specs()):
+                current["name"] = _specs()[sel[0]][0]
+
+        # ── adjustments for the current mask ─────────────────────────────
+        adj_vars = {key: tk.DoubleVar(value=0.0) for key in (
+            "exposure", "brightness", "contrast", "saturation", "vibrance",
+            "clarity", "texture", "sharpen", "temp", "tint", "blur")}
+        tk.Label(right, text=self._t("mask_adjust_sec"), font=FONT_SECTION,
+                 fg=COLORS["text"], bg=COLORS["bg"]).pack(anchor="w",
+                                                          pady=(10, 0))
+        _ADJ_META = (
+            ("exposure", -3, 3), ("brightness", -1, 1), ("contrast", -1, 1),
+            ("saturation", -1, 1), ("vibrance", -1, 1), ("clarity", -1, 1),
+            ("texture", -1, 1), ("sharpen", -1, 1), ("temp", 0, 12000),
+            ("tint", -100, 100), ("blur", 0, 50),
+        )
+        for i, (key, lo, hi) in enumerate(_ADJ_META):
+            tk.Label(right, text=self._t("adj_" + key), font=FONT_TINY,
+                     fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
+                anchor="w")
+            ttk.Scale(right, from_=lo, to=hi, variable=adj_vars[key]).pack(
+                fill="x")
+
+        def _save_adjusts():
+            name = current["name"]
+            if not name:
+                return
+            adjust = {}
+            for k, var in adj_vars.items():
+                v = round(var.get(), 3)
+                if v != 0.0:
+                    adjust[k] = v
+            _adjusts()[name] = adjust
+
+        def _load_adjusts():
+            name = current["name"]
+            for k, var in adj_vars.items():
+                var.set(0.0)
+            if not name:
+                return
+            for k, v in _adjusts().get(name, {}).items():
+                if k in adj_vars:
+                    adj_vars[k].set(v)
+
+        lst.bind("<<ListboxSelect>>",
+                 lambda e: (_select_from_list(), _load_adjusts()))
+
+        # ── paging ───────────────────────────────────────────────────────
+        def _page(delta):
+            _save_adjusts()
+            idx[0] = (idx[0] + delta) % len(files)
+            current["name"] = None
+            _load_adjusts()
+            _refresh_list()
+            _draw_image()
+            page_lbl.config(text=self._t("mask_page",
+                                         cur=idx[0] + 1, total=len(files)))
+
+        def _page_prev():
+            _page(-1)
+
+        def _page_next():
+            _page(1)
+
+        win.bind("<Left>", lambda e: _page_prev())
+        win.bind("<Right>", lambda e: _page_next())
+
+        bottom = tk.Frame(win, bg=COLORS["bg"])
+        bottom.pack(fill="x", padx=12, pady=(6, 12))
+        FlatButton(bottom, text=self._t("mask_prev"), command=_page_prev,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=8, pady=2, border_color=COLORS["border"]).pack(
+            side="left")
+        FlatButton(bottom, text=self._t("mask_next"), command=_page_next,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=8, pady=2, border_color=COLORS["border"]).pack(
+            side="left", padx=(6, 0))
+        FlatButton(bottom, text=self._t("mask_apply_all"),
+                   command=lambda: _apply_all(),
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=8, pady=2, border_color=COLORS["border"]).pack(
+            side="left", padx=(24, 0))
+
+        def _apply_all():
+            """Copy current photo's masks to every checked photo (deep)."""
+            src = photo[files[idx[0]]]
+            for f in files:
+                photo[f] = {
+                    "specs": [(s[0], s[1], list(s[2]), s[3], s[4])
+                              for s in src["specs"]],
+                    "adjusts": {k: dict(v) for k, v in
+                                src["adjusts"].items()},
+                    "visible": dict(src["visible"])}
+            self.masks.set(_serialize_masks(photo[f]["specs"],
+                                            photo[f]["adjusts"]))
+
+        def _n(v):
+            v = round(float(v), 4)
+            return str(int(v)) if v == int(v) else str(v)
+
+        def _serialize_masks(specs, adjusts):
+            """Per-photo state -> (masks_str, mask_adjust_str)."""
+            mask_segs = []
+            for name, kind, params, feather, invert in specs:
+                if kind == "brush":
+                    seg = f"{name}:brush:" + "|".join(
+                        f"{_n(x)},{_n(y)},{_n(r)}" for x, y, r in params)
+                elif kind in ("subject", "person"):
+                    seg = f"{name}:{kind}"
+                elif kind == "object":
+                    seg = f"{name}:object:{params[0] if params else 'car'}"
+                elif kind == "color":
+                    p = [int(round(float(v))) for v in params[:3]]
+                    seg = f"{name}:color:{_n(p[0])},{_n(p[1])},{_n(p[2])}"
+                    if len(params) > 3:
+                        seg += f",tol={_n(float(params[3]))}"
+                else:
+                    seg = f"{name}:{kind}:" + ",".join(_n(p) for p in params)
+                if feather:
+                    seg += f",feather={_n(feather)}"
+                if invert:
+                    seg += ",invert"
+                mask_segs.append(seg)
+            adj_segs = []
+            for name, adjust in adjusts.items():
+                if not adjust or name not in {s[0] for s in specs}:
+                    continue
+                adj_segs.append(name + ":" + ",".join(
+                    f"{k}={_n(v)}" for k, v in adjust.items()))
+            return ";".join(mask_segs), ";".join(adj_segs)
+
+        def _on_ok():
+            _save_adjusts()
+            if self._photo_masks is None:
+                self._photo_masks = {}
+            for f in files:
+                masks_s, adj_s = _serialize_masks(
+                    photo[f]["specs"], photo[f]["adjusts"])
+                if masks_s == self.masks.get().strip() and \
+                        adj_s == self.mask_adjust.get().strip():
+                    self._photo_masks.pop(f, None)  # same as global
+                else:
+                    self._photo_masks[f] = {"masks": masks_s,
+                                            "mask_adjust": adj_s}
+            win.destroy()
+
+        FlatButton(bottom, text=self._t("ok"), command=_on_ok,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right")
+        FlatButton(bottom, text=self._t("cancel"), command=win.destroy,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=10, pady=3, border_color=COLORS["border"]).pack(
+            side="right", padx=(0, 8))
+
+        tk.Label(win, text=self._t("mask_overlay_hint"), font=FONT_TINY,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
+            fill="x", padx=12, pady=(0, 8))
+
+        _refresh_list()
+        _draw_image()
+        page_lbl.config(text=self._t("mask_page", cur=1, total=len(files)))
+        win.after(50, _draw_image)  # canvas size settled after layout
 
     def _browse_gpx(self):
         """Pick a GPX track file."""
@@ -7895,11 +8495,23 @@ class PhotoSApp:
                 self._progress_path = path
                 self._progress_status = status
 
+        def _per_file_masks(path, opts):
+            """Inject per-photo masks (LR-style workflow) per file."""
+            from dataclasses import replace
+            pm = (self._photo_masks or {}).get(path)
+            if not pm:
+                return opts
+            return replace(
+                opts,
+                masks=pm.get("masks", opts.masks),
+                mask_adjust=pm.get("mask_adjust", opts.mask_adjust))
+
         try:
             result = batch_process(
                 files, options,
                 progress_callback=progress_callback,
                 cancel_checker=lambda: self.cancel_requested,
+                per_file_options=_per_file_masks,
             )
             with self._progress_lock:
                 self._batch_result = result

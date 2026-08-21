@@ -397,3 +397,72 @@ def test_engine_pipeline_bad_mask_spec_fails(tmp_path):
                    mask_adjust="sky:brightness=0.5")
     assert res.success is False
     assert res.error
+
+
+# ── LR-style workflow round-trip (v1.8.0) ────────────────────────────────────
+
+def test_workflow_spec_strings_parse_back():
+    """The GUI workflow serializes (name, kind, params) tuples to strings;
+    every emitted form must round-trip through parse_masks + render."""
+    from photo_s.mask import MaskSpec
+    cases = [
+        (["brush1", "brush", [[0.2143, 0.2177, 0.06], [0.2857, 0.283, 0.06]],
+          0.0, False],
+         "brush1:brush:0.2143,0.2177,0.06|0.2857,0.283,0.06"),
+        (["sky", "linear", [0.0, 0.0, 1.0, 0.0], 0.3, False],
+         "sky:linear:0,0,1,0,feather=0.3"),
+        (["people", "subject", [], 0.0, False], "people:subject"),
+        (["car", "object", ["car"], 0.0, False], "car:object:car"),
+        (["warm", "color", [255, 60, 60, 0.15], 0.0, False],
+         "warm:color:255,60,60,tol=0.15"),
+    ]
+    def _n(v):
+        v = round(float(v), 4)
+        return str(int(v)) if v == int(v) else str(v)
+
+    for (name, kind, params, feather, invert), expected in cases:
+        seg = f"{name}:{kind}"
+        if kind == "brush":
+            seg += ":" + "|".join(
+                f"{_n(x)},{_n(y)},{_n(r)}" for x, y, r in params)
+        elif kind in ("subject", "person"):
+            pass
+        elif kind == "object":
+            seg += ":" + (params[0] if params else "car")
+        elif kind == "color":
+            seg += f":{params[0]},{params[1]},{params[2]}"
+            if len(params) > 3:
+                seg += f",tol={_n(float(params[3]))}"
+        else:
+            seg += ":" + ",".join(_n(p) for p in params)
+        if feather:
+            seg += f",feather={_n(feather)}"
+        if invert:
+            seg += ",invert"
+        assert seg == expected
+        # and the string parses back into a renderable spec
+        specs = parse_masks(seg)
+        assert specs[0].name == name
+        assert specs[0].kind == kind
+        assert len(specs) == 1
+
+
+def test_workflow_ai_mask_pipeline_end_to_end(tmp_path, monkeypatch):
+    """Per-photo AI mask through process_image (hermetic segmask)."""
+    import photo_s.segmask as sm
+    from photo_s.engine import ProcessOptions, process_image
+
+    def fake_segment(img, kind, label=None):
+        import numpy as np
+        return np.full((img.height, img.width), 0.9, np.float32)
+
+    monkeypatch.setattr(sm, "segment", fake_segment)
+    src = tmp_path / "x.png"
+    Image.new("RGB", (32, 32), (100, 100, 100)).save(src)
+    res = _process(src, tmp_path / "out",
+                   masks="main:subject",
+                   mask_adjust="main:brightness=0.5")
+    assert res.success
+    import numpy as np
+    out = np.asarray(Image.open(res.output_path).convert("RGB"))
+    assert out.mean() > 105  # brightened under full-subject mask

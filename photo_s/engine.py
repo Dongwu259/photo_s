@@ -1414,6 +1414,8 @@ def batch_process(
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
     cancel_checker: Optional[Callable[[], bool]] = None,
     trace_callback: Optional[Callable[[str, "ProcessResult"], None]] = None,
+    per_file_options: Optional[Callable[[str, ProcessOptions],
+                                        ProcessOptions]] = None,
 ) -> BatchResult:
     """
     Process multiple images in batch, with optional parallel execution.
@@ -1427,6 +1429,10 @@ def batch_process(
                         been requested. In-flight images finish; images not yet
                         started are skipped (marked as cancelled failures in
                         parallel mode, omitted from results in sequential mode).
+        per_file_options: Optional callable(path, options) -> options called
+                          per file BEFORE output-path reservation, so per-file
+                          fields (e.g. GUI per-photo masks) are consistent with
+                          the pre-assigned output paths. Must be thread-safe.
 
     Returns:
         BatchResult aggregating all individual results.
@@ -1476,6 +1482,8 @@ def batch_process(
     reserved_paths = set()
     predictable = not options.rename_pattern and not options.folder_pattern
     for path in input_paths:
+        if per_file_options is not None:
+            options = per_file_options(path, options)
         opts_copy = replace(options, jobs=1)
         # Pre-assign sequence number (mutable list for process_image compatibility)
         opts_copy._seq_counter = [seq]
