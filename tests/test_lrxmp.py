@@ -394,6 +394,27 @@ def test_train_too_few_samples(tmp_path):
         lrxmp.train_auto_tone(recs, str(tmp_path / "m.npz"))
 
 
+def test_sanitize_package_loads_with_image_dir(tmp_path):
+    """sanitize 包内 image 是 basename：--images 按目录解析（原 0 样本）。"""
+    from PIL import Image
+    bdir = tmp_path / "before"
+    bdir.mkdir()
+    recs = []
+    for i in range(8):
+        Image.new("RGB", (16, 16), (100 + i, 100, 100)).save(
+            bdir / f"img{i}.jpg")
+        recs.append({"path": f"/catalog/img{i}.ARW", "image": f"img{i}.jpg",
+                     "edited": True, "options": {"exposure": 0.5}})
+    X, Y, metas, stats = lrxmp.load_training_data(recs, str(bdir))
+    assert stats == {"edited": 8, "missing": 0, "loaded": 8}
+    assert len(X) == 8 and len(Y) == 8
+    # 无 image_dir：0 样本但 stats 精确说明
+    _x, _y, _m, stats2 = lrxmp.load_training_data(recs, None)
+    assert stats2["missing"] == 8
+    with pytest.raises(LrError, match="缺图跳过"):
+        lrxmp.train_auto_tone(recs, str(tmp_path / "m.npz"))
+
+
 def test_cluster_recipes(tmp_path):
     recs = _synthetic_records(tmp_path)
     res = lrxmp.cluster_recipes(recs, k=4)

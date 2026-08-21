@@ -39,7 +39,7 @@ def train(args) -> None:
     from photo_s.lrxmp import TARGETS, load_training_data
 
     recs = _records(args.data)
-    X, Y, metas = load_training_data(recs, args.images)
+    X, Y, metas, _stats = load_training_data(recs, args.images)
     if len(X) < 30:
         raise SystemExit(f"样本不足（{len(X)} < 30），先合并各电脑数据")
     print(f"样本 {len(X)} 张，目标 {len(TARGETS)} 项")

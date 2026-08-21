@@ -1132,31 +1132,46 @@ def render_before_images(records: Sequence[Dict[str, Any]], out_dir: str,
 def load_training_data(records: Sequence[Dict[str, Any]],
                        image_dir: Optional[str] = None
                        ) -> Tuple[List[List[float]], List[List[float]],
-                                  List[Dict[str, Any]]]:
-    """records → (X, Y, metas)。X = 84 维内容特征（image 键指向 before 图），
-    Y = 9 项目标参数向量（含归一化）。缺图/无编辑的记录跳过。"""
+                                  List[Dict[str, Any]], Dict[str, int]]:
+    """records → (X, Y, metas, stats)。
+
+    X = 84 维内容特征（image 键指向 before 图），Y = 9 项目标参数向量
+    （含归一化）。缺图/无编辑的记录跳过。stats = {"edited", "missing",
+    "loaded"} 供训练错误诊断——sanitize 包的 image 是 basename，
+    ``image_dir`` 给定且路径相对时按它解析（绝对路径原样用）。"""
     from PIL import Image
     X: List[List[float]] = []
     Y: List[List[float]] = []
     metas: List[Dict[str, Any]] = []
+    stats = {"edited": 0, "missing": 0, "loaded": 0}
     for rec in records:
         if not rec.get("edited"):
             continue
+        stats["edited"] += 1
         img_path = rec.get("image")
+        if img_path and image_dir and not os.path.isabs(img_path):
+            # sanitize 包内 image 是 basename：按 image_dir 解析；
+            # 绝对路径（lr-merge 后）原样使用
+            joined = os.path.join(image_dir, img_path)
+            if os.path.exists(joined):
+                img_path = joined
         if not img_path and image_dir:
             img_path = os.path.join(image_dir, os.path.splitext(
                 os.path.basename(rec["path"]))[0] + ".jpg")
         if not img_path or not os.path.exists(img_path):
+            stats["missing"] += 1
             continue
         try:
             img = Image.open(img_path)
         except Exception:
+            stats["missing"] += 1
             continue
+        stats["loaded"] += 1
         X.append(_content_features(img))
         Y.append(_target_vector(rec.get("options") or {}))
         metas.append({"path": rec.get("path"), "image": img_path,
                       "options": rec.get("options")})
-    return X, Y, metas
+    return X, Y, metas, stats
 
 
 def train_auto_tone(records: Sequence[Dict[str, Any]],
@@ -1169,10 +1184,12 @@ def train_auto_tone(records: Sequence[Dict[str, Any]],
     任何机器可训——是 CLIP+MLP 路线的可落地基线（升级路径见模块 docstring）。
     """
     import numpy as np
-    X, Y, _m = load_training_data(records, image_dir)
+    X, Y, _m, stats = load_training_data(records, image_dir)
     if len(X) < 30:
         raise LrError(
-            f"训练样本不足（{len(X)} < 30）——先把各电脑 lr-scan 的数据合并")
+            f"训练样本不足（{len(X)} < 30：共 {len(records)} 条记录、"
+            f"{stats['edited']} 条已编辑、{stats['missing']} 条缺图跳过）"
+            f"——sanitize 数据包需 --images 指 before 图目录，或先 lr-merge")
     Xa = np.asarray(X, dtype=np.float64)
     Ya = np.asarray(Y, dtype=np.float64)
     n, d = Xa.shape
