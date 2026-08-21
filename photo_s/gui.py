@@ -4561,6 +4561,10 @@ class PhotoSApp:
                     type("E", (), {"x": drag["x0"], "y": drag["y0"]})()))
                 x1, y1 = _img_to_rel(*_canvas_to_img(
                     type("E", (), {"x": drag["x1"], "y": drag["y1"]})()))
+                # 点击未拖动 → 零长度渐变：画布上隐形（全 NaN→全 0）、
+                # 批量时 parse 必失败——不创建蒙版
+                if (x1 - x0) ** 2 + (y1 - y0) ** 2 < 1e-12:
+                    return
                 _finish_paint("linear", (x0, y0, x1, y1))
             elif tool.get() == "radial":
                 cx, cy = _img_to_rel(*_canvas_to_img(
