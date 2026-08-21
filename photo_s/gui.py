@@ -3108,19 +3108,22 @@ class PhotoSApp:
     # ── Shared photo reference (v1.8.0) ─────────────────────────────────
 
     def _add_photo_reference(self, parent, on_pick=None, max_w=480,
-                             max_h=240):
+                             max_h=240, render_fn=None):
         """Embed a paged photo preview into an editor dialog.
 
         Shows the first checked photo (fit into max_w x max_h), with
         prev/next paging across all checked photos. ``on_pick(rgb)``, when
         given, is called with the sampled pixel color on click (used by
-        the point-color editor). Returns a dict with ``get_index`` and
-        ``set_index`` so the caller can stay in sync.
+        the point-color editor). ``render_fn(base_img, path) -> Image``,
+        when given, is called on every page change and via the returned
+        ``refresh()`` to show the live effect of the editor's parameters
+        (curve/wheel/HSL/point-color dialogs). Returns a dict with
+        ``get_index``, ``set_index`` and ``refresh``.
         """
         from PIL import Image as PILImage, ImageTk
         files = self._checked_files()
         st = {"files": files, "idx": 0, "tk": None, "pil": None,
-              "scale": 1.0}
+              "scale": 1.0, "orig": None}
         frame = tk.Frame(parent, bg=COLORS["bg"])
         nav = tk.Frame(frame, bg=COLORS["bg"])
         nav.pack(fill="x")
@@ -3129,6 +3132,13 @@ class PhotoSApp:
         page.pack(side="left")
         img_lbl = tk.Label(frame, bg=COLORS["card"])
         img_lbl.pack(fill="both", expand=True, pady=(4, 0))
+
+        def _show(img, path):
+            st["tk"] = ImageTk.PhotoImage(img)
+            img_lbl.config(image=st["tk"])
+            img_lbl.image = st["tk"]
+            page.config(text=self._t(
+                "mask_page", cur=st["idx"] + 1, total=len(st["files"])))
 
         def _load(i=None):
             if i is not None:
@@ -3143,12 +3153,24 @@ class PhotoSApp:
                 base.thumbnail((max_w, max_h), PILImage.LANCZOS)
             except Exception:
                 base = PILImage.new("RGB", (max_w, max_h), (40, 40, 40))
+            st["orig"] = base
             st["pil"] = base
-            st["tk"] = ImageTk.PhotoImage(base)
-            img_lbl.config(image=st["tk"])
-            img_lbl.image = st["tk"]
-            page.config(text=self._t(
-                "mask_page", cur=st["idx"] + 1, total=len(st["files"])))
+            _show(base, path)
+
+        def _refresh():
+            """Re-render with the current editor state (no-op without
+            render_fn). Errors fall back to the plain photo."""
+            if render_fn is None or st.get("orig") is None:
+                return
+            try:
+                base = st["orig"].copy()
+                out = render_fn(base, st["files"][st["idx"]])
+                if out is not None:
+                    out.thumbnail((max_w, max_h), PILImage.LANCZOS)
+                    st["pil"] = out
+                    _show(out, st["files"][st["idx"]])
+            except Exception:
+                _show(st["orig"], st["files"][st["idx"]])
 
         def _flip(delta):
             st["idx"] = (st["idx"] + delta) % max(1, len(st["files"]))
@@ -3177,7 +3199,8 @@ class PhotoSApp:
                 side="left", padx=(0, 6))
         _load()
         return {"get_index": lambda: st["idx"],
-                "set_index": lambda i: _load(i), "frame": frame,
+                "set_index": lambda i: _load(i),
+                "refresh": _refresh, "frame": frame,
                 "files": st["files"]}
 
     def _open_curve_editor(self):
@@ -3204,9 +3227,24 @@ class PhotoSApp:
                              width=320, height=210)
             ed.pack(fill="both", expand=True, padx=8, pady=8)
             editors[ch] = ed
-        # photo reference strip (v1.8.0): see the checked photos while
-        # dragging curves
-        self._add_photo_reference(win)["frame"].pack(fill="x", padx=10)
+
+        def _curve_render(base_img, _path):
+            """Render the current curve state onto the preview (live)."""
+            from .grade import _parse_curves, apply_curves
+            specs = []
+            for ch, ed in editors.items():
+                if CurveEditor.is_identity(ed.get_points()):
+                    continue
+                specs.append(ed.to_spec(ch))
+            if not specs:
+                return base_img
+            return apply_curves(base_img, _parse_curves("|".join(specs)))
+
+        # photo reference strip (v1.8.0): live-renders the curve state
+        ref = self._add_photo_reference(win, render_fn=_curve_render)
+        ref["frame"].pack(fill="x", padx=10)
+        for ed in editors.values():
+            ed.on_change = lambda _e, r=ref: r["refresh"]()
         btns = tk.Frame(win, bg=COLORS["bg"])
         btns.pack(fill="x", padx=10, pady=(0, 10))
         FlatButton(btns, text=self._t("ok"),
@@ -3300,9 +3338,38 @@ class PhotoSApp:
                    hover_bg=COLORS["border"], font=FONT_SMALL,
                    padx=10, pady=3, border_color=COLORS["border"]).pack(
             side="right", padx=(0, 8))
-        # photo reference strip across the bottom (v1.8.0)
-        self._add_photo_reference(win, max_w=380, max_h=150)["frame"].pack(
-            fill="x", padx=10, pady=(0, 4))
+
+        def _wheels_render(base_img, _path):
+            """Render current wheel state onto the preview (live)."""
+            from .grade import _parse_color_grading, apply_color_grading
+            specs = []
+            for zone, wheel in wheels.items():
+                h, s = wheel.get_value()
+                lum = (lums or {}).get(zone, None)
+                lum_val = float(lum.get()) / 100.0 \
+                    if lum is not None else 0.0
+                if s <= 0.02 and abs(lum_val) < 0.005:
+                    continue
+                base = f"{zone}:{int(round(h))},{s:.2f}"
+                specs.append(base if abs(lum_val) < 0.005
+                             else f"{base},{lum_val:.2f}")
+            if not specs:
+                return base_img
+            parsed = _parse_color_grading(";".join(specs))
+            shadows = parsed.get("shadows", (0.0, 0.0, 0.0))
+            midtones = parsed.get("midtones", (0.0, 0.0, 0.0))
+            highs = parsed.get("highlights", (0.0, 0.0, 0.0))
+            return apply_color_grading(base_img, shadows, midtones, highs)
+
+        # photo reference strip across the bottom (v1.8.0), live-rendered
+        ref = self._add_photo_reference(win, max_w=380, max_h=150,
+                                        render_fn=_wheels_render)
+        ref["frame"].pack(fill="x", padx=10, pady=(0, 4))
+        for wheel in wheels.values():
+            wheel.on_change = lambda _e, r=ref: r["refresh"]()
+        for lum_var in lums.values():
+            lum_var.trace_add("write",
+                              lambda *a, r=ref: r["refresh"]())
 
     def _wheels_ok(self, win, wheels, lums=None):
         specs = []
@@ -3336,9 +3403,21 @@ class PhotoSApp:
         panel = HSLPanel(win, labels=labels)
         panel.load(self.hsl.get())
         panel.pack(padx=12, pady=12, side="left")
-        # photo reference strip on the right (v1.8.0)
-        self._add_photo_reference(win, max_w=320, max_h=200)["frame"].pack(
-            side="left", fill="both", expand=True, padx=(0, 12))
+
+        def _hsl_render(base_img, _path):
+            """Render current HSL state onto the preview (live)."""
+            from .grade import _parse_hsl, apply_hsl
+            s = panel.dump()
+            if not s:
+                return base_img
+            return apply_hsl(base_img, _parse_hsl(s))
+
+        # photo reference strip on the right (v1.8.0), live-rendered
+        ref = self._add_photo_reference(win, max_w=320, max_h=200,
+                                        render_fn=_hsl_render)
+        ref["frame"].pack(side="left", fill="both", expand=True,
+                          padx=(0, 12))
+        panel.on_change = lambda *a, r=ref: r["refresh"]()
         btns = tk.Frame(win, bg=COLORS["bg"])
         btns.pack(fill="x", side="bottom", padx=12, pady=(0, 12))
         FlatButton(btns, text=self._t("ok"),
@@ -3496,10 +3575,35 @@ class PhotoSApp:
             pc_b.set(str(rgb[2]))
             _sync_swatch()
 
-        self._add_photo_reference(win, on_pick=_on_pick, max_w=300,
-                                  max_h=240)["frame"].pack(
-            side="left", fill="both", expand=True, padx=(12, 0),
-            pady=(0, 12))
+        def _pc_render(base_img, _path):
+            """Render current point-color targets onto the preview."""
+            from .grade import apply_point_color
+            if not targets:
+                return base_img
+            return apply_point_color(base_img, list(targets))
+
+        ref = self._add_photo_reference(win, on_pick=_on_pick, max_w=300,
+                                        max_h=240,
+                                        render_fn=_pc_render)
+        ref["frame"].pack(side="left", fill="both", expand=True,
+                          padx=(12, 0), pady=(0, 12))
+        # live re-render when a target is added/updated/deleted
+        _orig_add, _orig_update, _orig_delete = _add, _update, _delete
+
+        def _add_refresh():
+            _orig_add()
+            ref["refresh"]()
+
+        def _update_refresh():
+            _orig_update()
+            ref["refresh"]()
+
+        def _delete_refresh():
+            _orig_delete()
+            ref["refresh"]()
+
+        _add, _update, _delete = _add_refresh, _update_refresh, \
+            _delete_refresh
 
         bottom = tk.Frame(win, bg=COLORS["bg"])
         bottom.pack(fill="x", padx=12, pady=(0, 12))
