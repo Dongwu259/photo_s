@@ -202,6 +202,27 @@ class TestBuildOptions:
         assert app.mask_adjust.get() == "sky:exposure=-0.7,saturation=0.2"
         root.destroy()
 
+    def test_masks_ok_v18_specs_roundtrip(self):
+        """v1.8 kinds (combo/object/subject/negative brush) must serialize
+        without crashing and round-trip through the engine parser."""
+        from photo_s.mask import parse_masks
+        root, app = _make_app()
+        specs = [("c1", "combo", ["sky", "&", "face"], 0.3, False),
+                 ("car", "object", ["car"], 0.0, False),
+                 ("sub", "subject", [], 0.2, True),
+                 ("br", "brush", [(0.5, 0.5, 0.05), (0.6, 0.6, -0.04)],
+                  0.0, False)]
+        app._masks_ok(None, specs, {})
+        parsed = parse_masks(app.masks.get())
+        by_name = {s.name: s for s in parsed}
+        assert by_name["c1"].kind == "combo"
+        assert by_name["c1"].params == ("sky", "&", "face")
+        assert by_name["c1"].feather == pytest.approx(0.3)
+        assert by_name["car"].params == ("car",)
+        assert by_name["sub"].invert is True
+        assert by_name["br"].params == ((0.5, 0.5, 0.05), (0.6, 0.6, -0.04))
+        root.destroy()
+
 
 class TestFileList:
     def test_dims_cached_across_refreshes(self):

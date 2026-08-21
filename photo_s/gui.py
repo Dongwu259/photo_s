@@ -1519,6 +1519,43 @@ def _open_image_safe(path):
         return _get_image(path)
 
 
+def _mask_spec_string(name, kind, params, feather, invert) -> str:
+    """Serialize one mask spec tuple -> compact string (shared by the
+    mask workflow OK handler and the v1.7 dialog — they duplicated this
+    and drifted: combo crashed both, _masks_ok missed object/color).
+    """
+    def _n(v):
+        v = round(float(v), 4)
+        return str(int(v)) if v == int(v) else str(v)
+
+    if kind == "brush":
+        # 减模式点存 (x, y, -r)：序列化成 -x,y,r（负号在 x 位，与
+        # MaskSpec.to_string 一致；-r 在半径位 parser 不认）
+        seg = f"{name}:brush:" + "|".join(
+            (f"-{_n(x)},{_n(y)},{_n(-r)}" if r < 0 else
+             f"{_n(x)},{_n(y)},{_n(r)}")
+            for x, y, r in params)
+    elif kind in ("subject", "person"):
+        seg = f"{name}:{kind}"
+    elif kind == "object":
+        seg = f"{name}:object:{params[0] if params else 'car'}"
+    elif kind == "color":
+        p = [int(round(float(v))) for v in params[:3]]
+        seg = f"{name}:color:{_n(p[0])},{_n(p[1])},{_n(p[2])}"
+        if len(params) > 3:
+            seg += f",tol={_n(float(params[3]))}"
+    elif kind == "combo":
+        a, op, b = params
+        seg = f"{name}:combo:{a}{op}{b}"
+    else:
+        seg = f"{name}:{kind}:" + ",".join(_n(p) for p in params)
+    if feather:
+        seg += f",feather={_n(feather)}"
+    if invert:
+        seg += ",invert"
+    return seg
+
+
 def _exif_datetime_str(meta):
     """Normalize meta['date']/['time'] ('YYYY-MM-DD' / 'HH-MM-SS' as read
     by read_exif_metadata) into the EXIF DateTimeOriginal form
@@ -4003,18 +4040,7 @@ class PhotoSApp:
         def _n(v):
             v = round(float(v), 4)
             return str(int(v)) if v == int(v) else str(v)
-        mask_segs = []
-        for name, kind, params, feather, invert in specs:
-            if kind == "brush":
-                seg = (f"{name}:brush:" + "|".join(
-                    f"{_n(x)},{_n(y)},{_n(r)}" for x, y, r in params))
-            else:
-                seg = f"{name}:{kind}:" + ",".join(_n(p) for p in params)
-            if feather:
-                seg += f",feather={_n(feather)}"
-            if invert:
-                seg += ",invert"
-            mask_segs.append(seg)
+        mask_segs = [_mask_spec_string(*s) for s in specs]
         adj_segs = []
         for name, adjust in adjusts.items():
             if name not in {s[0] for s in specs}:
@@ -4800,27 +4826,7 @@ class PhotoSApp:
 
         def _serialize_masks(specs, adjusts):
             """Per-photo state -> (masks_str, mask_adjust_str)."""
-            mask_segs = []
-            for name, kind, params, feather, invert in specs:
-                if kind == "brush":
-                    seg = f"{name}:brush:" + "|".join(
-                        f"{_n(x)},{_n(y)},{_n(r)}" for x, y, r in params)
-                elif kind in ("subject", "person"):
-                    seg = f"{name}:{kind}"
-                elif kind == "object":
-                    seg = f"{name}:object:{params[0] if params else 'car'}"
-                elif kind == "color":
-                    p = [int(round(float(v))) for v in params[:3]]
-                    seg = f"{name}:color:{_n(p[0])},{_n(p[1])},{_n(p[2])}"
-                    if len(params) > 3:
-                        seg += f",tol={_n(float(params[3]))}"
-                else:
-                    seg = f"{name}:{kind}:" + ",".join(_n(p) for p in params)
-                if feather:
-                    seg += f",feather={_n(feather)}"
-                if invert:
-                    seg += ",invert"
-                mask_segs.append(seg)
+            mask_segs = [_mask_spec_string(*s) for s in specs]
             adj_segs = []
             for name, adjust in adjusts.items():
                 if not adjust or name not in {s[0] for s in specs}:
