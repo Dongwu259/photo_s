@@ -320,6 +320,32 @@ def test_apply_local_string_keys_bad_strings_raise_maskerror():
             apply_local(img, mask, adj)
 
 
+# ── Combo cycle / depth safety (v1.8) ───────────────────────────────────────
+
+def test_combo_self_reference_rejected_at_parse():
+    with pytest.raises(MaskError, match="itself"):
+        parse_masks("a:combo:a&b; b:linear:0,0,1,1")
+
+
+def test_combo_cycle_raises_maskerror_not_recursionerror():
+    specs = parse_masks("a:combo:b&c; b:combo:a&c; c:linear:0,0,1,1")
+    refs = {s.name: s for s in specs}
+    with pytest.raises(MaskError, match="cycle"):
+        render_mask(refs["a"], 16, 16, refs=refs)
+
+
+def test_combo_deep_chain_raises_clear_error():
+    n = 70
+    segs = [f"lin{i}:linear:0,0,1,1" for i in range(n)]
+    for i in range(n - 1):
+        segs.append(f"m{i}:combo:m{i+1}&lin{i}")
+    segs.append(f"m{n-1}:combo:lin{n-1}&lin0")
+    specs = parse_masks(";".join(segs))
+    refs = {s.name: s for s in specs}
+    with pytest.raises(MaskError, match="too deep"):
+        render_mask(refs["m0"], 16, 16, refs=refs)
+
+
 # ── v1.8: brush / combo / string adjustments ─────────────────────────────────
 
 def test_brush_renders_stroke_union():

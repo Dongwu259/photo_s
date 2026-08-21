@@ -278,6 +278,9 @@ def _parse_combo(seg: str, name: str, params: str) -> MaskSpec:
                 raise MaskError(f"invalid mask name in combo (got {seg!r})")
             if a == b:
                 raise MaskError(f"combo operands must differ (got {seg!r})")
+            if name in (a, b):
+                raise MaskError(
+                    f"combo {name!r} cannot reference itself (got {seg!r})")
             return MaskSpec("combo", (a, op, b), 0.0, False, name)
     raise MaskError(
         f"combo needs 'A&B' or 'A-B' (got {seg!r})")
@@ -405,13 +408,17 @@ def _coords(w: int, h: int):
 
 def render_mask(spec: MaskSpec, w: int, h: int,
                 img: Image.Image = None,
-                refs: dict = None) -> np.ndarray:
+                refs: dict = None,
+                _stack: tuple = None) -> np.ndarray:
     """Render one mask as a float32 ``h x w`` array in 0..1.
 
     ``img`` is required for color masks (they measure the image's own
     pixels) and AI masks (they segment it); geometric masks ignore it.
     ``refs`` (name -> MaskSpec) is required for combo masks, which combine
-    two referenced masks; recursion is depth-limited and cycle-checked.
+    two referenced masks; combo recursion is depth-limited (64) and
+    cycle-checked — a cycle raises :class:`MaskError` with the chain path
+    instead of ``RecursionError``. ``_stack`` is the internal combo-name
+    path for cycle/depth detection (not part of the public API).
     """
     x, y = _coords(w, h)
     if spec.kind in _AI_TYPES:
@@ -426,13 +433,23 @@ def render_mask(spec: MaskSpec, w: int, h: int,
             raise MaskError(
                 f"combo mask {spec.name!r} needs the full mask list "
                 f"(render_all/engine passes refs)")
+        stack = _stack or ()
+        if len(stack) >= 64:
+            raise MaskError(
+                f"combo chain too deep: "
+                f"{' -> '.join(stack + (spec.name,))}")
+        if spec.name in stack:
+            raise MaskError(
+                f"combo cycle detected: "
+                f"{' -> '.join(stack + (spec.name,))}")
+        stack = stack + (spec.name,)
         a_name, op, b_name = spec.params
         for n in (a_name, b_name):
             if n not in refs:
                 raise MaskError(
                     f"combo references unknown mask {n!r} (has {sorted(refs)})")
-        a = render_mask(refs[a_name], w, h, img=img, refs=refs)
-        b = render_mask(refs[b_name], w, h, img=img, refs=refs)
+        a = render_mask(refs[a_name], w, h, img=img, refs=refs, _stack=stack)
+        b = render_mask(refs[b_name], w, h, img=img, refs=refs, _stack=stack)
         mask = np.minimum(a, b) if op == "&" else np.clip(a - b, 0.0, 1.0)
     elif spec.kind == "linear":
         x0, y0, x1, y1 = spec.params
