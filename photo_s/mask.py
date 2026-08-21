@@ -157,7 +157,9 @@ def _parse_mask_segment(seg: str, index: int) -> MaskSpec:
         return MaskSpec("person", (), 0.0, False, name)
     if mtype == "object":
         label = params.strip().lower()
-        if not label or any(c in label for c in ":;,= "):
+        # 空格允许（traffic light / hot dog 等 15 个 COCO 类含空格），
+        # label 是段末位，空格不会破坏 ;/: 结构
+        if not label or any(c in label for c in ":;,="):
             raise MaskError(
                 f"object mask needs one COCO label like 'object:car' "
                 f"(got {seg!r})")

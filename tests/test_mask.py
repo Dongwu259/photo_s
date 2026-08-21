@@ -348,6 +348,15 @@ def test_combo_deep_chain_raises_clear_error():
 
 # ── NaN / Inf rejection (v1.8) ──────────────────────────────────────────────
 
+def test_object_label_allows_spaces():
+    # traffic light / hot dog 等 15 个 COCO 类名含空格（v1.8）
+    spec = parse_masks("x:object:traffic light")[0]
+    assert spec.kind == "object" and spec.params == ("traffic light",)
+    for bad in ("a;b", "a:b", "a=b", "a,b"):
+        with pytest.raises(MaskError):
+            parse_masks(f"x:object:{bad}")
+
+
 def test_nan_inf_params_rejected_everywhere():
     # NaN/Inf slip past range comparisons and silently render black masks.
     for seg in ("r:radial:0.5,0.5,nan,0.2", "r:linear:0,0,inf,1",
