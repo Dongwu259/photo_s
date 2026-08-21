@@ -549,6 +549,7 @@ STRINGS = {
         "mask_show": "显示",
         "mask_hide": "隐藏",
         "mask_del": "删除蒙版",
+        "mask_undo": "撤销 (⌘Z)",
         "mask_ai_empty": "AI 未识别到该内容（蒙版为空）",
         "mask_tool": "工具",
         "mask_tool_linear": "线性渐变",
@@ -1146,6 +1147,7 @@ STRINGS = {
         "mask_show": "Show",
         "mask_hide": "Hide",
         "mask_del": "Delete mask",
+        "mask_undo": "Undo (⌘Z)",
         "mask_ai_empty": "AI found nothing (empty mask)",
         "mask_tool": "Tool",
         "mask_tool_linear": "Linear gradient",
@@ -3838,8 +3840,8 @@ class PhotoSApp:
         win.title(self._t("mask_workflow"))
         win.configure(bg=COLORS["bg"])
         win.transient(self.root)
-        win.geometry("980x680")
-        win.minsize(760, 520)
+        win.geometry("1320x860")
+        win.minsize(1080, 700)
 
         # ── per-photo state ──────────────────────────────────────────────
         # photo[path] = {"specs": [(name, kind, params, feather, invert)],
@@ -3864,8 +3866,13 @@ class PhotoSApp:
                         "visible": {s[0]: True for s in specs}}
         idx = [0]
         current = {"name": None}  # selected mask name
+        # undo history: deep snapshots of the CURRENT photo's state, pushed
+        # before every mutating action; Ctrl+Z / undo button pops one.
+        undo_stack = []
+        _MAX_UNDO = 50
         tool = tk.StringVar(value="brush")
         brush_r = tk.DoubleVar(value=0.06)
+        feather_v = tk.DoubleVar(value=0.0)  # feather as fraction 0..1
         ai_label = tk.StringVar(value="car")
         color_vals = [tk.StringVar(value=v) for v in ("255", "60", "60")]
         _img_photo = {"tk": None, "pil": None, "scale": 1.0,
@@ -3907,6 +3914,33 @@ class PhotoSApp:
 
         def _visible():
             return photo[files[idx[0]]]["visible"]
+
+        def _snapshot():
+            """Deep copy of the current photo's mask state (for undo)."""
+            return {"specs": [(s[0], s[1], list(s[2]), s[3], s[4])
+                              for s in _specs()],
+                    "adjusts": {k: dict(v) for k, v in
+                                _adjusts().items()},
+                    "visible": dict(_visible())}
+
+        def _push_undo():
+            undo_stack.append((files[idx[0]], _snapshot()))
+            del undo_stack[:-_MAX_UNDO]
+
+        def _undo():
+            if not undo_stack:
+                return
+            path, snap = undo_stack.pop()
+            if path != files[idx[0]]:
+                # undo belongs to another photo: jump there, then restore
+                idx[0] = files.index(path)
+            photo[path] = snap
+            current["name"] = None
+            _load_adjusts()
+            _refresh_list()
+            _draw_image()
+            page_lbl.config(text=self._t("mask_page",
+                                         cur=idx[0] + 1, total=len(files)))
 
         def _refresh_list(select=None):
             lst.delete(0, tk.END)
@@ -4006,6 +4040,7 @@ class PhotoSApp:
 
         def _set_current_mask(name, spec, adjust=None):
             """Replace or append the named mask in the current photo."""
+            _push_undo()
             specs = _specs()
             for i, s in enumerate(specs):
                 if s[0] == name:
@@ -4023,6 +4058,10 @@ class PhotoSApp:
             name = current["name"]
             if not name or not any(s[0] == name for s in _specs()):
                 name = _new_spec_name(kind)
+            # brush dots each carry their own radius; feather applies to
+            # every kind except color (color has tol, not feather)
+            if kind != "color":
+                feather = feather_v.get()
             spec = (name, kind, list(params), feather, False)
             _set_current_mask(name, spec, adjust)
 
@@ -4056,10 +4095,21 @@ class PhotoSApp:
             if tool.get() == "brush":
                 drag["dots"].append((evt.x, evt.y))
             canvas.delete("guide")
-            if tool.get() in ("linear", "radial"):
+            if tool.get() == "linear":
                 canvas.create_line(drag["x0"], drag["y0"], evt.x, evt.y,
                                    fill="#ffffff", width=1, tags="guide",
                                    dash=(4, 3))
+            elif tool.get() == "radial":
+                # dashed ellipse: start point is the center, drag extends
+                # the radii; bounding box = center ± (dx, dy)
+                cx, cy = drag["x0"], drag["y0"]
+                rx, ry = abs(evt.x - cx), abs(evt.y - cy)
+                canvas.create_oval(cx - rx, cy - ry, cx + rx, cy + ry,
+                                   outline="#ffffff", width=1.5,
+                                   tags="guide", dash=(5, 4))
+                canvas.create_line(drag["x0"], drag["y0"], evt.x, evt.y,
+                                   fill="#ffffff", width=1, tags="guide",
+                                   dash=(2, 3))
             elif tool.get() == "brush":
                 for px, py in drag["dots"]:
                     r = max(2, brush_r.get() * 30)
@@ -4160,6 +4210,11 @@ class PhotoSApp:
         tk.Label(right, text=self._t("mask_brush_size"), font=FONT_TINY,
                  fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(anchor="w")
         ttk.Scale(right, from_=0.01, to=0.3, variable=brush_r).pack(
+            fill="x", pady=(0, 2))
+        tk.Label(right, text=self._t("mask_feather"), font=FONT_TINY,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(anchor="w")
+        ttk.Scale(right, from_=0, to=100, variable=feather_v,
+                  command=lambda _v: _apply_feather()).pack(
             fill="x", pady=(0, 8))
         FlatButton(right, text=self._t("mask_add"), command=lambda:
                    current.__setitem__("name", None),
@@ -4178,6 +4233,7 @@ class PhotoSApp:
             name = current["name"]
             if not name:
                 return
+            _push_undo()
             _specs()[:] = [s for s in _specs() if s[0] != name]
             _adjusts().pop(name, None)
             _visible().pop(name, None)
@@ -4186,6 +4242,9 @@ class PhotoSApp:
             _draw_image()
 
         def _toggle_visible(name):
+            if not name:
+                return
+            _push_undo()
             _visible()[name] = not _visible().get(name, True)
             _refresh_list(select=name)
             _draw_image()
@@ -4198,6 +4257,22 @@ class PhotoSApp:
             sel = lst.curselection()
             if sel and sel[0] < len(_specs()):
                 current["name"] = _specs()[sel[0]][0]
+                feather_v.set(_specs()[sel[0]][3] * 100)
+
+        def _apply_feather(*_):
+            """Live-update the selected mask's feather from the slider."""
+            name = current["name"]
+            if not name:
+                return
+            for i, s in enumerate(_specs()):
+                if s[0] == name and s[1] != "color":
+                    if abs(s[3] - feather_v.get() / 100.0) > 1e-6:
+                        _push_undo()
+                    _specs()[i] = (s[0], s[1], list(s[2]),
+                                   feather_v.get() / 100.0, s[4])
+                    _refresh_list(select=name)
+                    _draw_image()
+                    return
 
         # ── adjustments for the current mask ─────────────────────────────
         adj_vars = {key: tk.DoubleVar(value=0.0) for key in (
@@ -4262,6 +4337,8 @@ class PhotoSApp:
 
         win.bind("<Left>", lambda e: _page_prev())
         win.bind("<Right>", lambda e: _page_next())
+        win.bind("<Command-z>", lambda e: _undo())
+        win.bind("<Control-z>", lambda e: _undo())
 
         bottom = tk.Frame(win, bg=COLORS["bg"])
         bottom.pack(fill="x", padx=12, pady=(6, 12))
@@ -4281,9 +4358,15 @@ class PhotoSApp:
                    hover_bg=COLORS["border"], font=FONT_SMALL,
                    padx=8, pady=2, border_color=COLORS["border"]).pack(
             side="left", padx=(24, 0))
+        FlatButton(bottom, text=self._t("mask_undo"), command=_undo,
+                   bg=COLORS["bg"], fg=COLORS["text"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=8, pady=2, border_color=COLORS["border"]).pack(
+            side="left", padx=(8, 0))
 
         def _apply_all():
             """Copy current photo's masks to every checked photo (deep)."""
+            _push_undo()
             src = photo[files[idx[0]]]
             for f in files:
                 photo[f] = {
