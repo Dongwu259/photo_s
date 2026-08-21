@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "photo-s-tools"
-version = "1.7.0"
+version = "1.7.1"
 description = "批量图片压缩与格式转换工具 — Batch Image Compression & Format Conversion (CLI + GUI)"
 readme = "README.md"
 requires-python = ">=3.9"
