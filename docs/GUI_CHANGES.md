@@ -537,3 +537,20 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   用户同名预设覆盖内置。⚠️ `_apply_preset_defaults` 现在跳过「等于 dataclass
   默认值」的字段——内置预设的默认 suffix 不再覆盖 batch 的 `_processed`
   （修了一个潜在的用户预设也受影响的问题）。
+
+- **高光恢复滑杆**（`adj_frame` row 8）：`self.highlight_recovery`
+  （tk.DoubleVar 放 `__init__`，0-1，默认 0=关）。对应
+  `ProcessOptions.highlight_recovery` → 管线 auto_levels 之后、几何之前的
+  LR 式高光压缩（`grade.apply_highlight_recovery`，200 起阈值 + 幂曲线 +
+  天花板随强度下降，单调、中间调不动，LUT per-channel）。
+- **RAW 色彩空间下拉**（`opts_frame` row 13）：`self.raw_color_space`
+  （sRGB/AdobeRGB/ProPhotoRGB，默认 sRGB）。sRGB 自动打 ICC；宽色域不加
+  标记（PIL 无对应内置 profile）。
+- **RAW 16-bit 勾选**（`opts_frame` row 14）：`self.raw_16bit`
+  （tk.BooleanVar）。解码 16-bit，TIFF 输出经 tifffile 写 16-bit（需
+  `pip install tifffile`，缺失抛清晰 per-file 错误）；JPEG/PNG 回退 8-bit。
+- **镜头档案下拉**（`sec_lens` row 6）：`self.lens_profile`
+  （tk.StringVar，值 = lens-profile save 维护的档案名）。管线开头把档案
+  解析进 lens_distort/vignette/ca（显式参数优先；未知档案 per-file 报错）。
+- 新增 GUI STRINGS（zh/en）：`highlight_recovery`、`raw_color_space`、
+  `raw_16bit`、`lens_profile`。

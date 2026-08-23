@@ -3,7 +3,7 @@
 > 以代码实际为准（v1.8.0），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
-## 1. CLI 命令（33 个）
+## 1. CLI 命令（34 个）
 
 | 命令 | 作用 |
 |---|---|
@@ -33,6 +33,7 @@
 | `gallery` | HTML 画廊 |
 | `watch` | 目录监视自动处理 |
 | `preset` | 预设配置管理（save 捕获全选项；batch/compress/convert 支持 `--preset NAME` 一键套用，显式 CLI 参数优先；**内置 `lr-look` 预设**：S 曲线+自然饱和+导出锐化，rawpy 平淡基线之上接近 LR 默认渲染，用户同名预设可覆盖） |
+| `lens-profile` | **镜头档案库**（用户维护，~/.photos/lens_profiles.json）：`save NAME --distort K1 --vignette A,M --ca R,B` / `list` / `delete`；batch/compress/convert `--lens-profile NAME` 查表套用三个手动镜头参数（显式 lens_* 参数优先） |
 | `config` | TOML 配置文件管理 |
 | `info` | 格式/环境探测（`--json`） |
 | `serve` | REST API（AI agent 集成，含 `/process/stream` SSE 进度） |
@@ -63,14 +64,14 @@
 | 白平衡 | wb_temp（色温 K）、wb_reference（灰卡采样） |
 | 曝光 | ev（2^EV）、auto_exposure |
 | 降噪 | denoise 0-20（SCUNet provider 优先，否则 NLM） |
-| 校正 | auto_levels（自动色阶）、log_curve（LOG 还原）、auto_straighten（扶正）、lens_distort/lens_vignette/lens_ca（镜头矫正） |
+| 校正 | auto_levels（自动色阶）、**highlight_recovery（LR 式高光恢复 0-1：压缩硬切高光恢复渐变）**、log_curve（LOG 还原）、auto_straighten（扶正）、lens_distort/lens_vignette/lens_ca/lens_profile（镜头矫正 + 命名档案库） |
 | 局部调整 | masks（命名蒙版 linear/radial/color）、mask_adjust（蒙版内 11 项标量）、point_color（取样色定向） |
 | 构图 | crop、crop_ratio、rotate、flip、pad |
 | 多尺寸 | output_sizes（`label:WxH,…`） |
 | 元数据 | preserve_exif、strip_gps、scrub、date_shift、sync_date、gpx_trace、PhotoS: 打标 |
 | 命名/组织 | prefix/suffix、rename_pattern、folder_pattern（date/date-camera/自定义） |
 | 输出 | output_dir、overwrite、remove_original、keep_mtime、resume、print_size、watermark |
-| RAW | rawpy 核心：37 种扩展原生读写、raw_half_size、raw_auto_bright、raw_demosaic（去马赛克算法 auto/ahd/vng/ppg/dcb/dht/amaze）、解码输出自动打 sRGB ICC |
+| RAW | rawpy 核心：37 种扩展原生读写、raw_half_size、raw_auto_bright、raw_demosaic（去马赛克算法 auto/ahd/vng/ppg/dcb/dht/amaze）、raw_color_space（sRGB/AdobeRGB/ProPhotoRGB，sRGB 自动打 ICC）、raw_16bit（16-bit 解码，TIFF 输出经 tifffile）、解码输出自动打 sRGB ICC |
 
 **RAW 输入**：.arw .cr2 .cr3 .crw .dng .erf .kdc .mef .mos .mrw .nef .nrw .orf .pef .raf .raw .rw2 .rwl .sr2 .srf .srw .x3f .3fr …（共 37 种）
 
@@ -118,7 +119,7 @@
 
 ## 8. 可选依赖（extras）
 
-`raw`(no-op，rawpy 已核心) · `exif`(piexif) · `watch`(watchdog) · `gui`(tkinterdnd2) · `heic` · `avif` · `enhance`(opencv: NLM 降噪+扶正+HDR 合并+人脸模糊) · `mcp`
+`raw`(no-op，rawpy 已核心) · `exif`(piexif) · `watch`(watchdog) · `gui`(tkinterdnd2) · `heic` · `avif` · `enhance`(opencv: NLM 降噪+扶正+HDR 合并+人脸模糊) · `tiff16`(tifffile: `--raw-16bit` 16-bit TIFF 输出) · `mcp`
 
 ## 9. 平台 / 验证
 

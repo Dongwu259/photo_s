@@ -39,7 +39,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | 批量压缩 | ✅ | ✅ | JPEG/WebP/HEIC/AVIF 质量调优、色度子采样（444/422/420） |
 | 目标体积模式 | ✅ | ✅ | 自动调优质量以控制在目标文件体积以内 |
 | 格式转换 | ✅ | ✅ | JPEG / PNG / WebP / TIFF / BMP / HEIC / AVIF |
-| RAW 解码 | ✅ | ✅ | 22+ 种相机 RAW 格式，内置支持（rawpy/libraw）；去马赛克算法可选、输出自动打 sRGB ICC |
+| RAW 解码 | ✅ | ✅ | 22+ 种相机 RAW 格式，内置支持（rawpy/libraw）；去马赛克算法可选、色彩空间（sRGB/AdobeRGB/ProPhotoRGB）、16-bit TIFF 输出、自动打 sRGB ICC |
 | 缩放 / 比例 | ✅ | ✅ | 最大尺寸、百分比或最长边上限 |
 | 视觉预览 | ✅ | — | 原图↔处理后实时并排预览（经真实管线渲染） |
 | 影调与色彩 | ✅ | ✅ | 亮度/对比度/饱和度/伽马/锐化，黑白、复古 |
@@ -51,12 +51,13 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | HSL 分色 | ✅ | ✅ | 8 色域，色相/饱和/亮度偏移 |
 | 点颜色 | ✅ | ✅ | 取样色定向色相/饱和/亮度 + 范围容差 |
 | 局部蒙版 | ✅ | ✅ | 命名线性/径向/颜色范围蒙版，蒙版内 11 项局部调整 |
-| 镜头矫正 | ✅ | ✅ | 手动畸变 k1 / 去暗角 / 消色差（纯 numpy） |
+| 镜头矫正 | ✅ | ✅ | 手动畸变 k1 / 去暗角 / 消色差（纯 numpy）；用户维护的命名镜头档案 |
 | 感知分析 | ✅ | ✅ | 直方图/通道统计/色温倾向/曝光/模糊（`analyze`） |
 | 自然饱和度 / 清晰度 / 纹理 | ✅ | ✅ | 反向加权饱和，局部对比 |
 | 去雾 / 暗角 / 颗粒 | ✅ | ✅ | 暗通道去雾，径向暗角，胶片颗粒 |
 | 曝光 | ✅ | ✅ | 曝光档位调整，或自动归一化到目标 |
 | 自动色阶 | ✅ | ✅ | 2% 裁切直方图拉伸 |
+| 高光恢复 | ✅ | ✅ | LR 式：压缩硬切高光，恢复出渐变细节 |
 | LOG 还原 | ✅ | ✅ | SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG（1D LUT，零依赖） |
 | LUT 调色 | ✅ | ✅ | .cube 三线性（插件加四面体 + 5 个电影预设） |
 | 降噪 | ✅ | ✅¹ | NLM（`[enhance]` 可选依赖） |
@@ -112,6 +113,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 ```bash
 pip install photo-s-tools            # 核心——内置 RAW 解码（rawpy）
 pip install "photo-s-tools[enhance]" # + opencv：人脸模糊 / HDR / 降噪 / 扶正
+pip install "photo-s-tools[tiff16]"  # + tifffile：16-bit RAW → TIFF 输出
 pip install "photo-s-tools[mcp]"     # + MCP server（Python 3.10+）
 ```
 
@@ -128,7 +130,7 @@ photo-s select ~/shoot/ -r --selects-dir 精选 --rejects-dir 淘汰 --dry-run
 photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 ```
 
-`photo-s --help` 列出全部 33 个子命令。语言：`--language en|zh|auto`。
+`photo-s --help` 列出全部 34 个子命令。语言：`--language en|zh|auto`。
 
 ---
 
@@ -136,7 +138,7 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/FEATURES.md`](FEATURES.md) | 完整功能清单——33 个 CLI 命令、引擎管线 |
+| [`docs/FEATURES.md`](FEATURES.md) | 完整功能清单——34 个 CLI 命令、引擎管线 |
 | [`docs/AGENT_API.md`](AGENT_API.md) | Agent 契约：JSON 结构、退出码、REST、MCP |
 | [`docs/PLUGINS.md`](PLUGINS.md) | 插件系统：SCUNet 降噪、LUT、自己写插件 |
 | [`docs/GUI_CHANGES.md`](GUI_CHANGES.md) | GUI 行为与接口契约 |

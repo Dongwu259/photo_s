@@ -254,6 +254,8 @@ STRINGS = {
         "raw_half_size": "RAW 半尺寸解码（更快）",
         "raw_auto_bright": "RAW 自动亮度",
         "raw_demosaic": "RAW 去马赛克算法",
+        "raw_color_space": "RAW 色彩空间",
+        "raw_16bit": "RAW 16-bit 解码（TIFF 输出）",
         "delete_original": "处理后删除原文件",
         "strip_gps": "移除 GPS 位置信息",
         "keep_mtime": "保留修改时间",
@@ -452,6 +454,7 @@ STRINGS = {
         "gamma": "伽马",
         "sharpen": "锐化",
         "export_sharpen": "导出锐化（0 关闭）",
+        "highlight_recovery": "高光恢复（0 关闭）",
         "grayscale": "黑白",
         "sepia": "复古",
         # Composition
@@ -525,6 +528,7 @@ STRINGS = {
         "lens_vignette_hint": "amount[,midpoint]；空 = 关闭",
         "lens_ca": "消色差",
         "lens_ca_hint": "r_scale,b_scale 如 0.999,1.001；空 = 关闭",
+        "lens_profile": "镜头档案（lens-profile save 维护）",
         "dlt_point_color": "点颜色（取样色 + 范围）",
         "dlt_masks": "局部蒙版编辑器",
         "pc_add": "添加",
@@ -869,6 +873,8 @@ STRINGS = {
         "auto_rotate": "Auto-rotate (EXIF Orientation)",
         "raw_half_size": "RAW half-size decode (faster)",
         "raw_demosaic": "RAW demosaic algorithm",
+        "raw_color_space": "RAW color space",
+        "raw_16bit": "16-bit RAW decode (TIFF output)",
         "raw_auto_bright": "RAW auto brightness",
         "delete_original": "Delete original after processing",
         "strip_gps": "Strip GPS data",
@@ -1068,6 +1074,7 @@ STRINGS = {
         "gamma": "Gamma",
         "sharpen": "Sharpen",
         "export_sharpen": "Export sharpen (0 off)",
+        "highlight_recovery": "Highlight recovery (0 off)",
         "grayscale": "Grayscale",
         "sepia": "Sepia",
         # Composition
@@ -1141,6 +1148,7 @@ STRINGS = {
         "lens_vignette_hint": "amount[,midpoint]; blank = off",
         "lens_ca": "CA fix",
         "lens_ca_hint": "r_scale,b_scale e.g. 0.999,1.001; blank = off",
+        "lens_profile": "Lens profile (maintained via lens-profile save)",
         "dlt_point_color": "Point color (sample + range)",
         "dlt_masks": "Local mask editor",
         "pc_add": "Add",
@@ -1715,6 +1723,8 @@ class PhotoSApp:
         self.target_size_value = tk.StringVar(value="500")
         self.target_size_unit = tk.StringVar(value="KB")
         self.raw_demosaic = tk.StringVar(value="auto")
+        self.raw_color_space = tk.StringVar(value="sRGB")
+        self.raw_16bit = tk.BooleanVar(value=False)
         self.raw_half_size = tk.BooleanVar(value=False)
         self.raw_auto_bright = tk.BooleanVar(value=True)
         self.auto_rotate = tk.BooleanVar(value=True)
@@ -1736,6 +1746,7 @@ class PhotoSApp:
         self.gamma = tk.DoubleVar(value=1.0)
         self.sharpen = tk.DoubleVar(value=1.0)
         self.export_sharpen = tk.DoubleVar(value=0.0)
+        self.highlight_recovery = tk.DoubleVar(value=0.0)
         self.grayscale = tk.BooleanVar(value=False)
         self.sepia = tk.BooleanVar(value=False)
         # Correction (exposure / LOG / denoise / straighten)
@@ -1769,6 +1780,7 @@ class PhotoSApp:
         self.lens_distort = tk.StringVar(value="")
         self.lens_vignette = tk.StringVar(value="")
         self.lens_ca = tk.StringVar(value="")
+        self.lens_profile = tk.StringVar(value="")
         self.auto_levels = tk.BooleanVar(value=False)
         self.srgb = tk.BooleanVar(value=False)
         self.flatten_cmyk = tk.BooleanVar(value=False)
@@ -2743,6 +2755,19 @@ class PhotoSApp:
             state="readonly", font=FONT_BODY, width=7)
         dem_combo.grid(row=12, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
 
+        # RAW output color space (wider gamuts untagged)
+        tk.Label(opts_frame, text=self._t("raw_color_space"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=13, column=0, sticky="w", pady=(10, 0))
+        cs_combo = ttk.Combobox(
+            opts_frame, textvariable=self.raw_color_space,
+            values=["sRGB", "AdobeRGB", "ProPhotoRGB"], state="readonly",
+            font=FONT_BODY, width=10)
+        cs_combo.grid(row=13, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+
+        self._add_checkbox(opts_frame, self._t("raw_16bit"),
+                           self.raw_16bit, row=14)
+
         # ── Watermark ────────────────────────────────────────────────────────
         wm_frame = self._add_collapsible_section(FX, "sec_watermark")
         wm_frame.columnconfigure(1, weight=1)
@@ -2844,6 +2869,19 @@ class PhotoSApp:
                   command=lambda v, lbl=es_val: lbl.config(
                       text=f"{float(v):.2f}")).grid(
             row=7, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+
+        # Highlight recovery (LR-style; 0 = off)
+        tk.Label(adj_frame, text=self._t("highlight_recovery"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=8, column=0, sticky="w", pady=(8, 0))
+        hr_val = tk.Label(adj_frame, text="0.00", font=FONT_SMALL,
+                          fg=COLORS["text_secondary"], bg=COLORS["card"],
+                          width=5)
+        hr_val.grid(row=8, column=2, sticky="e", pady=(8, 0))
+        ttk.Scale(adj_frame, from_=0.0, to=1.0, variable=self.highlight_recovery,
+                  command=lambda v, lbl=hr_val: lbl.config(
+                      text=f"{float(v):.2f}")).grid(
+            row=8, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
 
         # ── Composition (crop / rotate / flip / pad) ─────────────────────────
         comp_frame = self._add_collapsible_section(ADJ, "sec_composition")
@@ -3101,6 +3139,20 @@ class PhotoSApp:
                      font=FONT_TINY, fg=COLORS["text_secondary"],
                      bg=COLORS["card"]).grid(
                 row=r + 1, column=0, columnspan=3, sticky="w", pady=(0, 4))
+
+        # Lens profile (user-maintained; see photo-s lens-profile)
+        tk.Label(lens_frame, text=self._t("lens_profile"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=6, column=0, sticky="w", pady=(8, 0))
+        try:
+            from .lensprofile import lens_profile_names
+            _lens_profiles = [""] + lens_profile_names()
+        except Exception:
+            _lens_profiles = [""]
+        lp_combo = ttk.Combobox(
+            lens_frame, textvariable=self.lens_profile,
+            values=_lens_profiles, state="readonly", font=FONT_BODY, width=18)
+        lp_combo.grid(row=6, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
 
         # ── Metadata section ──────────────────────────────────────────────────
         meta_frame = self._add_collapsible_section(META, "sec_metadata")
@@ -5789,20 +5841,22 @@ class PhotoSApp:
 
         # booleans
         for name in ("preserve_exif", "optimize", "progressive", "overwrite",
-                     "raw_half_size", "raw_auto_bright", "auto_rotate",
-                     "remove_original", "strip_gps", "keep_mtime",
-                     "grayscale", "sepia", "auto_levels", "srgb",
-                     "flatten_cmyk", "evaluate", "blur_score", "resume",
-                     "sync_date", "scrub"):
+                     "raw_half_size", "raw_auto_bright", "raw_16bit",
+                     "auto_rotate", "remove_original", "strip_gps",
+                     "keep_mtime", "grayscale", "sepia", "auto_levels",
+                     "srgb", "flatten_cmyk", "evaluate", "blur_score",
+                     "resume", "sync_date", "scrub"):
             _set(getattr(self, name), getattr(opts, name), bool)
         # floats / sliders
         for name in ("brightness", "contrast", "saturation", "gamma",
                      "sharpen", "ev", "wb_tint", "vibrance", "clarity",
                      "texture", "dehaze"):
             _set(getattr(self, name), getattr(opts, name), float)
-        # export sharpen: None → 0 (slider off)
+        # export sharpen / highlight recovery: None → 0 (slider off)
         _set(self.export_sharpen,
              getattr(opts, "export_sharpen", None) or 0.0, float)
+        _set(self.highlight_recovery,
+             getattr(opts, "highlight_recovery", None) or 0.0, float)
         _set(self.lens_distort, getattr(opts, "lens_distort", 0.0), float)
         # strings (None → "")
         for name in ("output_dir", "prefix", "suffix", "scale_percent",
@@ -5814,7 +5868,8 @@ class PhotoSApp:
                      "pad_bg", "rename_pattern", "folder_pattern",
                      "levels", "curves", "color_grading", "hsl",
                      "vignette", "grain", "point_color", "masks",
-                     "mask_adjust", "lens_vignette", "lens_ca"):
+                     "mask_adjust", "lens_vignette", "lens_ca",
+                     "lens_profile"):
             _set(getattr(self, name), getattr(opts, name), str)
         # face blur combobox stores localized labels, options store
         # "blur"/"pixelate"/None
@@ -5833,6 +5888,8 @@ class PhotoSApp:
         _set(self.jpeg_subsampling, getattr(opts, "jpeg_subsampling", "420"),
              str)
         _set(self.raw_demosaic, getattr(opts, "raw_demosaic", "auto"), str)
+        _set(self.raw_color_space, getattr(opts, "raw_color_space", "sRGB"),
+             str)
         # rotate field name differs from the var
         _set(self.rotate, getattr(opts, "rotate_degrees", None), str)
         # watermark position (only set when the preset carries a valid value)
@@ -7935,6 +7992,8 @@ class PhotoSApp:
             raw_half_size=self.raw_half_size.get(),
             raw_auto_bright=self.raw_auto_bright.get(),
             raw_demosaic=self.raw_demosaic.get(),
+            raw_color_space=self.raw_color_space.get(),
+            raw_16bit=self.raw_16bit.get(),
             auto_rotate=self.auto_rotate.get(),
             remove_original=self.remove_original.get(),
             strip_gps=self.strip_gps.get(),
@@ -7983,7 +8042,10 @@ class PhotoSApp:
             if self.lens_distort.get().strip() else 0.0,
             lens_vignette=self.lens_vignette.get().strip(),
             lens_ca=self.lens_ca.get().strip(),
+            lens_profile=self.lens_profile.get() or None,
             auto_levels=self.auto_levels.get(),
+            highlight_recovery=(_to_float(self.highlight_recovery.get(), 0.0)
+                                or None),
             srgb=self.srgb.get(),
             flatten_cmyk=self.flatten_cmyk.get(),
             evaluate=self.evaluate.get(),

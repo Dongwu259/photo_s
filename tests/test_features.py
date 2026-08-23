@@ -3,6 +3,8 @@
 import os
 import sys
 
+import pytest
+
 # Ensure src package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -46,6 +48,14 @@ def _load_exif(path):
     import piexif
     with open(path, "rb") as f:
         return piexif.load(f.read())
+
+
+class _Subscriptable(dict):
+    """Name → value dict that also supports attribute access, mimicking a
+    real enum (rawpy.ColorSpace / DemosaicAlgorithm are subscriptable)."""
+
+    def __getattr__(self, k):
+        return self[k]
 
 
 class TestStripGps:
@@ -852,14 +862,11 @@ class TestRawDemosaic:
                 return np.zeros((4, 6, 3), dtype=np.uint8)
 
         fake.imread = lambda p: FakeRaw()
-        fake.ColorSpace = types.SimpleNamespace(sRGB="sRGB")
+        fake.ColorSpace = _Subscriptable(sRGB="sRGB")
 
-        class _Enum(dict):  # subscriptable name → value, like a real Enum
-            def __getattr__(self, k):
-                return self[k]
-
-        fake.DemosaicAlgorithm = _Enum(AMAZE="AMAZE", AHD="AHD", VNG="VNG",
-                                       PPG="PPG", DCB="DCB", DHT="DHT")
+        fake.DemosaicAlgorithm = _Subscriptable(
+            AMAZE="AMAZE", AHD="AHD", VNG="VNG", PPG="PPG",
+            DCB="DCB", DHT="DHT")
         monkeypatch.setitem(sys.modules, "rawpy", fake)
 
     def test_amaze_passes_demosaic_algorithm(self, tmp_path, monkeypatch):
@@ -945,7 +952,7 @@ class TestRawDecodeIcc:
                 return np.zeros((4, 6, 3), dtype=np.uint8)
 
         fake.imread = lambda p: FakeRaw()
-        fake.ColorSpace = types.SimpleNamespace(sRGB="sRGB")
+        fake.ColorSpace = _Subscriptable(sRGB="sRGB")
         monkeypatch.setitem(sys.modules, "rawpy", fake)
 
     def test_decode_attaches_srgb_icc(self, tmp_path, monkeypatch):
@@ -979,3 +986,190 @@ class TestExportSharpenPipeline:
         # edge halo appears in the sharpened output, not the baseline
         assert s[300, 399] < b[300, 399]     # darker just-left of edge
         assert s[300, 400] > b[300, 400]     # brighter just-right of edge
+
+
+class TestHighlightRecoveryPipeline:
+    def test_clipped_highlights_recovered(self, tmp_path):
+        import numpy as np
+        # half the image hard-clipped to white 255
+        arr = np.full((200, 300, 3), 255, dtype=np.uint8)
+        arr[:, :150] = (120, 120, 120)
+        src = tmp_path / "clip.jpg"
+        Image.fromarray(arr).save(src, quality=95)
+        base = _process(str(src), tmp_path / "base")
+        rec = _process(str(src), tmp_path / "rec", highlight_recovery=1.0)
+        b = np.asarray(Image.open(base.output_path).convert("L"), dtype=int)
+        r = np.asarray(Image.open(rec.output_path).convert("L"), dtype=int)
+        assert b[100, 250] == 255           # baseline stays clipped
+        assert r[100, 250] < 255            # recovered below white
+        assert r[100, 50] == 120            # midtones untouched
+
+
+class TestRawColorSpace:
+    """--raw-color-space maps to rawpy.ColorSpace; ICC only for sRGB."""
+
+    @staticmethod
+    def _fake_rawpy(monkeypatch, captured):
+        import types
+        import numpy as np
+        fake = types.ModuleType("rawpy")
+
+        class FakeRaw:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def postprocess(self, **kw):
+                captured.update(kw)
+                return np.zeros((4, 6, 3), dtype=np.uint8)
+
+        fake.imread = lambda p: FakeRaw()
+        fake.ColorSpace = _Subscriptable(
+            sRGB="sRGB", Adobe="Adobe", ProPhoto="ProPhoto")
+        monkeypatch.setitem(sys.modules, "rawpy", fake)
+
+    def test_default_is_srgb(self, tmp_path, monkeypatch):
+        from photo_s.engine import _load_raw_via_rawpy, ProcessOptions
+        captured = {}
+        self._fake_rawpy(monkeypatch, captured)
+        img = _load_raw_via_rawpy("fake.dng", ProcessOptions())
+        assert captured["output_color"] == "sRGB"
+        assert img.info.get("icc_profile")  # sRGB auto-tagged
+
+    def test_adobergb_passes_enum_no_icc(self, tmp_path, monkeypatch):
+        from photo_s.engine import _load_raw_via_rawpy, ProcessOptions
+        captured = {}
+        self._fake_rawpy(monkeypatch, captured)
+        img = _load_raw_via_rawpy(
+            "fake.dng", ProcessOptions(raw_color_space="AdobeRGB"))
+        assert captured["output_color"] == "Adobe"
+        assert not img.info.get("icc_profile")  # wide gamut untagged
+
+    def test_prophoto_passes_enum(self, tmp_path, monkeypatch):
+        from photo_s.engine import _load_raw_via_rawpy, ProcessOptions
+        captured = {}
+        self._fake_rawpy(monkeypatch, captured)
+        _load_raw_via_rawpy(
+            "fake.dng", ProcessOptions(raw_color_space="ProPhotoRGB"))
+        assert captured["output_color"] == "ProPhoto"
+
+    def test_invalid_raises_value_error(self, tmp_path, monkeypatch):
+        import pytest
+        from photo_s.engine import _load_raw_via_rawpy, ProcessOptions
+        captured = {}
+        self._fake_rawpy(monkeypatch, captured)
+        with pytest.raises(ValueError):
+            _load_raw_via_rawpy(
+                "fake.dng", ProcessOptions(raw_color_space="CMYK"))
+
+
+class TestRaw16bit:
+    """--raw-16bit: 16-bit decode + 16-bit TIFF output (via tifffile)."""
+
+    @staticmethod
+    def _fake_rawpy(monkeypatch, captured):
+        import types
+        import numpy as np
+        fake = types.ModuleType("rawpy")
+
+        class FakeRaw:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def postprocess(self, **kw):
+                captured.update(kw)
+                # high bytes carry the value; low bytes prove 16-bit survives
+                arr = np.zeros((4, 6, 3), dtype=np.uint16)
+                arr[0, 0] = [0x1234, 0xABCD, 0xFFFF]
+                if kw.get("output_bps", 8) == 8:
+                    return (arr >> 8).astype(np.uint8)
+                return arr
+
+        fake.imread = lambda p: FakeRaw()
+        fake.ColorSpace = _Subscriptable(sRGB="sRGB")
+        monkeypatch.setitem(sys.modules, "rawpy", fake)
+
+    def test_decode_requests_16bit_and_parks_array(self, tmp_path, monkeypatch):
+        from photo_s.engine import _load_raw_via_rawpy, ProcessOptions
+        captured = {}
+        self._fake_rawpy(monkeypatch, captured)
+        img = _load_raw_via_rawpy("fake.dng",
+                                  ProcessOptions(raw_16bit=True))
+        assert captured["output_bps"] == 16
+        assert img._raw_16bit.dtype == "uint16"
+        assert img._raw_16bit[0, 0, 0] == 0x1234  # 16-bit data preserved
+        # 8-bit pipeline view is the top byte (byte-identical to rawpy's
+        # own 8-bit output)
+        assert img.getpixel((0, 0))[0] == 0x12
+
+    def test_default_stays_8bit(self, tmp_path, monkeypatch):
+        from photo_s.engine import _load_raw_via_rawpy, ProcessOptions
+        captured = {}
+        self._fake_rawpy(monkeypatch, captured)
+        img = _load_raw_via_rawpy("fake.dng", ProcessOptions())
+        assert captured["output_bps"] == 8
+        assert not hasattr(img, "_raw_16bit")
+
+    def test_tiff_saves_true_16bit(self, tmp_path):
+        pytest.importorskip("tifffile")
+        import tifffile
+        import numpy as np
+        from photo_s.engine import _save_image, ProcessOptions
+        import photo_s.engine as eng
+        arr = (np.random.rand(30, 40, 3) * 65535).astype(np.uint16)
+        img = Image.fromarray((arr >> 8).astype(np.uint8))
+        img._raw_16bit = arr
+        out = str(tmp_path / "out.tiff")
+        _save_image(img, out, "TIFF", ProcessOptions())
+        readback = tifffile.imread(out)
+        assert readback.dtype == "uint16"
+        assert np.array_equal(readback, arr)
+
+    def test_tiff_embeds_icc_when_tagged(self, tmp_path):
+        pytest.importorskip("tifffile")
+        import tifffile
+        import numpy as np
+        from photo_s.engine import _save_image, ProcessOptions
+        arr = (np.random.rand(10, 12, 3) * 65535).astype(np.uint16)
+        img = Image.fromarray((arr >> 8).astype(np.uint8))
+        img._raw_16bit = arr
+        img.info["icc_profile"] = b"mock-icc"
+        out = str(tmp_path / "out_icc.tiff")
+        _save_image(img, out, "TIFF", ProcessOptions())
+        t = tifffile.TiffFile(out)
+        assert t.pages[0].tags[34675].value == b"mock-icc"
+
+    def test_jpeg_ignores_16bit(self, tmp_path):
+        import numpy as np
+        from photo_s.engine import _save_image, ProcessOptions
+        arr = (np.random.rand(10, 12, 3) * 65535).astype(np.uint16)
+        img = Image.fromarray((arr >> 8).astype(np.uint8))
+        img._raw_16bit = arr
+        out = str(tmp_path / "out.jpg")
+        _save_image(img, out, "JPEG", ProcessOptions())
+        r = Image.open(out)
+        assert r.mode == "RGB"
+
+    def test_tiff_without_tifffile_raises_clear_error(self, tmp_path, monkeypatch):
+        import builtins
+        import numpy as np
+        from photo_s.engine import _save_image, ProcessOptions
+        real_import = builtins.__import__
+
+        def fake_import(name, *a, **k):
+            if name == "tifffile":
+                raise ImportError("no tifffile")
+            return real_import(name, *a, **k)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        img = Image.fromarray(np.zeros((10, 12, 3), dtype=np.uint8))
+        img._raw_16bit = np.zeros((10, 12, 3), dtype=np.uint16)
+        with pytest.raises(RuntimeError) as e:
+            _save_image(img, str(tmp_path / "out.tiff"), "TIFF",
+                        ProcessOptions())
+        assert "tifffile" in str(e.value)

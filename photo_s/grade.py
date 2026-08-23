@@ -605,6 +605,33 @@ def apply_export_sharpen(img: Image.Image, amount: float = 1.0) -> Image.Image:
     return _usm_local_contrast(img, amount, radius)
 
 
+def apply_highlight_recovery(img: Image.Image,
+                             amount: float = 1.0) -> Image.Image:
+    """LR-style highlight recovery: softly compress the top of the tonal range.
+
+    Hard-clipped highlights (flat 255) regain a visible gradient: values above
+    ``thr`` roll off toward a ceiling below 255 instead of piling up at the
+    white point. Monotone — midtones and shadows are untouched. ``amount``
+    0-1 scales both the compression power and the ceiling drop; 0 = off.
+    """
+    amount = float(amount or 0.0)
+    if abs(amount) < 1e-4:
+        return img
+    amount = max(0.0, min(1.0, amount))
+    thr = 200.0                      # compression begins here
+    p = 1.0 + amount                 # power: stronger pull with more amount
+    max_out = 255.0 - 18.0 * amount  # ceiling sinks with amount
+    lut = list(range(256))
+    for x in range(int(thr) + 1, 256):
+        t = (x - thr) / (255.0 - thr)
+        lut[x] = int(round(thr + (max_out - thr) * (t ** p)))
+    if img.mode == "RGBA":
+        return img.point(lut * 3 + list(range(256)))  # alpha untouched
+    if img.mode == "L":
+        return img.point(lut)
+    return img.point(lut * 3)
+
+
 # ── Dehaze ──────────────────────────────────────────────────────────────────
 
 def apply_dehaze(img: Image.Image, amount: float = 0.0) -> Image.Image:

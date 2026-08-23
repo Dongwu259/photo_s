@@ -40,8 +40,9 @@ gui = ["tkinterdnd2>=0.3.0"]
 heic = ["pillow-heif>=0.5.0"]
 avif = ["pillow-avif-plugin>=1.0"]
 enhance = ["opencv-python-headless>=4.6.0"]  # NLM denoise + auto-straighten
+tiff16 = ["tifffile>=2024.0"]  # 16-bit RAW → TIFF output (--raw-16bit)
 mcp = ["mcp>=1.20,<2; python_version >= '3.10'"]  # MCP server for AI agents (requires Python >= 3.10)
-all = ["piexif>=1.1.3", "watchdog>=3.0.0", "pillow-heif>=0.5.0", "pillow-avif-plugin>=1.0", "tkinterdnd2>=0.3.0", "opencv-python-headless>=4.6.0", "mcp>=1.20,<2; python_version >= '3.10'"]
+all = ["piexif>=1.1.3", "watchdog>=3.0.0", "pillow-heif>=0.5.0", "pillow-avif-plugin>=1.0", "tkinterdnd2>=0.3.0", "opencv-python-headless>=4.6.0", "tifffile>=2024.0", "mcp>=1.20,<2; python_version >= '3.10'"]
 
 [project.scripts]
 photo-s = "photo_s.cli:main"

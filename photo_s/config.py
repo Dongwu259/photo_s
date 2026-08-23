@@ -36,6 +36,8 @@ _SIMPLE_FIELDS = {
     "progressive": "progressive",
     "jpeg_subsampling": "jpeg_subsampling",
     "raw_demosaic": "raw_demosaic",
+    "raw_color_space": "raw_color_space",
+    "raw_16bit": "raw_16bit",
     "overwrite": "overwrite",
     "prefix": "prefix",
     "suffix": "suffix",
@@ -58,6 +60,7 @@ _SIMPLE_FIELDS = {
     "grayscale": "grayscale",
     "sepia": "sepia",
     "auto_levels": "auto_levels",
+    "highlight_recovery": "highlight_recovery",
     "wb": "wb_temp",
     "wb_from": "wb_reference",
     "ev": "ev",
@@ -82,6 +85,10 @@ _SIMPLE_FIELDS = {
     "gpx_trace": "gpx_trace",
     "srgb": "srgb",
     "flatten_cmyk": "flatten_cmyk",
+    "lens_distort": "lens_distort",
+    "lens_vignette": "lens_vignette",
+    "lens_ca": "lens_ca",
+    "lens_profile": "lens_profile",
 }
 
 

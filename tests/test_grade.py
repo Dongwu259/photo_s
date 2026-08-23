@@ -23,6 +23,7 @@ from photo_s.grade import (
     apply_dehaze,
     apply_export_sharpen,
     apply_grain,
+    apply_highlight_recovery,
     apply_hsl,
     apply_levels,
     apply_texture,
@@ -576,3 +577,38 @@ class TestExportSharpen:
         # flat images are unchanged (delta = 0) — the strong smoke check
         assert np.array_equal(np.asarray(apply_export_sharpen(small, 1.0)),
                               np.asarray(small))
+
+
+class TestHighlightRecovery:
+    def test_zero_is_noop(self):
+        im = Image.new("RGB", (4, 4), (255, 255, 255))
+        assert apply_highlight_recovery(im, 0.0) is im
+
+    def test_clipped_white_gains_gradient(self):
+        # pure white 255 → pulled down below 255 (ceiling 255-18*amount)
+        im = Image.new("RGB", (4, 4), (255, 255, 255))
+        out = apply_highlight_recovery(im, 1.0)
+        assert out.getpixel((0, 0)) == (237, 237, 237)
+
+    def test_midtones_untouched(self):
+        im = Image.new("RGB", (4, 4), (128, 128, 128))
+        out = apply_highlight_recovery(im, 1.0)
+        assert out.getpixel((0, 0)) == (128, 128, 128)
+
+    def test_stronger_amount_pulls_more(self):
+        im = Image.new("RGB", (4, 4), (255, 255, 255))
+        soft = apply_highlight_recovery(im, 0.5).getpixel((0, 0))[0]
+        hard = apply_highlight_recovery(im, 1.0).getpixel((0, 0))[0]
+        assert hard < soft < 255
+
+    def test_monotone_and_alpha_preserved(self):
+        import numpy as np
+        arr = np.zeros((1, 256, 3), dtype=np.uint8)
+        for x in range(256):
+            arr[:, x] = [x, x, x]
+        im = Image.fromarray(arr).convert("RGBA")
+        im.putalpha(180)
+        out = apply_highlight_recovery(im, 1.0)
+        row = np.asarray(out.convert("L"))[0]
+        assert np.all(np.diff(row) >= 0)      # monotone
+        assert out.getpixel((0, 0))[3] == 180  # alpha untouched

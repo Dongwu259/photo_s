@@ -240,11 +240,11 @@ class TestCliRendering:
 
     def test_all_subcommands_en_help_no_cjk(self, capsys):
         for cmd in ("compress", "convert", "batch", "exif", "preset", "plugin",
-                    "watch", "dedup", "info", "rename", "check", "contact-sheet",
-                    "cull", "select", "hdr", "blurfaces", "hash", "gallery",
-                    "analyze", "lr-scan", "lr-train", "lr-predict",
-                    "lr-recipes", "lr-similar", "lr-eval", "lr-merge",
-                    "diff", "audit", "preview",
+                    "lens-profile", "watch", "dedup", "info", "rename", "check",
+                    "contact-sheet", "cull", "select", "hdr", "blurfaces",
+                    "hash", "gallery", "analyze", "lr-scan", "lr-train",
+                    "lr-predict", "lr-recipes", "lr-similar", "lr-eval",
+                    "lr-merge", "diff", "audit", "preview",
                     "bench", "config", "serve", "mcp"):
             capsys.readouterr()  # drain
             with pytest.raises(SystemExit):

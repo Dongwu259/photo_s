@@ -152,6 +152,14 @@ class ProcessOptions:
     raw_auto_bright: bool = True   # auto brightness adjustment (rawpy default)
     raw_demosaic: str = "auto"     # demosaic algorithm: auto/ahd/vng/ppg/dcb/dht/amaze
                                    # (amaze = highest quality, slowest)
+    raw_color_space: str = "sRGB"  # output color space: sRGB/AdobeRGB/ProPhotoRGB
+                                   # (sRGB auto-tagged with ICC; wider gamuts
+                                   # are untagged — tag in your editor)
+    raw_16bit: bool = False        # decode at 16-bit; TIFF output written as
+                                   # 16-bit (via tifffile). Only meaningful for
+                                   # pure RAW→TIFF conversion (JPEG is 8-bit;
+                                   # any pipeline transform drops the 16-bit
+                                   # array → falls back to 8-bit).
     # Post-processing options
     auto_rotate: bool = True       # auto-rotate by EXIF Orientation tag
     remove_original: bool = False  # delete original after successful processing
@@ -187,6 +195,9 @@ class ProcessOptions:
     wb_temp: Optional[int] = None  # white balance in Kelvin (None = no change)
     wb_reference: Optional[str] = None  # white balance from a reference image
     auto_levels: bool = False      # auto histogram stretch (2% clip)
+    highlight_recovery: Optional[float] = None  # LR-style highlight recovery
+                                                # (0-1; compress clipped
+                                                # highlights back to gradient)
     ev: Optional[float] = None     # exposure compensation in stops (2^EV gain)
     auto_exposure: Optional[float] = None  # normalize mean luminance to target (0-1)
     # Lightroom-direction grading (v1.6.0). Compact string/scalar fields so
@@ -212,6 +223,9 @@ class ProcessOptions:
     lens_distort: float = 0.0   # radial distortion k1 (+ = barrel fix)
     lens_vignette: str = ""     # corner-lift "amount[,midpoint]"
     lens_ca: str = ""           # channel scales "r_scale,b_scale" (~1.0)
+    lens_profile: Optional[str] = None  # named profile in ~/.photos/lens_profiles.json
+                                        # (resolved at pipeline start; explicit
+                                        # lens_* values win)
     lut_file: Optional[str] = None  # .cube 3D/1D LUT color grade (provider or built-in)
     log_curve: Optional[str] = None  # LOG recovery curve name (SLOG3, CLOG3, ...)
     denoise: Optional[float] = None  # denoise strength; SCUNet plugin provider
@@ -795,6 +809,16 @@ _DEMOSAIC_NAMES = {
     "amaze": "AMAZE",
 }
 
+# Output color space name → rawpy.ColorSpace member. Wider gamuts than sRGB
+# (AdobeRGB / ProPhotoRGB) preserve more color from the sensor for editing
+# workflows; they are NOT auto-ICC-tagged (PIL cannot fabricate those
+# profiles) — tag in your editor. Case-insensitive.
+_RAW_COLOR_SPACES = {
+    "srgb": "sRGB",
+    "adobergb": "Adobe",
+    "prophotorgb": "ProPhoto",
+}
+
 _SRGB_ICC: Optional[bytes] = None
 
 
@@ -821,13 +845,22 @@ def _load_raw_via_rawpy(path: str, options: ProcessOptions) -> Image.Image:
     import rawpy
     import numpy as np
 
+    cs = (getattr(options, "raw_color_space", "sRGB") or "sRGB").lower()
+    try:
+        output_color = rawpy.ColorSpace[_RAW_COLOR_SPACES[cs]]
+    except (KeyError, AttributeError):
+        raise ValueError(
+            f"unknown raw color space {cs!r}; "
+            f"choose from sRGB/AdobeRGB/ProPhotoRGB")
+
+    bps = 16 if getattr(options, "raw_16bit", False) else 8
     kwargs = dict(
         use_camera_wb=True,
         half_size=options.raw_half_size,
         no_auto_bright=not options.raw_auto_bright,
-        output_color=rawpy.ColorSpace.sRGB,
+        output_color=output_color,
         gamma=(2.222, 4.5),
-        output_bps=8,
+        output_bps=bps,
     )
     name = (getattr(options, "raw_demosaic", "auto") or "auto").lower()
     if name != "auto":
@@ -841,10 +874,17 @@ def _load_raw_via_rawpy(path: str, options: ProcessOptions) -> Image.Image:
 
     with rawpy.imread(path) as raw:
         rgb = raw.postprocess(**kwargs)
-    img = Image.fromarray(rgb)
-    if not getattr(options, "scrub", False):
-        # the decoded pixels ARE sRGB (output_color=sRGB) — tag them so the
-        # output carries a profile instead of being untagged
+    if bps == 16:
+        # PIL cannot represent 16-bit RGB — show the 8-bit view (>> 8 is
+        # byte-identical to rawpy's own 8-bit output) and park the uint16
+        # array on the image for the 16-bit TIFF save path.
+        img = Image.fromarray((rgb >> 8).astype(np.uint8))
+        img._raw_16bit = rgb
+    else:
+        img = Image.fromarray(rgb)
+    if cs == "srgb" and not getattr(options, "scrub", False):
+        # the decoded pixels ARE sRGB — tag them so the output carries a
+        # profile instead of being untagged (wider gamuts are left untagged)
         img.info["icc_profile"] = _sRGB_icc_bytes()
     return img
 
@@ -929,6 +969,28 @@ def _save_image(img: Image.Image, output_path: str, fmt: str,
                 options: ProcessOptions):
     """Save image with format-specific options."""
     save_kwargs = {}
+
+    # ── 16-bit RAW decode → 16-bit TIFF ────────────────────────────────────
+    # PIL cannot represent/save 16-bit RGB, so the uint16 array parked at
+    # decode is written directly via tifffile (optional dep; clear error
+    # guidance when missing). Only a PURE RAW→TIFF conversion reaches this
+    # branch — any pipeline transform replaces the image and drops the
+    # attribute, falling back to the 8-bit save (which is correct: JPEG is
+    # 8-bit anyway).
+    raw16 = getattr(img, "_raw_16bit", None)
+    if raw16 is not None and fmt == "TIFF" and not options.scrub:
+        try:
+            import tifffile
+        except ImportError:
+            tifffile = None
+        if tifffile is not None:
+            icc = img.info.get("icc_profile")
+            tifffile.imwrite(output_path, raw16, photometric="rgb",
+                             iccprofile=icc)
+            return
+        raise RuntimeError(
+            "16-bit TIFF output needs tifffile. "
+            "Install: pip install tifffile")
 
     if fmt in ("JPEG", "WebP", "HEIC", "AVIF"):
         save_kwargs["quality"] = options.quality
@@ -1061,6 +1123,25 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
     temp_files = []    # sips-fallback temp files parked on the loaded image
 
     try:
+        # ── Resolve a named lens profile into the manual lens_* params ─────
+        # Inside the try so an unknown profile surfaces as a clear per-file
+        # error rather than killing the batch. Runs before the lens-correction
+        # block; explicit lens_* values (nonzero / non-empty) win over the
+        # profile.
+        if options.lens_profile:
+            from .lensprofile import load_lens_profile
+            prof = load_lens_profile(options.lens_profile)
+            if prof is None:
+                raise ValueError(
+                    f"unknown lens profile {options.lens_profile!r}; "
+                    f"see 'photo-s lens-profile list'")
+            if not options.lens_distort and prof.get("distort"):
+                options.lens_distort = float(prof["distort"])
+            if not options.lens_vignette and prof.get("vignette"):
+                options.lens_vignette = prof["vignette"]
+            if not options.lens_ca and prof.get("ca"):
+                options.lens_ca = prof["ca"]
+
         # Stat inside the try: an input deleted after the batch scan must
         # surface as a per-file error, not kill the whole sequential batch.
         input_size = os.path.getsize(input_path)
@@ -1211,6 +1292,12 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
         # ── Auto levels (histogram stretch) ─────────────────────────────────
         if options.auto_levels:
             img = apply_auto_levels(img)
+
+        # ── Highlight recovery (LR-style, after grading so it catches the
+        # final tones; before geometry) ─────────────────────────────────────
+        if options.highlight_recovery:
+            from .grade import apply_highlight_recovery
+            img = apply_highlight_recovery(img, options.highlight_recovery)
 
         # ── Finishing looks (vignette/grain) before geometry ────────────────
         if options.vignette:

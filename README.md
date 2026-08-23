@@ -43,7 +43,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | Batch compress | ✅ | ✅ | JPEG/WebP/HEIC/AVIF quality tuning, chroma subsampling (444/422/420) |
 | Target size mode | ✅ | ✅ | Auto-tune quality to fit under a target file size |
 | Format convert | ✅ | ✅ | JPEG / PNG / WebP / TIFF / BMP / HEIC / AVIF |
-| RAW decode | ✅ | ✅ | 22+ camera RAW formats, built-in (rawpy/libraw); demosaic algorithm choice, auto sRGB ICC tagging |
+| RAW decode | ✅ | ✅ | 22+ camera RAW formats, built-in (rawpy/libraw); demosaic algorithm choice, color space (sRGB/AdobeRGB/ProPhotoRGB), 16-bit TIFF output, auto sRGB ICC tagging |
 | Resize / Scale | ✅ | ✅ | Max dimensions, percentage, or longest-side cap |
 | Visual preview | ✅ | — | Live original↔processed preview rendered through the real pipeline |
 | Tone & color | ✅ | ✅ | Brightness/contrast/saturation/gamma/sharpen, B&W, sepia |
@@ -55,12 +55,13 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | HSL split | ✅ | ✅ | 8 color domains, hue/sat/lum shifts |
 | Point color | ✅ | ✅ | Targeted hue/sat/lum around a sampled color + range |
 | Local masks | ✅ | ✅ | Named linear/radial/color-range masks + v1.8 AI segmentation (`subject`/`person`/`object:class`), brush strokes (subtract mode), combos (A&B / A-B); 11 scalar + 5 string local adjustments under each |
-| Lens correction | ✅ | ✅ | Manual distortion k1, vignette fix, CA fix (pure numpy) |
+| Lens correction | ✅ | ✅ | Manual distortion k1, vignette fix, CA fix (pure numpy); named user-maintained lens profiles |
 | Perceptual analysis | ✅ | ✅ | Histograms / channel stats / WB lean / exposure / blur (`analyze`) |
 | Vibrance / clarity / texture | ✅ | ✅ | Natural saturation, local contrast |
 | Dehaze / vignette / grain | ✅ | ✅ | Dark-channel dehaze, radial vignette, film grain |
 | Exposure | ✅ | ✅ | Stops adjustment or normalize-to-target auto exposure |
 | Auto levels | ✅ | ✅ | 2% clip histogram stretch |
+| Highlight recovery | ✅ | ✅ | LR-style: compress flat clipped highlights back to visible gradient |
 | LOG recovery | ✅ | ✅ | SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG (1D LUT, no deps) |
 | LUT grading | ✅ | ✅ | .cube trilinear (plugin adds tetrahedral + 5 film presets) |
 | Denoise | ✅ | ✅¹ | NLM (`[enhance]` extra) |
@@ -116,6 +117,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 ```bash
 pip install photo-s-tools            # core — RAW decode (rawpy) built in
 pip install "photo-s-tools[enhance]" # + opencv: face blur / HDR / denoise / straighten
+pip install "photo-s-tools[tiff16]"  # + tifffile: 16-bit RAW → TIFF output
 pip install "photo-s-tools[mcp]"     # + MCP server (Python 3.10+)
 ```
 
@@ -134,7 +136,7 @@ photo-s select ~/shoot/ -r --selects-dir picks --rejects-dir bin --dry-run
 photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 ```
 
-`photo-s --help` lists all 33 commands. Language: `--language en|zh|auto`.
+`photo-s --help` lists all 34 commands. Language: `--language en|zh|auto`.
 
 ---
 

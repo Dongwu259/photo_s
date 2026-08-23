@@ -235,6 +235,10 @@ def _add_transform_args(parser):
         help=_t('help___auto_levels'),
     )
     parser.add_argument(
+        "--highlight-recovery", type=float, default=argparse.SUPPRESS,
+        metavar="0-1", help=_t('help___highlight_recovery'),
+    )
+    parser.add_argument(
         "--wb", type=float, default=argparse.SUPPRESS, metavar="KELVIN",
         help=_t('help___wb'),
     )
@@ -330,6 +334,11 @@ def _add_transform_args(parser):
         "--lens-ca", type=str, default=argparse.SUPPRESS,
         metavar="R_SCALE,B_SCALE",
         help=_t('help___lens_ca'),
+    )
+    parser.add_argument(
+        "--lens-profile", type=str, default=argparse.SUPPRESS,
+        metavar="NAME",
+        help=_t('help___lens_profile'),
     )
     parser.add_argument(
         "--log-curve", type=str, default=argparse.SUPPRESS, metavar="NAME",
@@ -457,6 +466,16 @@ def _add_raw_args(parser):
         metavar="auto|ahd|vng|ppg|dcb|dht|amaze",
         help=_t('help___raw_demosaic'),
     )
+    parser.add_argument(
+        "--raw-color-space", type=str, default=argparse.SUPPRESS,
+        choices=["sRGB", "AdobeRGB", "ProPhotoRGB"],
+        metavar="sRGB|AdobeRGB|ProPhotoRGB",
+        help=_t('help___raw_color_space'),
+    )
+    parser.add_argument(
+        "--raw-16bit", action="store_true",
+        help=_t('help___raw_16bit'),
+    )
 
 
 # Config keys the CLI applies outside the generic field mapping
@@ -575,6 +594,8 @@ def _build_process_options(parsed) -> ProcessOptions:
         raw_half_size=getattr(parsed, 'raw_half_size', False),
         raw_auto_bright=not getattr(parsed, 'raw_no_auto_bright', False),
         raw_demosaic=getattr(parsed, 'raw_demosaic', 'auto'),
+        raw_color_space=getattr(parsed, 'raw_color_space', 'sRGB'),
+        raw_16bit=getattr(parsed, 'raw_16bit', False),
         auto_rotate=not getattr(parsed, 'no_auto_rotate', False),
         remove_original=getattr(parsed, 'remove_original', False),
         rename_pattern=getattr(parsed, 'rename', None) or "",
@@ -597,6 +618,7 @@ def _build_process_options(parsed) -> ProcessOptions:
         grayscale=getattr(parsed, 'grayscale', False),
         sepia=getattr(parsed, 'sepia', False),
         auto_levels=getattr(parsed, 'auto_levels', False),
+        highlight_recovery=getattr(parsed, 'highlight_recovery', None),
         wb_temp=getattr(parsed, 'wb', None),
         wb_reference=getattr(parsed, 'wb_from', None),
         ev=getattr(parsed, 'ev', None),
@@ -644,6 +666,7 @@ def _build_process_options(parsed) -> ProcessOptions:
         lens_distort=getattr(parsed, 'lens_distort', 0.0),
         lens_vignette=getattr(parsed, 'lens_vignette', ""),
         lens_ca=getattr(parsed, 'lens_ca', ""),
+        lens_profile=getattr(parsed, 'lens_profile', None),
         jobs=_jobs,
     )
 
@@ -1260,6 +1283,26 @@ def run_cli(args: List[str] = None) -> int:
     preset_load.add_argument("name", help=_t('help___preset_name'))
     preset_delete = preset_subs.add_parser("delete", help=_t('cmd_delete'))
     preset_delete.add_argument("name", help=_t('help___preset_name'))
+
+    # ── lens-profile subcommand (user-maintained lens registry) ─────────────
+    lens_prof_parser = subparsers.add_parser(
+        "lens-profile", help=_t('cmd_lens_profile'),
+    )
+    lens_prof_subs = lens_prof_parser.add_subparsers(dest="lens_profile_action")
+    lp_save = lens_prof_subs.add_parser("save", help=_t('cmd_save'))
+    lp_save.add_argument("name", help=_t('help___lens_profile_name'))
+    lp_save.add_argument("--distort", type=float, default=None,
+                         metavar="K1", help=_t('help___lens_distort'))
+    lp_save.add_argument("--vignette", type=str, default=None,
+                         metavar="AMOUNT[,MIDPOINT]",
+                         help=_t('help___lens_vignette'))
+    lp_save.add_argument("--ca", type=str, default=None,
+                         metavar="R_SCALE,B_SCALE",
+                         help=_t('help___lens_ca'))
+    lp_save.add_argument("--desc", type=str, default="", help=_t('help___desc'))
+    lens_prof_subs.add_parser("list", help=_t('cmd_list'))
+    lp_delete = lens_prof_subs.add_parser("delete", help=_t('cmd_delete'))
+    lp_delete.add_argument("name", help=_t('help___lens_profile_name'))
 
     # ── plugin subcommand ───────────────────────────────────────────────────
     plugin_parser = subparsers.add_parser(
@@ -1991,7 +2034,7 @@ def run_cli(args: List[str] = None) -> int:
                  serve_parser, mcp_parser, analyze_parser, lr_scan_parser,
                  lr_train_parser, lr_predict_parser, lr_recipes_parser,
                  lr_similar_parser, lr_eval_parser, lr_merge_parser,
-                 diff_parser, audit_parser, preview_parser,
+                 diff_parser, audit_parser, preview_parser, lens_prof_parser,
                  preset_save, preset_load, preset_delete,
                  plugin_install, plugin_uninstall, plugin_info, plugin_fetch,
                  config_init, config_show):
@@ -2155,6 +2198,51 @@ def run_cli(args: List[str] = None) -> int:
 
         else:
             preset_parser.print_help()
+            return 1
+
+        return 0
+
+    # ── Handle 'lens-profile' command (user-maintained lens registry) ───────
+    if parsed.command == "lens-profile":
+        from .lensprofile import (save_lens_profile, load_lens_profile,
+                                  list_lens_profiles, delete_lens_profile)
+        is_json = getattr(parsed, 'json', False)
+
+        if parsed.lens_profile_action == "save":
+            prof = save_lens_profile(
+                parsed.name, distort=parsed.distort, vignette=parsed.vignette,
+                ca=parsed.ca, description=parsed.desc)
+            if is_json:
+                import json
+                print(json.dumps(versioned(
+                    {"ok": True, "name": parsed.name, "profile": prof}),
+                    indent=2, ensure_ascii=False))
+            else:
+                print(f"{_t('msg_lens_profile_saved')}: {parsed.name} "
+                      f"({len(prof)} 参数)")
+
+        elif parsed.lens_profile_action == "list":
+            profs = list_lens_profiles()
+            if is_json:
+                import json
+                print(json.dumps(versioned({"profiles": profs}),
+                                 indent=2, ensure_ascii=False))
+            elif profs:
+                print(_t("msg_lens_profiles_available"))
+                for p in profs:
+                    print(f"   {p}")
+            else:
+                print(_t("msg_no_lens_profiles"))
+
+        elif parsed.lens_profile_action == "delete":
+            if delete_lens_profile(parsed.name):
+                print(f"{_t('msg_lens_profile_deleted')}: {parsed.name}")
+            else:
+                print(f"{_t('msg_lens_profile_not_found')}: {parsed.name}")
+                return 1
+
+        else:
+            lens_prof_parser.print_help()
             return 1
 
         return 0
