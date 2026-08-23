@@ -40,10 +40,10 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 
 | Feature | GUI | CLI | Description |
 |---|---|---|---|
-| Batch compress | ✅ | ✅ | JPEG/WebP/HEIC/AVIF quality tuning |
+| Batch compress | ✅ | ✅ | JPEG/WebP/HEIC/AVIF quality tuning, chroma subsampling (444/422/420) |
 | Target size mode | ✅ | ✅ | Auto-tune quality to fit under a target file size |
 | Format convert | ✅ | ✅ | JPEG / PNG / WebP / TIFF / BMP / HEIC / AVIF |
-| RAW decode | ✅ | ✅ | 22+ camera RAW formats, built-in (rawpy/libraw) |
+| RAW decode | ✅ | ✅ | 22+ camera RAW formats, built-in (rawpy/libraw); demosaic algorithm choice, auto sRGB ICC tagging |
 | Resize / Scale | ✅ | ✅ | Max dimensions, percentage, or longest-side cap |
 | Visual preview | ✅ | — | Live original↔processed preview rendered through the real pipeline |
 | Tone & color | ✅ | ✅ | Brightness/contrast/saturation/gamma/sharpen, B&W, sepia |
@@ -125,6 +125,8 @@ Zero-install (uvx): `uvx --from photo-s-tools photo-s --help` ·
 
 ```bash
 photo-s batch 'RAW/*.ARW' --format jpeg -o out/ -q 90   # batch RAW → JPEG
+photo-s batch 'RAW/*.ARW' -o out/ -q 95 --jpeg-subsampling 444 \
+  --raw-demosaic amaze                                # max quality RAW → JPEG
 photo-s compress *.jpg --target-size 5MB -j 8           # auto-tune to ≤5MB
 photo-s select ~/shoot/ -r --selects-dir picks --rejects-dir bin --dry-run
 photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv

@@ -34,6 +34,8 @@ _SIMPLE_FIELDS = {
     "keep_mtime": "keep_mtime",
     "evaluate": "evaluate",
     "progressive": "progressive",
+    "jpeg_subsampling": "jpeg_subsampling",
+    "raw_demosaic": "raw_demosaic",
     "overwrite": "overwrite",
     "prefix": "prefix",
     "suffix": "suffix",

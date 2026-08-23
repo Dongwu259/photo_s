@@ -248,10 +248,12 @@ STRINGS = {
         "preserve_exif": "保留 EXIF 信息",
         "optimize": "优化压缩",
         "progressive": "渐进式 JPEG",
+        "jpeg_subsampling": "JPEG 色度子采样（444 全色彩）",
         "overwrite": "覆盖已存在文件",
         "auto_rotate": "按 EXIF 方向自动旋转",
         "raw_half_size": "RAW 半尺寸解码（更快）",
         "raw_auto_bright": "RAW 自动亮度",
+        "raw_demosaic": "RAW 去马赛克算法",
         "delete_original": "处理后删除原文件",
         "strip_gps": "移除 GPS 位置信息",
         "keep_mtime": "保留修改时间",
@@ -861,9 +863,11 @@ STRINGS = {
         "preserve_exif": "Preserve EXIF",
         "optimize": "Optimize",
         "progressive": "Progressive JPEG",
+        "jpeg_subsampling": "JPEG chroma subsampling (444 = full color)",
         "overwrite": "Overwrite existing files",
         "auto_rotate": "Auto-rotate (EXIF Orientation)",
         "raw_half_size": "RAW half-size decode (faster)",
+        "raw_demosaic": "RAW demosaic algorithm",
         "raw_auto_bright": "RAW auto brightness",
         "delete_original": "Delete original after processing",
         "strip_gps": "Strip GPS data",
@@ -1703,10 +1707,12 @@ class PhotoSApp:
         self.preserve_exif = tk.BooleanVar(value=True)
         self.optimize = tk.BooleanVar(value=True)
         self.progressive = tk.BooleanVar(value=False)
+        self.jpeg_subsampling = tk.StringVar(value="420")
         self.overwrite = tk.BooleanVar(value=False)
         self.target_size_mode = tk.BooleanVar(value=False)
         self.target_size_value = tk.StringVar(value="500")
         self.target_size_unit = tk.StringVar(value="KB")
+        self.raw_demosaic = tk.StringVar(value="auto")
         self.raw_half_size = tk.BooleanVar(value=False)
         self.raw_auto_bright = tk.BooleanVar(value=True)
         self.auto_rotate = tk.BooleanVar(value=True)
@@ -2713,6 +2719,26 @@ class PhotoSApp:
         jobs_entry = ttk.Entry(opts_frame, textvariable=self.jobs,
                                font=FONT_BODY, width=5)
         jobs_entry.grid(row=10, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+
+        # JPEG chroma subsampling (444 = full color, larger files)
+        tk.Label(opts_frame, text=self._t("jpeg_subsampling"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=11, column=0, sticky="w", pady=(10, 0))
+        sub_combo = ttk.Combobox(
+            opts_frame, textvariable=self.jpeg_subsampling,
+            values=["444", "422", "420"], state="readonly",
+            font=FONT_BODY, width=5)
+        sub_combo.grid(row=11, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+
+        # RAW demosaic algorithm (amaze = highest quality, slowest)
+        tk.Label(opts_frame, text=self._t("raw_demosaic"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=12, column=0, sticky="w", pady=(10, 0))
+        dem_combo = ttk.Combobox(
+            opts_frame, textvariable=self.raw_demosaic,
+            values=["auto", "ahd", "vng", "ppg", "dcb", "dht", "amaze"],
+            state="readonly", font=FONT_BODY, width=7)
+        dem_combo.grid(row=12, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
 
         # ── Watermark ────────────────────────────────────────────────────────
         wm_frame = self._add_collapsible_section(FX, "sec_watermark")
@@ -5785,6 +5811,9 @@ class PhotoSApp:
              int)
         _set(self.jobs, getattr(opts, "jobs", None), str)
         _set(self.output_format, getattr(opts, "output_format", None), str)
+        _set(self.jpeg_subsampling, getattr(opts, "jpeg_subsampling", "420"),
+             str)
+        _set(self.raw_demosaic, getattr(opts, "raw_demosaic", "auto"), str)
         # rotate field name differs from the var
         _set(self.rotate, getattr(opts, "rotate_degrees", None), str)
         # watermark position (only set when the preset carries a valid value)
@@ -7879,12 +7908,14 @@ class PhotoSApp:
             preserve_exif=self.preserve_exif.get(),
             optimize=self.optimize.get(),
             progressive=self.progressive.get(),
+            jpeg_subsampling=self.jpeg_subsampling.get(),
             overwrite=self.overwrite.get(),
             prefix=self.prefix.get(),
             suffix=self.suffix.get(),
             target_size_bytes=target_bytes,
             raw_half_size=self.raw_half_size.get(),
             raw_auto_bright=self.raw_auto_bright.get(),
+            raw_demosaic=self.raw_demosaic.get(),
             auto_rotate=self.auto_rotate.get(),
             remove_original=self.remove_original.get(),
             strip_gps=self.strip_gps.get(),

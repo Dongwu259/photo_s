@@ -66,6 +66,12 @@ SUPPORTED_FORMATS = {
     "AVIF":  {"ext": ".avif", "save_kwargs": ["quality"]},
 }
 
+# JPEG chroma subsampling → PIL `subsampling` save param (0=4:4:4, 1=4:2:2,
+# 2=4:2:0). PIL's default at typical qualities is 4:2:0, which halves color
+# resolution vs luma — visible as soft color edges. 4:4:4 keeps full color
+# detail at the cost of larger files; 4:2:2 is the middle ground.
+_JPEG_SUBSAMPLING = {"444": 0, "422": 1, "420": 2}
+
 INPUT_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".webp", ".tiff", ".tif",
     ".bmp", ".heic", ".heif", ".ico", ".gif", ".psd", ".avif",
@@ -134,6 +140,8 @@ class ProcessOptions:
     preserve_exif: bool = True   # keep EXIF metadata
     optimize: bool = True        # run PIL's optimize pass
     progressive: bool = False    # progressive JPEG
+    jpeg_subsampling: str = "420"  # JPEG chroma subsampling: 444/422/420
+                                   # (444 = full color, larger files)
     overwrite: bool = False      # overwrite existing files
     prefix: str = ""             # output filename prefix
     suffix: str = "_compressed"  # output filename suffix
@@ -142,6 +150,8 @@ class ProcessOptions:
     # RAW processing options
     raw_half_size: bool = False    # decode RAW at half resolution (faster)
     raw_auto_bright: bool = True   # auto brightness adjustment (rawpy default)
+    raw_demosaic: str = "auto"     # demosaic algorithm: auto/ahd/vng/ppg/dcb/dht/amaze
+                                   # (amaze = highest quality, slowest)
     # Post-processing options
     auto_rotate: bool = True       # auto-rotate by EXIF Orientation tag
     remove_original: bool = False  # delete original after successful processing
@@ -770,21 +780,70 @@ def _normalize_exif_orientation(img: Image.Image) -> None:
 
 # ── RAW image loading ─────────────────────────────────────────────────────
 
+# Demosaic algorithm name → rawpy.DemosaicAlgorithm (resolved lazily since
+# rawpy is imported inside _load_raw_via_rawpy). "auto" omits the parameter
+# and lets libraw pick its default (AHD for Bayer, X-Trans aware for Fuji).
+_DEMOSAIC_NAMES = {
+    "ahd": "AHD",
+    "vng": "VNG",
+    "ppg": "PPG",
+    "dcb": "DCB",
+    "dht": "DHT",
+    "amaze": "AMAZE",
+}
+
+_SRGB_ICC: Optional[bytes] = None
+
+
+def _sRGB_icc_bytes() -> bytes:
+    """Lazy-cached sRGB ICC profile bytes (used to tag RAW decode output).
+
+    rawpy decodes to sRGB pixels (output_color=ColorSpace.sRGB) but the numpy
+    → Image.fromarray result carries no profile, so outputs were untagged and
+    viewers assumed a profile — inconsistent color across apps. Tagging the
+    decode makes every downstream save carry the profile automatically
+    (engine._save_image forwards img.info['icc_profile']); --scrub still
+    strips it.
+    """
+    global _SRGB_ICC
+    if _SRGB_ICC is None:
+        from PIL import ImageCms
+        _SRGB_ICC = ImageCms.ImageCmsProfile(
+            ImageCms.createProfile("sRGB")).tobytes()
+    return _SRGB_ICC
+
+
 def _load_raw_via_rawpy(path: str, options: ProcessOptions) -> Image.Image:
     """Decode a RAW file using rawpy (libraw). Returns a PIL Image."""
     import rawpy
     import numpy as np
 
+    kwargs = dict(
+        use_camera_wb=True,
+        half_size=options.raw_half_size,
+        no_auto_bright=not options.raw_auto_bright,
+        output_color=rawpy.ColorSpace.sRGB,
+        gamma=(2.222, 4.5),
+        output_bps=8,
+    )
+    name = (getattr(options, "raw_demosaic", "auto") or "auto").lower()
+    if name != "auto":
+        try:
+            kwargs["demosaic_algorithm"] = rawpy.DemosaicAlgorithm[
+                _DEMOSAIC_NAMES[name]]
+        except (KeyError, AttributeError):
+            raise ValueError(
+                f"unknown raw demosaic algorithm {name!r}; "
+                f"choose from auto/ahd/vng/ppg/dcb/dht/amaze")
+
     with rawpy.imread(path) as raw:
-        rgb = raw.postprocess(
-            use_camera_wb=True,
-            half_size=options.raw_half_size,
-            no_auto_bright=not options.raw_auto_bright,
-            output_color=rawpy.ColorSpace.sRGB,
-            gamma=(2.222, 4.5),
-            output_bps=8,
-        )
-    return Image.fromarray(rgb)
+        rgb = raw.postprocess(**kwargs)
+    img = Image.fromarray(rgb)
+    if not getattr(options, "scrub", False):
+        # the decoded pixels ARE sRGB (output_color=sRGB) — tag them so the
+        # output carries a profile instead of being untagged
+        img.info["icc_profile"] = _sRGB_icc_bytes()
+    return img
 
 
 def _load_raw_via_sips(path: str) -> Image.Image:
@@ -874,6 +933,9 @@ def _save_image(img: Image.Image, output_path: str, fmt: str,
     if fmt == "JPEG":
         save_kwargs["optimize"] = options.optimize
         save_kwargs["progressive"] = options.progressive
+        # chroma subsampling: explicit choice, PIL default (4:2:0) otherwise
+        save_kwargs["subsampling"] = _JPEG_SUBSAMPLING.get(
+            options.jpeg_subsampling, 2)
         # Convert RGBA → RGB for JPEG (JPEG doesn't support alpha).
         # The fresh background starts with an empty info dict — copy img.info
         # (EXIF/ICC) onto it so metadata survives the alpha flatten.

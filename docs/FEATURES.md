@@ -56,7 +56,7 @@
 
 | 类别 | 能力 |
 |---|---|
-| 压缩 | 质量调优、target-size 自动调优、optimize、progressive |
+| 压缩 | 质量调优、target-size 自动调优、optimize、progressive、JPEG 色度子采样 444/422/420（`--jpeg-subsampling`，444 保留全色彩） |
 | 格式 | JPEG/PNG/WebP/TIFF/HEIC/AVIF/BMP/ICO |
 | 缩放 | max_width/height、max_pixels、scale_percent |
 | 影调 | brightness/contrast/saturation/gamma/sharpen/grayscale/sepia |
@@ -70,7 +70,7 @@
 | 元数据 | preserve_exif、strip_gps、scrub、date_shift、sync_date、gpx_trace、PhotoS: 打标 |
 | 命名/组织 | prefix/suffix、rename_pattern、folder_pattern（date/date-camera/自定义） |
 | 输出 | output_dir、overwrite、remove_original、keep_mtime、resume、print_size、watermark |
-| RAW | rawpy 核心：37 种扩展原生读写、raw_half_size、raw_auto_bright |
+| RAW | rawpy 核心：37 种扩展原生读写、raw_half_size、raw_auto_bright、raw_demosaic（去马赛克算法 auto/ahd/vng/ppg/dcb/dht/amaze）、解码输出自动打 sRGB ICC |
 
 **RAW 输入**：.arw .cr2 .cr3 .crw .dng .erf .kdc .mef .mos .mrw .nef .nrw .orf .pef .raf .raw .rw2 .rwl .sr2 .srf .srw .x3f .3fr …（共 37 种）
 

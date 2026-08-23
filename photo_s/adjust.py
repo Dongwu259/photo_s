@@ -101,6 +101,12 @@ def apply_tone_adjustments(
             and not grayscale and not sepia):
         return img  # fast path: nothing to do
 
+    # ImageEnhance.Brightness/Contrast return a fresh image with an EMPTY
+    # .info — snapshot EXIF/ICC/DPI and restore it on the result, or any
+    # brightness/contrast pass would silently strip metadata (same
+    # regression class grade.py documents for fromarray).
+    info = dict(img.info)
+
     if img.mode not in ("RGB", "RGBA", "L"):
         img = img.convert("RGBA")
 
@@ -111,7 +117,9 @@ def apply_tone_adjustments(
             img = bg.convert("L")
         else:
             img = img.convert("L")
-        return _final_tone(img, brightness, contrast, gamma, sharpen)
+        img = _final_tone(img, brightness, contrast, gamma, sharpen)
+        img.info.update(info)
+        return img
 
     if img.mode == "L" and (saturation != 1.0 or sepia):
         img = img.convert("RGB")
@@ -128,7 +136,9 @@ def apply_tone_adjustments(
         if alpha is not None:
             img.putalpha(alpha)
 
-    return _final_tone(img, brightness, contrast, gamma, sharpen)
+    img = _final_tone(img, brightness, contrast, gamma, sharpen)
+    img.info.update(info)
+    return img
 
 
 def _final_tone(img: Image.Image, brightness: float, contrast: float,

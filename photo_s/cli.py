@@ -403,6 +403,11 @@ def _add_transform_args(parser):
         help=_t('help___flatten_cmyk'),
     )
     parser.add_argument(
+        "--jpeg-subsampling", type=str, default=argparse.SUPPRESS,
+        choices=["444", "422", "420"], metavar="444|422|420",
+        help=_t('help___jpeg_subsampling'),
+    )
+    parser.add_argument(
         "--blur-score", action="store_true", default=argparse.SUPPRESS,
         help=_t('help___blur_score'),
     )
@@ -426,6 +431,27 @@ def _add_transform_args(parser):
     parser.add_argument(
         "--blur-faces-margin", type=int, default=argparse.SUPPRESS,
         metavar="PCT", help=_t('help___blur_faces_margin'),
+    )
+
+
+def _add_raw_args(parser):
+    """Add shared RAW-decode options (shared by batch/compress/convert).
+
+    Config-capable args use default=argparse.SUPPRESS (see _add_advanced_args).
+    """
+    parser.add_argument(
+        "--raw-half-size", action="store_true",
+        help=_t('help___raw_half_size'),
+    )
+    parser.add_argument(
+        "--raw-no-auto-bright", action="store_true",
+        help=_t('help___raw_no_auto_bright'),
+    )
+    parser.add_argument(
+        "--raw-demosaic", type=str, default=argparse.SUPPRESS,
+        choices=["auto", "ahd", "vng", "ppg", "dcb", "dht", "amaze"],
+        metavar="auto|ahd|vng|ppg|dcb|dht|amaze",
+        help=_t('help___raw_demosaic'),
     )
 
 
@@ -537,12 +563,14 @@ def _build_process_options(parsed) -> ProcessOptions:
         preserve_exif=not getattr(parsed, 'no_exif', False),
         optimize=not getattr(parsed, 'no_optimize', False),
         progressive=getattr(parsed, 'progressive', False),
+        jpeg_subsampling=getattr(parsed, 'jpeg_subsampling', '420'),
         overwrite=getattr(parsed, 'overwrite', False),
         prefix=getattr(parsed, 'prefix', ''),
         suffix=getattr(parsed, 'suffix', None),  # resolved per-command below
         target_size_bytes=target_size_bytes,
         raw_half_size=getattr(parsed, 'raw_half_size', False),
         raw_auto_bright=not getattr(parsed, 'raw_no_auto_bright', False),
+        raw_demosaic=getattr(parsed, 'raw_demosaic', 'auto'),
         auto_rotate=not getattr(parsed, 'no_auto_rotate', False),
         remove_original=getattr(parsed, 'remove_original', False),
         rename_pattern=getattr(parsed, 'rename', None) or "",
@@ -840,14 +868,7 @@ def run_cli(args: List[str] = None) -> int:
         "--target-size", type=str, default=argparse.SUPPRESS, metavar="SIZE",
         help=_t('help___target_size'),
     )
-    compress_parser.add_argument(
-        "--raw-half-size", action="store_true",
-        help=_t('help___raw_half_size'),
-    )
-    compress_parser.add_argument(
-        "--raw-no-auto-bright", action="store_true",
-        help=_t('help___raw_no_auto_bright'),
-    )
+    _add_raw_args(compress_parser)
     compress_parser.add_argument(
         "--no-auto-rotate", action="store_true",
         help=_t('help___no_auto_rotate'),
@@ -946,14 +967,7 @@ def run_cli(args: List[str] = None) -> int:
         "--target-size", type=str, default=argparse.SUPPRESS, metavar="SIZE",
         help=_t('help___target_size'),
     )
-    convert_parser.add_argument(
-        "--raw-half-size", action="store_true",
-        help=_t('help___raw_half_size'),
-    )
-    convert_parser.add_argument(
-        "--raw-no-auto-bright", action="store_true",
-        help=_t('help___raw_no_auto_bright'),
-    )
+    _add_raw_args(convert_parser)
     convert_parser.add_argument(
         "--no-auto-rotate", action="store_true",
         help=_t('help___no_auto_rotate'),
@@ -1044,14 +1058,7 @@ def run_cli(args: List[str] = None) -> int:
         "--target-size", type=str, default=argparse.SUPPRESS, metavar="SIZE",
         help=_t('help___target_size'),
     )
-    batch_parser.add_argument(
-        "--raw-half-size", action="store_true",
-        help=_t('help___raw_half_size'),
-    )
-    batch_parser.add_argument(
-        "--raw-no-auto-bright", action="store_true",
-        help=_t('help___raw_no_auto_bright'),
-    )
+    _add_raw_args(batch_parser)
     batch_parser.add_argument(
         "--no-auto-rotate", action="store_true",
         help=_t('help___no_auto_rotate'),

@@ -766,3 +766,196 @@ class TestRenameEmptyStem:
         name = os.path.basename(result.output_path)
         assert name == "plain_out.jpg"  # helper default suffix "_out"
         assert not name.startswith(".")
+
+
+class TestJpegSubsampling:
+    """JPEG chroma subsampling is configurable via jpeg_subsampling
+    (444 = full color detail, 422/420 progressively smaller)."""
+
+    @staticmethod
+    def _sampling_factors(path):
+        """Parse JPEG SOF0/SOF2 frame header → [(h, v), ...] per component.
+
+        4:4:4 → all (1,1); 4:2:2 → [(2,1),(1,1),(1,1)]; 4:2:0 → [(2,2),(1,1),(1,1)].
+        """
+        with open(path, "rb") as f:
+            data = f.read()
+        i = 2
+        sof = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+               0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+        while i < len(data) - 1:
+            if data[i] != 0xFF:
+                i += 1
+                continue
+            if data[i + 1] in sof:
+                n_comp = data[i + 9]
+                factors, pos = [], i + 10
+                for _ in range(n_comp):
+                    sf = data[pos + 1]
+                    factors.append((sf >> 4, sf & 0x0F))
+                    pos += 3
+                return factors
+            i += 2
+        return None
+
+    def test_default_is_420(self, tmp_path):
+        src = _make_image(tmp_path / "src.jpg")
+        result = _process(src, tmp_path / "out", quality=90)
+        assert result.success
+        factors = self._sampling_factors(result.output_path)
+        assert factors is not None
+        assert factors[0] == (2, 2)      # luma 2x2
+        assert factors[1:] == [(1, 1), (1, 1)]  # chroma 1x1
+
+    def test_444_full_sampling(self, tmp_path):
+        src = _make_image(tmp_path / "src.jpg")
+        result = _process(src, tmp_path / "out", quality=90,
+                          jpeg_subsampling="444")
+        assert result.success
+        assert self._sampling_factors(result.output_path) == [
+            (1, 1), (1, 1), (1, 1)]
+
+    def test_422(self, tmp_path):
+        src = _make_image(tmp_path / "src.jpg")
+        result = _process(src, tmp_path / "out", quality=90,
+                          jpeg_subsampling="422")
+        assert result.success
+        factors = self._sampling_factors(result.output_path)
+        assert factors[0] == (2, 1)
+
+    def test_invalid_value_falls_back_to_420(self, tmp_path):
+        src = _make_image(tmp_path / "src.jpg")
+        result = _process(src, tmp_path / "out", quality=90,
+                          jpeg_subsampling="bogus")
+        assert result.success
+        assert self._sampling_factors(result.output_path)[0] == (2, 2)
+
+
+class TestRawDemosaic:
+    """--raw-demosaic maps to rawpy.DemosaicAlgorithm; "auto" omits it."""
+
+    @staticmethod
+    def _fake_rawpy(monkeypatch, captured):
+        import types
+        import numpy as np
+        fake = types.ModuleType("rawpy")
+
+        class FakeRaw:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def postprocess(self, **kw):
+                captured.update(kw)
+                return np.zeros((4, 6, 3), dtype=np.uint8)
+
+        fake.imread = lambda p: FakeRaw()
+        fake.ColorSpace = types.SimpleNamespace(sRGB="sRGB")
+
+        class _Enum(dict):  # subscriptable name → value, like a real Enum
+            def __getattr__(self, k):
+                return self[k]
+
+        fake.DemosaicAlgorithm = _Enum(AMAZE="AMAZE", AHD="AHD", VNG="VNG",
+                                       PPG="PPG", DCB="DCB", DHT="DHT")
+        monkeypatch.setitem(sys.modules, "rawpy", fake)
+
+    def test_amaze_passes_demosaic_algorithm(self, tmp_path, monkeypatch):
+        from photo_s.engine import _load_raw_via_rawpy, ProcessOptions
+        captured = {}
+        self._fake_rawpy(monkeypatch, captured)
+        img = _load_raw_via_rawpy("fake.dng", ProcessOptions(raw_demosaic="amaze"))
+        assert img.size == (6, 4)
+        assert captured["demosaic_algorithm"] == "AMAZE"
+
+    def test_auto_omits_demosaic(self, tmp_path, monkeypatch):
+        from photo_s.engine import _load_raw_via_rawpy, ProcessOptions
+        captured = {}
+        self._fake_rawpy(monkeypatch, captured)
+        _load_raw_via_rawpy("fake.dng", ProcessOptions(raw_demosaic="auto"))
+        assert "demosaic_algorithm" not in captured
+
+    def test_invalid_raises_value_error(self, tmp_path, monkeypatch):
+        import pytest
+        from photo_s.engine import _load_raw_via_rawpy, ProcessOptions
+        captured = {}
+        self._fake_rawpy(monkeypatch, captured)
+        with pytest.raises(ValueError):
+            _load_raw_via_rawpy("fake.dng", ProcessOptions(raw_demosaic="bogus"))
+
+
+class TestMetadataSurvivesTone:
+    """Regression: ImageEnhance.Brightness/Contrast return fresh images with
+    an empty .info — any brightness/contrast pass used to silently drop
+    EXIF + ICC + DPI. apply_tone_adjustments now restores img.info."""
+
+    def test_exif_and_icc_survive_brightness(self, tmp_path):
+        import piexif
+        from photo_s.engine import process_image, ProcessOptions
+        src = _make_jpeg_with_gps(tmp_path / "src.jpg")
+        result = _process(src, tmp_path / "out", brightness=1.3)
+        assert result.success
+        d = _load_exif(result.output_path)
+        assert d["0th"].get(piexif.ImageIFD.Make) == b"TestCam"
+
+    def test_exif_and_icc_survive_contrast(self, tmp_path):
+        import piexif
+        from photo_s.engine import process_image, ProcessOptions
+        src = _make_jpeg_with_gps(tmp_path / "src.jpg")
+        result = _process(src, tmp_path / "out", contrast=0.8)
+        assert result.success
+        assert _load_exif(result.output_path)["0th"].get(
+            piexif.ImageIFD.Make) == b"TestCam"
+
+    def test_icc_survives_brightness(self, tmp_path):
+        from PIL import Image, ImageCms
+        import piexif
+        from photo_s.engine import process_image, ProcessOptions
+        src = tmp_path / "src.jpg"
+        img = Image.new("RGB", (40, 30), (10, 90, 200))
+        exif = piexif.dump({"0th": {}, "Exif": {}, "1st": {},
+                            "thumbnail": None, "GPS": {}})
+        icc = ImageCms.ImageCmsProfile(
+            ImageCms.createProfile("sRGB")).tobytes()
+        img.save(src, exif=exif, icc_profile=icc)
+        result = _process(str(src), tmp_path / "out", brightness=1.3)
+        assert result.success
+        assert Image.open(result.output_path).info.get("icc_profile")
+
+
+class TestRawDecodeIcc:
+    """RAW decode tags output with sRGB ICC (the decoded pixels are sRGB)."""
+
+    @staticmethod
+    def _fake_rawpy(monkeypatch):
+        import types
+        import numpy as np
+        fake = types.ModuleType("rawpy")
+
+        class FakeRaw:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def postprocess(self, **kw):
+                return np.zeros((4, 6, 3), dtype=np.uint8)
+
+        fake.imread = lambda p: FakeRaw()
+        fake.ColorSpace = types.SimpleNamespace(sRGB="sRGB")
+        monkeypatch.setitem(sys.modules, "rawpy", fake)
+
+    def test_decode_attaches_srgb_icc(self, tmp_path, monkeypatch):
+        from photo_s.engine import _load_raw_via_rawpy, ProcessOptions
+        self._fake_rawpy(monkeypatch)
+        img = _load_raw_via_rawpy("fake.dng", ProcessOptions())
+        assert img.info.get("icc_profile")
+
+    def test_scrub_skips_icc(self, tmp_path, monkeypatch):
+        from photo_s.engine import _load_raw_via_rawpy, ProcessOptions
+        self._fake_rawpy(monkeypatch)
+        img = _load_raw_via_rawpy("fake.dng", ProcessOptions(scrub=True))
+        assert not img.info.get("icc_profile")

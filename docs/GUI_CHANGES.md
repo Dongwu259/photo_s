@@ -506,3 +506,23 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   need_dir/done/done_warn`、`more_hdr`、`hdr_*`（title/need_files/count/output/
   align/merge/done/failed）、`blur_faces/blur_faces_off/blur_faces_blur/
   blur_faces_pixelate/blur_faces_margin_lbl/blur_faces_hint`。
+
+## 13. 第十轮：RAW/JPEG 输出质量设定（v1.9.0）
+
+- **设置面板「选项」区新增两行**（`opts_frame` row 11-12，jobs 之后）：
+  - **JPEG 色度子采样**（`self.jpeg_subsampling`，tk.StringVar 放 `__init__`，
+    combobox 444/422/420，默认 420）：444 = 全色彩（体积更大），422/420 依次
+    更小。对应 `ProcessOptions.jpeg_subsampling` → `_save_image`
+    `save_kwargs["subsampling"]`（PIL 0/1/2）。
+  - **RAW 去马赛克算法**（`self.raw_demosaic`，combobox
+    auto/ahd/vng/ppg/dcb/dht/amaze，默认 auto）：映射 rawpy.DemosaicAlgorithm；
+    amaze 质量最高最慢。对应 `ProcessOptions.raw_demosaic` →
+    `_load_raw_via_rawpy` kwargs。
+- **RAW 解码自动打 sRGB ICC**（引擎层，非 GUI 选项）：rawpy 解码像素本就是
+  sRGB（output_color=sRGB），解码后 `img.info["icc_profile"]` 自动补 sRGB
+  profile → 输出 JPEG/TIFF/PNG 自带色彩空间标记（`--scrub` 仍会剥离）。
+- **修复隐藏元数据丢失 bug**：`apply_tone_adjustments` 的
+  `ImageEnhance.Brightness/Contrast` 返回空 `.info` 的新图，任何
+  `--brightness`/`--contrast` 都会静默丢掉 EXIF/ICC/DPI——现已快照+回填
+  `img.info`（grade.py/mask.py 已有同类约定，这是最后一处漏网）。
+- 新增 GUI STRINGS（zh/en）：`jpeg_subsampling`、`raw_demosaic`。

@@ -206,6 +206,8 @@ GET  /health  带 Bearer → {"status": "ok", "version": "..."}
 | `pad` | 配置式别名，等价于 `pad_ratio`（如 `"16:9"`） |
 | `target_size` | 人类可读目标体积：`"500KB"` / `"2MB"`（转成 `target_size_bytes`） |
 | `output_format` | 大小写不敏感：`"png"` / `"WEBP"` 均接受，归一化为规范大小写 |
+| `jpeg_subsampling` | `"444"`/`"422"`/`"420"`（默认 `"420"`；444 保留全色彩，体积更大） |
+| `raw_demosaic` | `"auto"`/`"ahd"`/`"vng"`/`"ppg"`/`"dcb"`/`"dht"`/`"amaze"`（默认 `"auto"`；amaze 质量最高最慢） |
 
 ### 3.5 异步任务（长批处理：进度 + 取消）
 
@@ -303,7 +305,7 @@ shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
 
 | 工具 | 关键参数 | 输出 |
 |---|---|---|
-| `process` | `paths[]`, `recursive`, `quality`, `output_format`, `output_dir`, `resize` "WxH", `scale`, `suffix`, `target_size` "500KB", `strip_gps`, `denoise`, `ev`, `log_curve`, `wb_temp`, `auto_straighten`, `crop_ratio` "16:9", `blur_faces` "blur"\|"pixelate", `blur_faces_margin`, v1.6 调色（`wb_tint`/`levels`/`curves`/`vibrance`/`color_grading`/`hsl`/`clarity`/`texture`/`dehaze`/`vignette`/`grain`），v1.7 局部与镜头（`masks`/`mask_adjust`/`point_color`/`lens_distort`/`lens_vignette`/`lens_ca`）, `jobs`, `dry_run`, `evaluate` | `BatchResult` JSON + `ok`；`dry_run` → `{"dry_run", "count", "files", "settings"}`；`evaluate=true` 时每文件带 `ssim`（同 `--evaluate`）。`blur_faces` 需 `photo-s-tools[enhance]`（opencv），缺失时 per-file 报错 |
+| `process` | `paths[]`, `recursive`, `quality`, `output_format`, `output_dir`, `resize` "WxH", `scale`, `suffix`, `target_size` "500KB", `strip_gps`, `denoise`, `ev`, `log_curve`, `wb_temp`, `auto_straighten`, `crop_ratio` "16:9", `blur_faces` "blur"\|"pixelate", `blur_faces_margin`, v1.6 调色（`wb_tint`/`levels`/`curves`/`vibrance`/`color_grading`/`hsl`/`clarity`/`texture`/`dehaze`/`vignette`/`grain`），v1.7 局部与镜头（`masks`/`mask_adjust`/`point_color`/`lens_distort`/`lens_vignette`/`lens_ca`），v1.9 输出质量（`jpeg_subsampling`/`raw_demosaic`）, `jobs`, `dry_run`, `evaluate` | `BatchResult` JSON + `ok`；`dry_run` → `{"dry_run", "count", "files", "settings"}`；`evaluate=true` 时每文件带 `ssim`（同 `--evaluate`）。`blur_faces` 需 `photo-s-tools[enhance]`（opencv），缺失时 per-file 报错 |
 | `info` | — | 同 `photo-s info --json`（含 `optional_features`/`plugins`） |
 | `exif` | `action` "show"\|"write", `paths[]`, `recursive`, `rating_min`, `rating`, `keywords`, `camera`, `tags` {"path": {…}}, `gps` "lat,lon" | show → `{"count", "results": [{path, rating, keywords, …}]}`；write → `{"written", "errors"}`。`gps` 把同一坐标批量写入 `paths` 全部文件 |
 | `dedup` | `paths[]`, `recursive`, `threshold` (默认 5), `action` "report"\|"keep-sharpest", `dry_run` (默认 **True**) | report → `{"count", "duplicate_count", "savings_bytes", "groups"}`；keep-sharpest → `{"kept", "removed", "dry_run"}` |
