@@ -47,6 +47,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | Resize / Scale | ✅ | ✅ | Max dimensions, percentage, or longest-side cap |
 | Visual preview | ✅ | — | Live original↔processed preview rendered through the real pipeline |
 | Tone & color | ✅ | ✅ | Brightness/contrast/saturation/gamma/sharpen, B&W, sepia |
+| Export sharpen | ✅ | ✅ | LR-style output-stage USM, radius scales with output resolution |
 | White balance | ✅ | ✅ | Kelvin temperature or gray-card sampling |
 | WB tint axis | ✅ | ✅ | Green(-)/magenta(+) G-M axis |
 | Point curves / levels | ✅ | ✅ | PCHIP point curves, manual black/white/gamma |
@@ -80,7 +81,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | Burst keep-sharpest | ✅ | ✅ | Keep the sharpest of a burst |
 | Checksum manifest | ✅ | ✅ | SHA-256 archive integrity + verify |
 | HTML gallery | ✅ | ✅ | Self-contained index.html + thumbnails |
-| Presets | ✅ | ✅ | Save/load named configs |
+| Presets | ✅ | ✅ | Save/load named configs + built-in `lr-look` (LR-style grade: S-curve, vibrance, export sharpen) |
 | Multi-profile batch | — | ✅ | One input set, N output profiles |
 | Parallel processing | ✅ | ✅ | Multi-threaded |
 | JSON output | — | ✅ | Machine-readable output for AI agents |
@@ -127,6 +128,7 @@ Zero-install (uvx): `uvx --from photo-s-tools photo-s --help` ·
 photo-s batch 'RAW/*.ARW' --format jpeg -o out/ -q 90   # batch RAW → JPEG
 photo-s batch 'RAW/*.ARW' -o out/ -q 95 --jpeg-subsampling 444 \
   --raw-demosaic amaze                                # max quality RAW → JPEG
+photo-s batch 'RAW/*.ARW' -o out/ --preset lr-look     # LR-style grade out of the box
 photo-s compress *.jpg --target-size 5MB -j 8           # auto-tune to ≤5MB
 photo-s select ~/shoot/ -r --selects-dir picks --rejects-dir bin --dry-run
 photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv

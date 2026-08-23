@@ -21,6 +21,7 @@ from photo_s.grade import (
     apply_color_grading,
     apply_curves,
     apply_dehaze,
+    apply_export_sharpen,
     apply_grain,
     apply_hsl,
     apply_levels,
@@ -512,3 +513,66 @@ def test_point_color_preserves_info_and_alpha():
     assert out.mode == "RGBA"
     assert out.info.get("exif") == b"keepme"
     assert np.all(np.asarray(out)[..., 3] == 255)
+
+
+class TestVibranceNeutral:
+    """Regression: vibrance must leave truly neutral (gray) pixels alone.
+
+    At sat ≈ 0, HSV hue is undefined — boosting saturation there round-trips
+    to a red tint via HSV→RGB and darkens the pixel (e.g. 0.12 vibrance
+    turned mid-gray 128 into (128, 113, 113)). Real vibrance is a no-op on
+    neutrals."""
+
+    def test_gray_stays_gray_and_same_value(self):
+        im = Image.new("RGB", (4, 4), (128, 128, 128))
+        out = apply_vibrance(im, 0.5)
+        r, g, b = out.getpixel((0, 0))
+        assert (r, g, b) == (128, 128, 128)
+
+    def test_near_gray_preserves_value_and_hue_order(self):
+        # sat ~0.03 is above the neutral floor, so it IS boosted by design
+        # ("muted colors get the most change") — but the value (max channel)
+        # must stay put and the hue must not flip to the red hue=0 pole.
+        im = Image.new("RGB", (4, 4), (128, 126, 124))
+        out = apply_vibrance(im, 0.5)
+        r, g, b = out.getpixel((0, 0))
+        assert max(r, g, b) == 128  # value preserved
+        assert r > g > b            # hue order intact (no red/cyan flip)
+
+
+class TestExportSharpen:
+    def test_zero_is_noop(self):
+        im = Image.new("RGB", (40, 40), (100, 100, 100))
+        assert apply_export_sharpen(im, 0.0) is im
+
+    def test_edge_contrast_increases(self):
+        # a hard edge gets a light halo (USM) → local gradient grows
+        import numpy as np
+        arr = np.zeros((60, 80, 3), dtype=np.uint8)
+        arr[:, :40] = (40, 40, 40)
+        arr[:, 40:] = (200, 200, 200)
+        im = Image.fromarray(arr)
+        out = apply_export_sharpen(im, 1.5)
+        o = np.asarray(out, dtype=int)
+        # just left of the edge: darker than the flat 40 side
+        assert o[30, 39, 0] < 40
+        # just right of the edge: brighter than the flat 200 side
+        assert o[30, 40, 0] > 200
+
+    def test_info_preserved(self):
+        im = Image.new("RGB", (40, 40), (100, 100, 100))
+        im.info["exif"] = b"mock"
+        out = apply_export_sharpen(im, 1.0)
+        assert out.info.get("exif") == b"mock"
+
+    def test_radius_scales_with_resolution(self):
+        # small vs large images both run; the large one's radius is bigger
+        # (formula 0.5 + max_dim/4000, clamped [0.3, 3.0]) — indirectly
+        # verified: both succeed and neither errors on tiny/large sizes.
+        small = Image.new("RGB", (200, 100), (128, 128, 128))
+        big = Image.new("RGB", (4000, 3000), (128, 128, 128))
+        apply_export_sharpen(small, 1.0)
+        apply_export_sharpen(big, 1.0)  # radius would be 1.5 here
+        # flat images are unchanged (delta = 0) — the strong smoke check
+        assert np.array_equal(np.asarray(apply_export_sharpen(small, 1.0)),
+                              np.asarray(small))

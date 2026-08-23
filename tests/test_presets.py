@@ -118,3 +118,71 @@ class TestCliPresetApply:
         rc = run_cli(["batch", str(src), "-o", str(tmp_path / "out"),
                       "--preset", "nope", "--dry-run"])
         assert rc == 1
+
+
+class TestBuiltinPresets:
+    def test_lr_look_resolves_without_user_file(self, presets_dir):
+        from photo_s.presets import load_preset, list_presets
+        # isolated dir has no user presets
+        opts = load_preset("lr-look")
+        assert opts is not None
+        assert opts.curves  # S-curve present
+        assert opts.export_sharpen == 1.0  # LR-style output sharpening
+        assert any("lr-look" in p for p in list_presets())
+
+    def test_user_preset_shadows_builtin(self, presets_dir):
+        from photo_s.presets import save_preset, load_preset, list_presets
+        save_preset("lr-look", ProcessOptions(quality=42),
+                    "user override")
+        opts = load_preset("lr-look")
+        assert opts.quality == 42
+        assert opts.curves == ""  # builtin values gone
+        listed = list_presets()
+        assert any("user override" in p for p in listed)
+
+    def test_unknown_returns_none(self, presets_dir):
+        from photo_s.presets import load_preset
+        assert load_preset("definitely-not-a-preset") is None
+
+
+class TestPresetSkipDefaults:
+    """A preset field at its dataclass default carries no intent — applying
+    it must not clobber command-level defaults (batch suffix '_processed')
+    or config values."""
+
+    def test_builtin_does_not_clobber_batch_suffix(self, presets_dir):
+        # The builtin ProcessOptions has default suffix "_compressed"; a batch
+        # run must keep "_processed" (regression: lr-look output was named
+        # *_compressed.jpg before the fix).
+        import types
+        import photo_s.cli as cli
+        from photo_s.engine import ProcessOptions
+        from photo_s.presets import load_preset
+        parsed = types.SimpleNamespace(command="batch", preset="lr-look")
+        options = ProcessOptions(suffix="_processed")
+        out = cli._apply_preset_defaults(options, parsed)
+        assert out.suffix == "_processed"
+        # and the look fields DID apply
+        assert out.curves and out.export_sharpen == 1.0
+
+    def test_explicit_cli_still_wins(self, presets_dir):
+        import types
+        import photo_s.cli as cli
+        from photo_s.engine import ProcessOptions
+        parsed = types.SimpleNamespace(command="batch", preset="lr-look",
+                                       sharpen=3.0)
+        options = ProcessOptions(sharpen=3.0)
+        out = cli._apply_preset_defaults(options, parsed)
+        assert out.sharpen == 3.0  # CLI explicit beats preset
+
+    def test_non_default_preset_field_applies(self, presets_dir):
+        import types
+        import photo_s.cli as cli
+        from photo_s.presets import save_preset
+        from photo_s.engine import ProcessOptions
+        save_preset("web", ProcessOptions(quality=70, suffix="_web"), "")
+        parsed = types.SimpleNamespace(command="batch", preset="web")
+        options = ProcessOptions(suffix="_processed")
+        out = cli._apply_preset_defaults(options, parsed)
+        assert out.suffix == "_web"   # non-default preset value applies
+        assert out.quality == 70

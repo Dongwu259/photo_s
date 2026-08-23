@@ -219,6 +219,10 @@ def _add_transform_args(parser):
         metavar="0-3", help=_t('help___sharpen'),
     )
     parser.add_argument(
+        "--export-sharpen", type=float, default=argparse.SUPPRESS,
+        metavar="0-2", help=_t('help___export_sharpen'),
+    )
+    parser.add_argument(
         "--grayscale", action="store_true", default=argparse.SUPPRESS,
         help=_t('help___grayscale'),
     )
@@ -589,6 +593,7 @@ def _build_process_options(parsed) -> ProcessOptions:
         saturation=getattr(parsed, 'saturation', 1.0),
         gamma=getattr(parsed, 'gamma', 1.0),
         sharpen=getattr(parsed, 'sharpen', 1.0),
+        export_sharpen=getattr(parsed, 'export_sharpen', None),
         grayscale=getattr(parsed, 'grayscale', False),
         sepia=getattr(parsed, 'sepia', False),
         auto_levels=getattr(parsed, 'auto_levels', False),
@@ -688,12 +693,21 @@ def _apply_preset_defaults(options: ProcessOptions, parsed) -> ProcessOptions:
         # stderr so a --json stdout payload stays clean
         print(f"{_t('msg_preset_not_found')}: {preset_name}", file=sys.stderr)
         return None
+    defaults = ProcessOptions()
     for field in ProcessOptions.__dataclass_fields__:
         if field in ("jobs", "output_dir"):
             continue
         cli_dest = _PRESET_CLI_DESTS.get(field, field)
         if not hasattr(parsed, cli_dest):
-            setattr(options, field, getattr(preset_opts, field))
+            value = getattr(preset_opts, field)
+            # A field at its dataclass default carries no intent — applying
+            # it would clobber command-level defaults (batch's
+            # suffix="_processed") and config values with the ProcessOptions
+            # default (suffix="_compressed"). Only non-default values from the
+            # preset are real intent.
+            if value == getattr(defaults, field):
+                continue
+            setattr(options, field, value)
     return options
 
 

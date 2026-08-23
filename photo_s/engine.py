@@ -179,6 +179,9 @@ class ProcessOptions:
     saturation: float = 1.0
     gamma: float = 1.0
     sharpen: float = 1.0
+    export_sharpen: Optional[float] = None  # LR-style output-stage USM
+                                            # (0/None off; radius scales with
+                                            # final output resolution)
     grayscale: bool = False        # convert to black & white
     sepia: bool = False            # sepia toning
     wb_temp: Optional[int] = None  # white balance in Kelvin (None = no change)
@@ -1280,6 +1283,16 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
             img, _faces = apply_face_blur(
                 img, mode=options.blur_faces,
                 margin=options.blur_faces_margin or 20)
+
+        # ── Export sharpening (LR-style output stage) ───────────────────────
+        # After resize/pad/print-size so the USM radius scales with the FINAL
+        # output resolution; after watermark/blur so it sharpens the saved
+        # pixels (the lr-look preset uses this instead of mid-pipeline
+        # sharpen). Multi-size outputs copy this already-sharpened full-res
+        # image and downscale — acceptable (sharpen-then-downscale).
+        if options.export_sharpen:
+            from .grade import apply_export_sharpen
+            img = apply_export_sharpen(img, options.export_sharpen)
 
         # ── Extract EXIF metadata for smart rename ──────────────────────────
         exif_meta = _extract_exif_metadata(img, input_path)

@@ -54,6 +54,7 @@ _SIMPLE_FIELDS = {
     "saturation": "saturation",
     "gamma": "gamma",
     "sharpen": "sharpen",
+    "export_sharpen": "export_sharpen",
     "grayscale": "grayscale",
     "sepia": "sepia",
     "auto_levels": "auto_levels",

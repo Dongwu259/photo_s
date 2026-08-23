@@ -32,7 +32,7 @@
 | `contact-sheet` | 联系表（网格拼图） |
 | `gallery` | HTML 画廊 |
 | `watch` | 目录监视自动处理 |
-| `preset` | 预设配置管理（save 捕获全选项；batch/compress/convert 支持 `--preset NAME` 一键套用，显式 CLI 参数优先） |
+| `preset` | 预设配置管理（save 捕获全选项；batch/compress/convert 支持 `--preset NAME` 一键套用，显式 CLI 参数优先；**内置 `lr-look` 预设**：S 曲线+自然饱和+导出锐化，rawpy 平淡基线之上接近 LR 默认渲染，用户同名预设可覆盖） |
 | `config` | TOML 配置文件管理 |
 | `info` | 格式/环境探测（`--json`） |
 | `serve` | REST API（AI agent 集成，含 `/process/stream` SSE 进度） |
@@ -59,7 +59,7 @@
 | 压缩 | 质量调优、target-size 自动调优、optimize、progressive、JPEG 色度子采样 444/422/420（`--jpeg-subsampling`，444 保留全色彩） |
 | 格式 | JPEG/PNG/WebP/TIFF/HEIC/AVIF/BMP/ICO |
 | 缩放 | max_width/height、max_pixels、scale_percent |
-| 影调 | brightness/contrast/saturation/gamma/sharpen/grayscale/sepia |
+| 影调 | brightness/contrast/saturation/gamma/sharpen/grayscale/sepia、**导出锐化 `--export-sharpen`（LR 式输出级 USM，半径随输出分辨率缩放，`--preset lr-look` 内置）** |
 | 白平衡 | wb_temp（色温 K）、wb_reference（灰卡采样） |
 | 曝光 | ev（2^EV）、auto_exposure |
 | 降噪 | denoise 0-20（SCUNet provider 优先，否则 NLM） |

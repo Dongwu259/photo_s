@@ -43,6 +43,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | 缩放 / 比例 | ✅ | ✅ | 最大尺寸、百分比或最长边上限 |
 | 视觉预览 | ✅ | — | 原图↔处理后实时并排预览（经真实管线渲染） |
 | 影调与色彩 | ✅ | ✅ | 亮度/对比度/饱和度/伽马/锐化，黑白、复古 |
+| 导出锐化 | ✅ | ✅ | LR 式输出级 USM，半径随输出分辨率缩放 |
 | 白平衡 | ✅ | ✅ | 色温 K，或灰卡采样 |
 | WB tint 轴 | ✅ | ✅ | 绿(-)/品红(+) G-M 轴 |
 | 点曲线 / 色阶 | ✅ | ✅ | PCHIP 点曲线，手动黑/白场/伽马 |
@@ -76,7 +77,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | 连拍选图 | ✅ | ✅ | 每组保留最清晰 |
 | 校验和清单 | ✅ | ✅ | SHA-256 归档完整性 + 校验 |
 | HTML 画廊 | ✅ | ✅ | 自包含 index.html + 缩略图 |
-| 预设 | ✅ | ✅ | 保存/加载命名配置 |
+| 预设 | ✅ | ✅ | 保存/加载命名配置 + 内置 `lr-look`（LR 风格：S 曲线+自然饱和+导出锐化） |
 | 多配置批量 | — | ✅ | 一份输入，N 份输出配置 |
 | 并行处理 | ✅ | ✅ | 多线程 |
 | JSON 输出 | — | ✅ | 供 AI agent 消费的机器可读输出 |
@@ -121,6 +122,7 @@ pip install "photo-s-tools[mcp]"     # + MCP server（Python 3.10+）
 
 ```bash
 photo-s batch 'RAW/*.ARW' --format jpeg -o out/ -q 90   # 批量 RAW → JPEG
+photo-s batch 'RAW/*.ARW' -o out/ --preset lr-look      # 内置 LR 风格出片
 photo-s compress *.jpg --target-size 5MB -j 8           # 自动调优到 ≤5MB
 photo-s select ~/shoot/ -r --selects-dir 精选 --rejects-dir 淘汰 --dry-run
 photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv

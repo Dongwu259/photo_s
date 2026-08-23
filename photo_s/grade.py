@@ -273,6 +273,10 @@ def apply_vibrance(img: Image.Image, amount: float = 0.0) -> Image.Image:
     new_sat = sat + (1.0 - sat) * amount if amount > 0 \
         else sat * (1.0 + amount)
     new_sat = np.clip(new_sat, 0.0, 1.0)
+    # Truly neutral pixels (sat ≈ 0) have an undefined hue — boosting their
+    # saturation would round-trip to a red/cyan tint via the HSV→RGB
+    # conversion and darken them. Real vibrance leaves neutrals alone.
+    new_sat[sat < 1e-3] = 0.0
     out_arr = _from_hsv(hue, new_sat, val)
     return _finish_grade(img, out_arr, alpha)
 
@@ -542,8 +546,10 @@ def _usm_local_contrast(img: Image.Image, amount: float,
     preserved and only local luminance detail changes (clarity = large
     radius, texture = small radius).
     """
-    amount = max(-1.0, min(1.0, float(amount)))
-    if abs(amount) < 1e-4:
+    # amount is pre-clamped by the callers (clarity/texture → [-1,1],
+    # export sharpen → its own range); clamping here would silently cap
+    # export-sharpen strengths above 1.0.
+    if abs(float(amount)) < 1e-4:
         return img
     if img.mode not in ("RGB", "RGBA", "L"):
         img = img.convert("RGBA")
@@ -571,12 +577,31 @@ def _usm_local_contrast(img: Image.Image, amount: float,
 def apply_clarity(img: Image.Image, amount: float = 0.0,
                   radius: float = 60.0) -> Image.Image:
     """Local contrast with a large radius (Lightroom-style clarity)."""
-    return _usm_local_contrast(img, amount, radius)
+    return _usm_local_contrast(img, max(-1.0, min(1.0, float(amount or 0.0))),
+                               radius)
 
 
 def apply_texture(img: Image.Image, amount: float = 0.0,
                   radius: float = 4.0) -> Image.Image:
     """Fine-detail enhancement with a small radius (texture)."""
+    return _usm_local_contrast(img, max(-1.0, min(1.0, float(amount or 0.0))),
+                               radius)
+
+
+def apply_export_sharpen(img: Image.Image, amount: float = 1.0) -> Image.Image:
+    """Output-stage USM with the radius scaled to the image's resolution.
+
+    Lightroom-style export sharpening: runs on the FINAL (post-resize) pixels
+    with a radius proportional to output size — a 4000px-wide export wants a
+    larger radius than an 800px thumbnail. ``amount`` 0 = off; 0.5 gentle,
+    1.0 standard, 2.0 strong. The lr-look preset uses this instead of the
+    mid-pipeline ``sharpen``.
+    """
+    amount = float(amount or 0.0)
+    if abs(amount) < 1e-4:
+        return img
+    max_dim = max(img.size)
+    radius = min(3.0, max(0.3, 0.5 + max_dim / 4000.0))
     return _usm_local_contrast(img, amount, radius)
 
 

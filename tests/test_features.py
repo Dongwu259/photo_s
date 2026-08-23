@@ -959,3 +959,23 @@ class TestRawDecodeIcc:
         self._fake_rawpy(monkeypatch)
         img = _load_raw_via_rawpy("fake.dng", ProcessOptions(scrub=True))
         assert not img.info.get("icc_profile")
+
+
+class TestExportSharpenPipeline:
+    """--export-sharpen sharpens the final (post-resize) pixels."""
+
+    def test_edges_are_sharper_after_resize(self, tmp_path):
+        import numpy as np
+        arr = np.zeros((600, 800, 3), dtype=np.uint8)
+        arr[:, :400] = (40, 40, 40)
+        arr[:, 400:] = (200, 200, 200)
+        src = tmp_path / "edges.jpg"
+        Image.fromarray(arr).save(src, quality=95)
+        base = _process(str(src), tmp_path / "base")
+        sharp = _process(str(src), tmp_path / "sharp", export_sharpen=1.5)
+        assert base.success and sharp.success
+        b = np.asarray(Image.open(base.output_path).convert("L"), dtype=int)
+        s = np.asarray(Image.open(sharp.output_path).convert("L"), dtype=int)
+        # edge halo appears in the sharpened output, not the baseline
+        assert s[300, 399] < b[300, 399]     # darker just-left of edge
+        assert s[300, 400] > b[300, 400]     # brighter just-right of edge

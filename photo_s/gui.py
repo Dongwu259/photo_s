@@ -451,6 +451,7 @@ STRINGS = {
         "saturation": "饱和度",
         "gamma": "伽马",
         "sharpen": "锐化",
+        "export_sharpen": "导出锐化（0 关闭）",
         "grayscale": "黑白",
         "sepia": "复古",
         # Composition
@@ -1066,6 +1067,7 @@ STRINGS = {
         "saturation": "Saturation",
         "gamma": "Gamma",
         "sharpen": "Sharpen",
+        "export_sharpen": "Export sharpen (0 off)",
         "grayscale": "Grayscale",
         "sepia": "Sepia",
         # Composition
@@ -1733,6 +1735,7 @@ class PhotoSApp:
         self.saturation = tk.DoubleVar(value=1.0)
         self.gamma = tk.DoubleVar(value=1.0)
         self.sharpen = tk.DoubleVar(value=1.0)
+        self.export_sharpen = tk.DoubleVar(value=0.0)
         self.grayscale = tk.BooleanVar(value=False)
         self.sepia = tk.BooleanVar(value=False)
         # Correction (exposure / LOG / denoise / straighten)
@@ -2828,6 +2831,19 @@ class PhotoSApp:
                            self.grayscale, row=5)
         self._add_checkbox(adj_frame, self._t("sepia"),
                            self.sepia, row=6)
+
+        # Export sharpening (LR-style output-stage USM; 0 = off)
+        tk.Label(adj_frame, text=self._t("export_sharpen"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=7, column=0, sticky="w", pady=(8, 0))
+        es_val = tk.Label(adj_frame, text="0.00", font=FONT_SMALL,
+                          fg=COLORS["text_secondary"], bg=COLORS["card"],
+                          width=5)
+        es_val.grid(row=7, column=2, sticky="e", pady=(8, 0))
+        ttk.Scale(adj_frame, from_=0.0, to=2.0, variable=self.export_sharpen,
+                  command=lambda v, lbl=es_val: lbl.config(
+                      text=f"{float(v):.2f}")).grid(
+            row=7, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
 
         # ── Composition (crop / rotate / flip / pad) ─────────────────────────
         comp_frame = self._add_collapsible_section(ADJ, "sec_composition")
@@ -5784,6 +5800,9 @@ class PhotoSApp:
                      "sharpen", "ev", "wb_tint", "vibrance", "clarity",
                      "texture", "dehaze"):
             _set(getattr(self, name), getattr(opts, name), float)
+        # export sharpen: None → 0 (slider off)
+        _set(self.export_sharpen,
+             getattr(opts, "export_sharpen", None) or 0.0, float)
         _set(self.lens_distort, getattr(opts, "lens_distort", 0.0), float)
         # strings (None → "")
         for name in ("output_dir", "prefix", "suffix", "scale_percent",
@@ -7926,6 +7945,7 @@ class PhotoSApp:
             saturation=_to_float(self.saturation.get(), 1.0),
             gamma=_to_float(self.gamma.get(), 1.0),
             sharpen=_to_float(self.sharpen.get(), 1.0),
+            export_sharpen=_to_float(self.export_sharpen.get(), 0.0) or None,
             grayscale=self.grayscale.get(),
             sepia=self.sepia.get(),
             ev=_to_float(self.ev.get(), 0.0),

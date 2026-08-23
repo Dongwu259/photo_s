@@ -15,6 +15,37 @@ from .engine import ProcessOptions
 
 PRESETS_DIR = Path.home() / ".photos" / "presets"
 
+# Built-in presets (name → options dict). Always available with zero setup —
+# no user files written. A user-saved preset of the same name overrides the
+# builtin (user wins), and delete_preset on a builtin is a no-op.
+BUILTIN_PRESETS = {
+    "lr-look": {
+        "_description": (
+            "LR 风格出片：S 曲线（提黑位/压高光）+ 自然饱和 + 导出锐化，"
+            "在 rawpy 平淡基线之上接近 Lightroom 默认渲染"),
+        # gentle S-curve: raised blacks, lifted midtones, soft highlight
+        # compression — the contrast lives in the curve, not a linear slider
+        "curves": "0,0;24,30;64,76;128,138;192,204;236,244;255,255",
+        "contrast": 1.0,
+        "saturation": 1.06,
+        "vibrance": 0.08,
+        # LR-style output-stage USM (radius scales with output resolution),
+        # instead of the mid-pipeline ImageEnhance sharpen
+        "export_sharpen": 1.0,
+    },
+}
+
+
+def _builtin_options(name: str) -> Optional[ProcessOptions]:
+    """Resolve a built-in preset to ProcessOptions, or None if unknown."""
+    data = BUILTIN_PRESETS.get(name)
+    if data is None:
+        return None
+    return ProcessOptions(**{
+        k: v for k, v in data.items()
+        if k in ProcessOptions.__dataclass_fields__
+    })
+
 
 def _ensure_dir():
     """Ensure the presets directory exists."""
@@ -28,19 +59,24 @@ def _preset_path(name: str) -> Path:
 
 
 def list_presets() -> List[str]:
-    """Return sorted list of available preset names."""
-    if not PRESETS_DIR.exists():
-        return []
-    presets = []
-    for f in PRESETS_DIR.glob("*.json"):
-        name = f.stem
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-            desc = data.get("_description", "")
-            presets.append((name, desc))
-        except Exception:
-            pass
-    return [f"{n} — {d}" if d else n for n, d in sorted(presets)]
+    """Return sorted list of available preset names (user + built-in).
+
+    A user-saved preset shadows a built-in of the same name.
+    """
+    user = []
+    if PRESETS_DIR.exists():
+        for f in PRESETS_DIR.glob("*.json"):
+            name = f.stem
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                desc = data.get("_description", "")
+                user.append((name, desc))
+            except Exception:
+                pass
+    user_names = {n for n, _ in user}
+    builtin = [(n, d.get("_description", ""))
+               for n, d in BUILTIN_PRESETS.items() if n not in user_names]
+    return [f"{n} — {d}" if d else n for n, d in sorted(user + builtin)]
 
 
 def save_preset(name: str, options: ProcessOptions, description: str = ""):
@@ -60,7 +96,8 @@ def save_preset(name: str, options: ProcessOptions, description: str = ""):
 def load_preset(name: str) -> Optional[ProcessOptions]:
     """Load a named preset and return a ProcessOptions instance.
 
-    Returns None if the preset doesn't exist.
+    User-saved presets win; built-in presets are the fallback. Returns None
+    if neither exists.
     """
     path = _preset_path(name)
     if not path.exists():
@@ -70,15 +107,15 @@ def load_preset(name: str) -> Optional[ProcessOptions]:
                 path = f
                 break
         else:
-            return None
+            return _builtin_options(name)
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return None
+        return _builtin_options(name)
 
     if not isinstance(data, dict):
-        return None
+        return _builtin_options(name)
 
     # Extract known fields; ignore metadata
     data.pop("_description", None)

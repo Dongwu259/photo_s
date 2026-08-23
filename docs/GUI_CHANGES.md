@@ -526,3 +526,14 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   `--brightness`/`--contrast` 都会静默丢掉 EXIF/ICC/DPI——现已快照+回填
   `img.info`（grade.py/mask.py 已有同类约定，这是最后一处漏网）。
 - 新增 GUI STRINGS（zh/en）：`jpeg_subsampling`、`raw_demosaic`。
+
+- **导出锐化滑杆**（`adj_frame` row 7）：`self.export_sharpen`（tk.DoubleVar 放
+  `__init__`，0-2，默认 0=关）。对应 `ProcessOptions.export_sharpen` →
+  管线 blur_faces 之后、EXIF 提取之前的**输出级 USM**（`grade.apply_export_sharpen`，
+  半径 `0.5 + max_dim/4000` 随最终输出分辨率缩放，LR 式）。与中段 `sharpen`
+  并存；`_apply_options_to_ui` 把 None → 0.0。
+- **内置预设 lr-look**（presets.py `BUILTIN_PRESETS`，零文件写入）：S 曲线 +
+  微自然饱和 + export_sharpen=1.0。CLI/GUI/MCP 经 `load_preset` 统一可用；
+  用户同名预设覆盖内置。⚠️ `_apply_preset_defaults` 现在跳过「等于 dataclass
+  默认值」的字段——内置预设的默认 suffix 不再覆盖 batch 的 `_processed`
+  （修了一个潜在的用户预设也受影响的问题）。
