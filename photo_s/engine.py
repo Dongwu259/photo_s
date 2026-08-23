@@ -53,6 +53,15 @@ except ImportError:
     _HAS_PILLOW_AVIF = False
 
 
+class RawOptionError(ValueError):
+    """A user-chosen RAW decode option this build/rawpy can't honor.
+
+    Distinct from decode failures: option errors must surface as clear
+    per-file errors and MUST NOT trigger the sips fallback (which would swap
+    in a different renderer and silently change brightness/colors).
+    """
+
+
 # ── Supported formats ──────────────────────────────────────────────────────
 
 SUPPORTED_FORMATS = {
@@ -849,7 +858,7 @@ def _load_raw_via_rawpy(path: str, options: ProcessOptions) -> Image.Image:
     try:
         output_color = rawpy.ColorSpace[_RAW_COLOR_SPACES[cs]]
     except (KeyError, AttributeError):
-        raise ValueError(
+        raise RawOptionError(
             f"unknown raw color space {cs!r}; "
             f"choose from sRGB/AdobeRGB/ProPhotoRGB")
 
@@ -868,12 +877,23 @@ def _load_raw_via_rawpy(path: str, options: ProcessOptions) -> Image.Image:
             kwargs["demosaic_algorithm"] = rawpy.DemosaicAlgorithm[
                 _DEMOSAIC_NAMES[name]]
         except (KeyError, AttributeError):
-            raise ValueError(
+            raise RawOptionError(
                 f"unknown raw demosaic algorithm {name!r}; "
                 f"choose from auto/ahd/vng/ppg/dcb/dht/amaze")
 
-    with rawpy.imread(path) as raw:
-        rgb = raw.postprocess(**kwargs)
+    try:
+        with rawpy.imread(path) as raw:
+            rgb = raw.postprocess(**kwargs)
+    except Exception as e:
+        # A demosaic/color-space choice that this rawpy build can't honor
+        # (e.g. AMAZE needs the GPL3 demosaic pack) must surface as a CLEAR
+        # error — silently falling back to the sips decoder would swap in a
+        # different renderer and change brightness/colors without telling
+        # anyone (the old broad except swallowed it).
+        if type(e).__name__ == "NotSupportedError" or "requires" in str(e):
+            raise RawOptionError(
+                f"raw option not supported by this rawpy build: {e}") from e
+        raise
     if bps == 16:
         # PIL cannot represent 16-bit RGB — show the 8-bit view (>> 8 is
         # byte-identical to rawpy's own 8-bit output) and park the uint16
@@ -909,11 +929,19 @@ def _load_raw_via_sips(path: str) -> Image.Image:
 
 
 def _load_raw(path: str, options: ProcessOptions) -> Image.Image:
-    """Load a RAW image via rawpy, falling back to macOS sips."""
+    """Load a RAW image via rawpy, falling back to macOS sips.
+
+    Decode-level failures (bad file, missing rawpy) fall back to sips, but
+    RawOptionError (a user-chosen option this build can't honor, e.g. AMAZE
+    demosaic) propagates — silently re-rendering with sips would change
+    brightness/colors behind the user's back.
+    """
     # Try rawpy first (most capable)
     try:
         return _load_raw_via_rawpy(path, options)
-    except (ImportError, Exception):
+    except RawOptionError:
+        raise
+    except Exception:
         pass
 
     # Fallback: macOS sips

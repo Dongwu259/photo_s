@@ -1173,3 +1173,74 @@ class TestRaw16bit:
             _save_image(img, str(tmp_path / "out.tiff"), "TIFF",
                         ProcessOptions())
         assert "tifffile" in str(e.value)
+
+
+class TestRawOptionErrorNoSipsFallback:
+    """Regression: a demosaic/color-space choice this rawpy build can't honor
+    (e.g. AMAZE needs the GPL3 demosaic pack) must surface as a clear
+    RawOptionError — NOT silently fall back to the sips decoder (which would
+    swap in a different renderer and change brightness/colors)."""
+
+    @staticmethod
+    def _fake_rawpy(monkeypatch, raise_on_amaze=True):
+        import types
+        import numpy as np
+        fake = types.ModuleType("rawpy")
+
+        class NotSupportedError(Exception):
+            pass
+
+        class FakeRaw:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def postprocess(self, **kw):
+                if (raise_on_amaze
+                        and kw.get("demosaic_algorithm") == "AMAZE"):
+                    raise NotSupportedError(
+                        "Demosaic algorithm AMAZE requires GPL3 demosaic pack")
+                return np.zeros((4, 6, 3), dtype=np.uint8)
+
+        fake.imread = lambda p: FakeRaw()
+        fake.NotSupportedError = NotSupportedError
+        fake.ColorSpace = _Subscriptable(sRGB="sRGB")
+        fake.DemosaicAlgorithm = _Subscriptable(
+            AMAZE="AMAZE", AHD="AHD", VNG="VNG", PPG="PPG",
+            DCB="DCB", DHT="DHT")
+        monkeypatch.setitem(sys.modules, "rawpy", fake)
+
+    def test_amaze_not_supported_raises_clear_error(self, tmp_path, monkeypatch):
+        from photo_s.engine import (RawOptionError, _load_raw,
+                                    ProcessOptions)
+        self._fake_rawpy(monkeypatch)
+        with pytest.raises(RawOptionError) as e:
+            _load_raw("fake.ARW", ProcessOptions(raw_demosaic="amaze"))
+        assert "GPL3" in str(e.value)
+
+    def test_supported_demosaic_still_works(self, tmp_path, monkeypatch):
+        from photo_s.engine import _load_raw, ProcessOptions
+        self._fake_rawpy(monkeypatch)
+        img = _load_raw("fake.ARW", ProcessOptions(raw_demosaic="dht"))
+        assert img.size == (6, 4)
+
+    def test_decode_failure_still_falls_back_to_sips(self, tmp_path, monkeypatch):
+        # a genuine decode error (no demosaic option involved) must keep the
+        # existing sips fallback — only option errors propagate
+        from photo_s.engine import _load_raw, ProcessOptions
+        import types
+        import numpy as np
+        fake = types.ModuleType("rawpy")
+        fake.imread = lambda p: (_ for _ in ()).throw(
+            RuntimeError("corrupt file"))
+        fake.ColorSpace = _Subscriptable(sRGB="sRGB")
+        monkeypatch.setitem(sys.modules, "rawpy", fake)
+        # sips is unavailable in tests → the final UnidentifiedImageError
+        # proves the path reached the fallback layer
+        def _no_sips(p):
+            raise Image.UnidentifiedImageError("no sips")
+        monkeypatch.setattr("photo_s.engine._load_raw_via_sips", _no_sips)
+        with pytest.raises(Image.UnidentifiedImageError):
+            _load_raw("fake.ARW", ProcessOptions())
