@@ -46,13 +46,14 @@ def test_weight_specs_env_override(monkeypatch, tmp_path):
 
     f = tmp_path / "fake.pt"
     f.write_bytes(b"x" * 10)
-    monkeypatch.setenv("PHOTOS_AUTO_TONE_URL_BASE", "file://" + str(tmp_path))
+    monkeypatch.setenv("PHOTOS_AUTO_TONE_URL_BASE", tmp_path.as_uri())
     monkeypatch.setenv("PHOTOS_AUTO_TONE_AUTO_TONE_V7_CLEAN_PT_SHA256", "0" * 64)
     specs = {s.name: s for s in models.weight_specs()}
     assert set(specs) == set(models.WEIGHTS)
     assert specs["auto_tone_v7_clean.pt"].sha256 == "0" * 64
+    import posixpath
     assert specs["auto_tone_v7_clean.pt"].url == \
-        "file://" + str(tmp_path) + "/auto_tone_v7_clean.pt"
+        posixpath.join(tmp_path.as_uri(), "auto_tone_v7_clean.pt")
 
 
 def test_core_path_uses_cache(monkeypatch, tmp_path):
@@ -77,7 +78,7 @@ def test_ensure_lora_dir_layout(monkeypatch, tmp_path):
         w.write_bytes(b"W" * 100)
         c = src / f"{prefix}_config.json"
         c.write_text('{"r": 32}')
-        monkeypatch.setenv("PHOTOS_AUTO_TONE_URL_BASE", "file://" + str(src))
+        monkeypatch.setenv("PHOTOS_AUTO_TONE_URL_BASE", src.as_uri())
         monkeypatch.setenv(
             "PHOTOS_AUTO_TONE_LORA_AESTHETIC_SAFETENSORS_SHA256",
             hashlib.sha256(w.read_bytes()).hexdigest())
