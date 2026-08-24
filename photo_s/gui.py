@@ -1467,6 +1467,11 @@ class FlatButton(tk.Canvas):
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
         self.bind("<Button-1>", self._on_click)
+        # keyboard accessibility: Canvas widgets are not focus targets by
+        # default, so every FlatButton was mouse-only
+        self.configure(takefocus=True)
+        self.bind("<Return>", self._on_key_activate)
+        self.bind("<space>", self._on_key_activate)
 
     # ── internals ─────────────────────────────────────────────────────────
 
@@ -1525,6 +1530,11 @@ class FlatButton(tk.Canvas):
 
     def _is_enabled(self):
         return self._state != "disabled"
+
+    def _on_key_activate(self, _event):
+        if self._is_enabled() and self._command:
+            self._command()
+        return "break"
 
     def _on_enter(self, _event):
         if self._is_enabled() and self._fill != self._hover_bg:
@@ -1668,6 +1678,14 @@ class PhotoSApp:
 
     def __init__(self, root):
         self.root = root
+        # Per-monitor DPI awareness on Windows: without it Tk renders
+        # blurry on scaled displays and mouse coordinates misalign.
+        if sys.platform == "win32":
+            try:
+                from ctypes import windll
+                windll.shcore.SetProcessDpiAwareness(1)
+            except Exception:
+                pass
         # Startup language: persisted user choice > PHOTO_S_LANG env >
         # system detection. DEFAULT_LANG stays as the _t missing-key fallback.
         from . import i18n
@@ -1808,8 +1826,10 @@ class PhotoSApp:
         self._last_result = None
         # (path, size, mtime) -> "WxH" cache for the file list; opening every
         # image on each refresh freezes the UI on RAW files
+        self._preview_tempdirs: set = set()
         self._dims_cache: dict = {}
-        self._thumb_cache: dict = {}   # (path, size, mtime) → PIL Image
+        self._thumb_cache: dict = {}   # (path, size, mtime) → PIL Image (False = failed)
+        self._thumb_decoding: set = set()  # cache keys with a RAW decode in flight
         self._thumb_size = 96          # file-list thumbnail edge px
         self._pending_thumbs: list = []   # (label, path, cache_key) queue
         self._thumbs_after = None      # pending after() id for the queue
@@ -1987,6 +2007,17 @@ class PhotoSApp:
             pass
 
     def _on_main_close(self):
+        # Request cancellation of any in-flight batch before the Tk loop
+        # dies — worker callbacks into destroyed widgets crash noisily, and
+        # preview temp dirs leaked on close.
+        try:
+            if getattr(self, "processing", False):
+                self._cancel_processing()
+        except Exception:
+            pass
+        import shutil
+        for td in getattr(self, "_preview_tempdirs", ()) or ():
+            shutil.rmtree(td, ignore_errors=True)
         self._save_gui_state()
         self.root.destroy()
 
@@ -2344,7 +2375,8 @@ class PhotoSApp:
         _last_boundary = [0.0]
 
         def _on_mousewheel(event):
-            delta = event.delta
+            delta = event.delta or (120 if event.num == 4 else
+                                    -120 if event.num == 5 else 0)
             amount = -delta if abs(delta) < 10 else -delta / 120
             if time.monotonic() - _last_boundary[0] < 0.15:
                 return  # momentum tail right after a boundary hit
@@ -2363,9 +2395,14 @@ class PhotoSApp:
 
         def _bind_scroll(event):
             self.file_list_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            # X11 wheels send Button-4/5 with num=4/5 instead of delta
+            self.file_list_canvas.bind_all("<Button-4>", _on_mousewheel)
+            self.file_list_canvas.bind_all("<Button-5>", _on_mousewheel)
 
         def _unbind_scroll(event):
             self.file_list_canvas.unbind_all("<MouseWheel>")
+            self.file_list_canvas.unbind_all("<Button-4>")
+            self.file_list_canvas.unbind_all("<Button-5>")
 
         for w in (list_frame, self.file_list_canvas):
             w.bind("<Enter>", _bind_scroll)
@@ -6018,8 +6055,10 @@ class PhotoSApp:
                 status_lbl.configure(
                     text=text, fg=color or COLORS["text_secondary"])
 
-        def run():
-            out_dir = out_var.get().strip()
+        def run(out_dir, title, thumb):
+            # Tk variables are read in the button command (main thread) and
+            # handed in as plain values — touching out_var/title_combo from
+            # this worker thread is unsafe under non-threaded Tcl.
             if not out_dir:
                 schedule(lambda: set_status(
                     self._t("gallery_need_dir"), COLORS["danger"]))
@@ -6030,8 +6069,8 @@ class PhotoSApp:
             try:
                 res = self._gallery_build(
                     list(files), out_dir,
-                    title=title_var.get().strip() or "PhotoS Gallery",
-                    thumb_size=int(thumb_combo.get()))
+                    title=title,
+                    thumb_size=int(thumb))
             except Exception as e:
                 schedule(lambda err=str(e): _failed(err))
             else:
@@ -6054,13 +6093,18 @@ class PhotoSApp:
 
         generate_btn = FlatButton(
             btns, text=self._t("gallery_generate"),
-            command=lambda: threading.Thread(target=run, daemon=True).start(),
+            command=lambda: threading.Thread(
+                target=run,
+                args=(out_var.get().strip(),
+                      title_var.get().strip() or "PhotoS Gallery",
+                      thumb_combo.get()),
+                daemon=True).start(),
             bg=COLORS["accent"])
         generate_btn.pack(side="left")
         open_btn = FlatButton(
             btns, text=self._t("gallery_open"),
             command=lambda: state["output"]
-            and webbrowser.open("file://" + state["output"]),
+            and webbrowser.open(Path(state["output"]).as_uri()),
             bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
             border_color=COLORS["border"])
 
@@ -7181,7 +7225,11 @@ class PhotoSApp:
         self._undo_stack.append(entry)
         if len(self._undo_stack) > self._undo_max:
             self._undo_stack.pop(0)
+        # A new action invalidates undone work: replaying stale redo
+        # closures against changed state could delete the wrong rows.
+        self._redo_stack.clear()
         self._sync_undo_btn()
+        self._sync_redo_btn()
         return entry
 
     def _sync_undo_btn(self):
@@ -7377,7 +7425,6 @@ class PhotoSApp:
                     if p not in self._queued_files:
                         self._queued_files.append(p)
         return added
-        return added
 
     def _on_drop(self, event):
         """Handle drag-and-drop of files/folders onto the file list."""
@@ -7532,38 +7579,87 @@ class PhotoSApp:
             self._thumbs_after = self.root.after(30, self._drain_thumbnails,
                                                  batch)
 
+    def _decode_thumb_source(self, path: str, size: int):
+        """Decode + downscale one thumbnail source (no Tk objects created).
+
+        Runs on the UI thread for plain images and inside a worker for RAW
+        files — a RAW postprocess used to run inline in the drain loop and
+        froze the interface on every burst.
+        """
+        from PIL import Image
+        if Path(path).suffix.lower() in RAW_EXTENSIONS:
+            import rawpy
+            with rawpy.imread(path) as raw:
+                rgb = raw.postprocess(use_camera_wb=True,
+                                      half_size=True, output_bps=8)
+                img = Image.fromarray(rgb)
+        else:
+            with Image.open(path) as im:
+                img = im.convert("RGB").copy()
+        img.thumbnail((size, size), Image.LANCZOS)
+        return img
+
     def _drain_thumbnails(self, batch):
         self._thumbs_after = None
         size = self._thumb_size
         done = 0
-        while self._pending_thumbs and done < batch:
+        deferred = False
+        while self._pending_thumbs and done < batch and not deferred:
             lbl, path, cache_key = self._pending_thumbs.pop(0)
             try:
                 img = self._thumb_cache.get(cache_key)
                 if img is None:
-                    from PIL import Image
+                    if cache_key in self._thumb_decoding:
+                        # worker still decoding this RAW — retry later
+                        self._pending_thumbs.append((lbl, path, cache_key))
+                        deferred = True
+                        continue
                     if Path(path).suffix.lower() in RAW_EXTENSIONS:
-                        import rawpy
-                        with rawpy.imread(path) as raw:
-                            rgb = raw.postprocess(use_camera_wb=True,
-                                                  half_size=True, output_bps=8)
-                            img = Image.fromarray(rgb)
-                    else:
-                        with Image.open(path) as im:
-                            img = im.convert("RGB").copy()
-                    img.thumbnail((size, size), Image.LANCZOS)
-                    self._thumb_cache[cache_key] = img
+                        # decode RAW off the UI thread; this label re-queues
+                        self._thumb_decoding.add(cache_key)
+
+                        def _decode(p=path, k=cache_key, s=size):
+                            try:
+                                self._thumb_cache[k] = self._decode_thumb_source(p, s)
+                            except Exception:
+                                self._thumb_cache[k] = False  # failed marker
+                            finally:
+                                self._thumb_decoding.discard(k)
+                                try:
+                                    self.root.after(0, lambda: self._drain_thumbnails(batch))
+                                except tk.TclError:
+                                    pass  # window already gone
+
+                        threading.Thread(target=_decode, daemon=True).start()
+                        self._pending_thumbs.append((lbl, path, cache_key))
+                        deferred = True
+                        continue
+                    try:
+                        img = self._decode_thumb_source(path, size)
+                        self._thumb_cache[cache_key] = img
+                    except Exception:
+                        self._thumb_cache[cache_key] = False
+                if not img:
+                    lbl.configure(text="▦")
+                    done += 1
+                    continue
                 from PIL import ImageTk
                 photo = ImageTk.PhotoImage(img)
                 lbl.configure(image=photo)
                 lbl._photo_ref = photo
                 lbl.configure(text="")
             except Exception:
-                lbl.configure(text="▦")
+                # The label itself may be destroyed (row cleared mid-drain):
+                # a TclError from the fallback used to kill the whole drain
+                # loop and strand every remaining thumbnail.
+                try:
+                    lbl.configure(text="▦")
+                except tk.TclError:
+                    pass
             done += 1
         if self._pending_thumbs:
-            self._thumbs_after = self.root.after(30, self._drain_thumbnails,
-                                                 batch)
+            self._thumbs_after = self.root.after(
+                50 if deferred else 30, self._drain_thumbnails, batch)
 
     def _browse_output_dir(self):
         """Browse for output directory."""
@@ -8181,6 +8277,19 @@ class PhotoSApp:
             q.put(fn)
 
         def _start():
+            # stop-then-start race: the previous watcher thread may still be
+            # draining when Start is pressed again — two watchers on the same
+            # directory would double-process every new file. Wait for it.
+            prev = state.get("thread")
+            if prev is not None and prev.is_alive():
+                status.configure(
+                    text=self._t("watch_stopping_prev")
+                    if self._t("watch_stopping_prev") != "watch_stopping_prev"
+                    else "等待上一个 watcher 停止… stopping previous watcher…",
+                    fg=COLORS["warning"])
+                if win.winfo_exists():
+                    win.after(200, _start)
+                return
             d = watch_dir.get().strip()
             if not d or not os.path.isdir(d):
                 status.configure(text=self._t("watch_no_dir"),
@@ -8204,10 +8313,11 @@ class PhotoSApp:
                 output_dir=out_dir.get().strip() or None,
                 remove_original=rm_orig.get(),
             )
+            rec = recursive.get()  # read on the main thread only
 
             def run():
                 from .watcher import start_watching
-                start_watching(d, opts, recursive=recursive.get(),
+                start_watching(d, opts, recursive=rec,
                                on_process=lambda r: schedule(
                                    lambda: _on_result(r)),
                                stop_event=state["stop"])
@@ -8361,12 +8471,14 @@ class PhotoSApp:
             output = out_var.get().strip()
             captions = cap_var.get()
             bg = _parse_bg()
+            cols = _parse_cols()      # parsed on the MAIN thread — the old
+            thumb = _parse_thumb()    # worker read cols_var/thumb_var itself
 
             def run():
                 try:
                     result = self._contact_sheet_build(
-                        files, output, cols=_parse_cols(),
-                        thumb_size=_parse_thumb(), captions=captions, bg=bg)
+                        files, output, cols=cols,
+                        thumb_size=thumb, captions=captions, bg=bg)
                     schedule(lambda: _done(result))
                 except Exception as e:
                     schedule(lambda err=str(e): _done(None, err))
@@ -8389,7 +8501,7 @@ class PhotoSApp:
         def _open():
             p = out_var.get().strip()
             if p and os.path.isfile(p):
-                webbrowser.open("file://" + os.path.abspath(p))
+                webbrowser.open(Path(os.path.abspath(p)).as_uri())
 
         def drain():
             try:
@@ -8848,7 +8960,7 @@ class PhotoSApp:
 
         def _open_path(p):
             if p and os.path.isfile(p):
-                webbrowser.open("file://" + os.path.abspath(p))
+                webbrowser.open(Path(os.path.abspath(p)).as_uri())
 
         def drain():
             try:
@@ -9013,6 +9125,10 @@ class PhotoSApp:
         from PIL import Image, ImageTk
 
         tempdir = tempfile.mkdtemp(prefix="photos_preview_")
+        # registered so _on_main_close can rmtree even when the preview's
+        # own drain loop dies with the mainloop (closing the app with a
+        # preview open used to strand the temp dir forever)
+        self._preview_tempdirs.add(tempdir)
         win = tk.Toplevel(self.root)
         win.title(self._t("preview_title"))
         win.geometry("1000x640")
@@ -9333,7 +9449,7 @@ class PhotoSApp:
         if m >= 60:
             h, m = divmod(m, 60)
             return f"  · {h}:{m:02d}:{s:02d}"
-        return f"  · {m}:{s:02d} 剩余"
+        return f"  · {m}:{s:02d} {self._t('eta_remaining')}"
 
     def _on_processing_done(self, result: BatchResult):
         """Handle processing completion."""
@@ -9766,8 +9882,12 @@ class PhotoSApp:
     def _toggle_settings(self, enabled: bool):
         """Enable or disable settings controls during processing."""
         state = "normal" if enabled else "disabled"
-        # Toggle major controls
+        # Toggle major controls — but never Toplevel dialogs: they disable
+        # their own action buttons to prevent re-entry (a rename dialog
+        # re-enabled mid-batch could fire the rename twice).
         for widget in self.root.winfo_children():
+            if isinstance(widget, tk.Toplevel):
+                continue
             self._set_state_recursive(widget, state)
 
     def _set_state_recursive(self, widget, state):

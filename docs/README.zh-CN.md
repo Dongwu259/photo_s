@@ -101,6 +101,13 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | 官方插件管理 | — | ✅ | list/install/info/fetch + pip 安装 |
 | MCP server | — | ✅ | 向 MCP 客户端（Claude Desktop / Claude Code / 任意客户端）暴露 25 个工具 |
 | 批量基准 | — | ✅ | 并发扩展实测 |
+| AI 识别蒙版 | ✅ | ✅¹ | 主体/人物/物体（80 类）一键生成蒙版，U2Netp/HumanSeg/YOLOv8n-seg（v1.8，onnx 权重自动下载校验） |
+| 笔刷 + 组合蒙版 | ✅ | ✅ | 笔刷涂抹蒙版；A&B / A-B 组合引用已命名蒙版（v1.8） |
+| AI 自动调色 | — | ✅ | auto-tone 官方插件：CLIP+MLP 预测 9 项全局参数 + RAG 检索历史修图（权重 CC-BY-NC 4.0，非商用） |
+| LR 数据桥 | — | ✅ | `lr-scan` 扫描 Lightroom 目录/XMP → 训练数据；`lr-train`/`lr-predict` 岭回归基调模型；`lr-merge` 合并多机数据包（v1.9） |
+| 出片审计 | — | ✅ | `audit` 质量闸门（pass/fail + 原因，agent 终止条件）；`diff` 前后对比；`preview` base64 快照（v1.9） |
+| GPS 地理标记 | — | ✅ | GPX 轨迹插值写 GPS EXIF（时区偏移自动换算，跨日期变更线正确插值） |
+| SCUNet 强降噪 | — | ✅ | 官方插件（ONNX）：强度感知混合 + 分块推理，大图不 OOM |
 
 > ¹ 降噪 / 自动扶正 / HDR / 人脸模糊需要可选依赖：
 > `pip install photo-s-tools[enhance]`（opencv-python-headless）。
@@ -154,8 +161,9 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 PhotoS 是**批量 / 交付导向管线**，不是交互式编辑器——不做 RAW 域编辑。局部编辑是规格驱动的：命名蒙版（linear/radial/color/AI 分割/笔刷/组合算子）+ 蒙版内局部调整，全部以紧凑字符串建模，经 CLI/REST/MCP/preset 零胶水传递。
 
 - **设备上推理，无云端。** 降噪模型权重（SCUNet）首次使用时下载到本机；不上传任何数据。
-- **许可。** 官方代码与官方模型权重（含 SCUNet 检查点）均为 **MIT**——可自由商用。
-  第三方插件与模型各自持有自己的许可；商用再分发前请自行核实。
+- **许可。** 官方代码与多数官方模型权重（含 SCUNet 检查点）为 **MIT**——可自由商用；
+  但 auto-tone 插件的权重为 **CC-BY-NC 4.0**（非商用，训练数据来自个人照片库），
+  商用需另行授权。第三方插件与模型各自持有自己的许可；商用再分发前请自行核实。
 
 ## 📄 许可证
 

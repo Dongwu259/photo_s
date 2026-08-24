@@ -43,7 +43,7 @@ def _parse_levels(s: str):
     black = float(parts[0]) if len(parts) > 0 and parts[0] else 0.0
     white = float(parts[1]) if len(parts) > 1 and parts[1] else 255.0
     gamma = float(parts[2]) if len(parts) > 2 and parts[2] else 1.0
-    black = max(0.0, min(255.0, black))
+    black = max(0.0, min(254.0, black))
     white = max(black + 1.0, min(255.0, white))
     gamma = max(0.1, min(8.0, gamma)) if gamma else 1.0
     return black, white, gamma
@@ -126,8 +126,20 @@ def _monotone_cubic(xs, ys, xq):
 
 
 def _build_curve_lut(points) -> list:
-    """256-entry LUT from control points ``[(x, y), ...]`` (x, y in 0..255)."""
+    """256-entry LUT from control points ``[(x, y), ...]`` (x, y in 0..255).
+
+    Duplicate x values are collapsed to the last occurrence (later points
+    win), so ``"128,100;128,140"`` degrades to a constant curve instead of
+    hitting division-by-zero in the interpolator.
+    """
     pts = sorted((float(x), float(y)) for x, y in points)
+    deduped = []
+    for x, y in pts:
+        if deduped and x == deduped[-1][0]:
+            deduped[-1] = (x, y)
+        else:
+            deduped.append((x, y))
+    pts = deduped
     xs = [p[0] for p in pts]
     ys = [p[1] for p in pts]
     if xs[0] > 0.0:  # pad to the full 0..255 domain
@@ -324,6 +336,11 @@ def _zone_mask(zone: str, val: np.ndarray) -> np.ndarray:
 
 
 def _smoothstep(e0: float, e1: float, x) -> np.ndarray:
+    if e1 <= e0:
+        # degenerate range (e.g. vignette midpoint=1.0 clamps the falloff to
+        # a zero-width band) — 0/0 used to produce NaN that ate the whole
+        # mask; degrade to a hard step instead.
+        return (np.asarray(x, dtype=np.float64) >= e1).astype(np.float64)
     t = np.clip((x - e0) / (e1 - e0), 0.0, 1.0)
     return t * t * (3.0 - 2.0 * t)
 
@@ -704,26 +721,33 @@ def apply_vignette(img: Image.Image, amount: float = 0.5,
 # ── Grain ───────────────────────────────────────────────────────────────────
 
 def _parse_grain(s: str):
-    """Parse ``"amount[,size]"`` (defaults 0.1 / 1.0)."""
+    """Parse ``"amount[,size[,seed]]"`` (defaults 0.1 / 1.0 / derived)."""
     parts = [p.strip() for p in s.split(",")]
     amount = float(parts[0]) if parts[0] else 0.1
     size = float(parts[1]) if len(parts) > 1 and parts[1] else 1.0
+    seed = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
     return (max(0.0, min(1.0, amount)),
-            max(0.1, min(4.0, size)))
+            max(0.1, min(4.0, size)),
+            seed)
 
 
 def apply_grain(img: Image.Image, amount: float = 0.1,
-                size: float = 1.0) -> Image.Image:
+                size: float = 1.0, seed: int = None) -> Image.Image:
     """Film grain: luminance-weighted monochrome gaussian noise.
 
     The noise pattern (optionally blurred for coarser ``size``) is weighted
-    by a midtone curve so highlights/shadows stay clean — film-like.
+    by a midtone curve so highlights/shadows stay clean — film-like. The
+    generator is seeded from the image dimensions unless ``seed`` is given,
+    so re-running the same command reproduces the same grain.
     """
     if not amount:
         return img
     arr, alpha = _normalize_grade_input(img)
     h, w = arr.shape[:2]
-    rng = np.random.default_rng()
+    if seed is None:
+        # deterministic per image size — same input + params ⇒ same output
+        seed = (w * 73856093) ^ (h * 19349663)
+    rng = np.random.default_rng(seed)
     noise = rng.standard_normal((h, w)).astype(np.float32)
     if size > 1.0:
         noise_img = Image.fromarray(

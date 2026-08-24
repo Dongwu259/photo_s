@@ -1,8 +1,9 @@
 """
 PhotoS - Contact Sheet
 
-Builds a grid montage (contact sheet) of many images, thumbnailed lazily so
-large originals are never fully decoded into memory.
+Builds a grid montage (contact sheet) of many images. Thumbnails decode each
+original fully (PIL has no partial decode), then immediately downscale and
+drop the reference — peak memory is one original at a time, not the whole set.
 """
 
 import math

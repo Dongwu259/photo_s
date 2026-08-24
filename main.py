@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-PhotoS — Batch Image Compression & Format Conversion Tool
-       批量图片压缩与格式转换工具
+PhotoS — Batch Photo Toolkit
+       批量照片处理工具箱（压缩/转换/调色/EXIF/RAW/去重/选片）
 
 Usage:
     photo-s gui            Launch graphical user interface
@@ -20,7 +20,8 @@ Examples:
 import sys
 import os
 
-# Ensure src package is importable when running as `python main.py`
+# Ensure the photo_s package (repo root) is importable when running as
+# `python main.py` without an installed copy.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from photo_s.cli import main

@@ -106,11 +106,15 @@ def core_path(name: str) -> str:
     from photo_s.modelstore import ensure, cache_dir
 
     cached = os.path.join(cache_dir(), name)
-    if os.path.isfile(cached):
-        return cached
     specs = weight_specs([name])
     if not specs:
         raise KeyError(f"unknown weight: {name}")
+    # Verify on every use: "exists → trust" let a tampered/stale cache file
+    # bypass the sha256 gate entirely after landing there once.
+    from photo_s.modelstore import cached_path
+    verified = cached_path(specs[0])
+    if verified:
+        return verified
     return ensure(specs[0])
 
 

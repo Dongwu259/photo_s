@@ -436,3 +436,42 @@ class TestSizedOutputReservation:
             assert len(sized) == 4
             # no derivative was overwritten by another same-label output
             assert self._colors_of(sized) == set(colors)
+
+
+class TestAuditRegressions:
+    """Regressions from the 2026-08 audit."""
+
+    def test_scale_percent_tiny_image_clear_error(self, tmp_path):
+        from PIL import Image
+        from photo_s.engine import process_image, ProcessOptions
+        src = tmp_path / "tiny.jpg"
+        Image.new("RGB", (3, 3), (10, 20, 30)).save(src)
+        result = process_image(
+            str(src), ProcessOptions(scale_percent=20,
+                                     output_dir=str(tmp_path / "o"),
+                                     suffix="_s"))
+        assert not result.success
+        assert "scale_percent" in result.error
+
+    def test_bare_filename_output_no_makedirs_crash(self, tmp_path,
+                                                     monkeypatch):
+        from PIL import Image
+        from photo_s.engine import process_image, ProcessOptions
+        monkeypatch.chdir(tmp_path)
+        src = tmp_path / "x.jpg"
+        Image.new("RGB", (8, 8), (5, 5, 5)).save(src)
+        # output to a bare filename in the CWD (no directory component):
+        # os.makedirs("") used to raise a baffling [Errno 2] ''
+        result = process_image(str(src), ProcessOptions(suffix="_out"))
+        assert result.success
+        assert os.path.exists(tmp_path / "x_out.jpg")
+
+    def test_suffix_path_traversal_rejected(self, tmp_path):
+        from PIL import Image
+        from photo_s.engine import process_image, ProcessOptions
+        src = tmp_path / "y.jpg"
+        Image.new("RGB", (8, 8), (5, 5, 5)).save(src)
+        result = process_image(
+            str(src), ProcessOptions(suffix="/../../../tmp/pwned"))
+        assert not result.success
+        assert "prefix/suffix" in result.error or "traversal" in result.error

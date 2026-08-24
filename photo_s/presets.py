@@ -36,6 +36,25 @@ BUILTIN_PRESETS = {
 }
 
 
+# Fields that destroy or overwrite user data. Presets are SHARED artifacts
+# (import_presets_from_json is an official flow), so a preset file must never
+# be able to turn "here's my grading look" into "delete the originals".
+# These stay controlled by explicit CLI flags / interactive confirmation only.
+_DESTRUCTIVE_FIELDS = frozenset({
+    "remove_original",   # deletes source files after processing
+    "overwrite",         # clobbers existing outputs
+})
+
+
+def _filter_preset_fields(data: dict) -> dict:
+    """Keep only known ProcessOptions fields minus the destructive ones."""
+    return {
+        k: v for k, v in data.items()
+        if k in ProcessOptions.__dataclass_fields__
+        and k not in _DESTRUCTIVE_FIELDS
+    }
+
+
 def _builtin_options(name: str) -> Optional[ProcessOptions]:
     """Resolve a built-in preset to ProcessOptions, or None if unknown."""
     data = BUILTIN_PRESETS.get(name)
@@ -80,9 +99,16 @@ def list_presets() -> List[str]:
 
 
 def save_preset(name: str, options: ProcessOptions, description: str = ""):
-    """Save a ProcessOptions config as a named preset."""
+    """Save a ProcessOptions config as a named preset.
+
+    Destructive fields (remove_original / overwrite) are not persisted — a
+    preset is a reusable "look", and shared presets carrying delete flags
+    are a data-loss trap.
+    """
     _ensure_dir()
     data = asdict(options)
+    for key in _DESTRUCTIVE_FIELDS:
+        data.pop(key, None)
     data["_description"] = description
     data["_version"] = "1.0"
     # Remove non-serializable fields
@@ -121,10 +147,13 @@ def load_preset(name: str) -> Optional[ProcessOptions]:
     data.pop("_description", None)
     data.pop("_version", None)
 
-    return ProcessOptions(**{
-        k: v for k, v in data.items()
-        if k in ProcessOptions.__dataclass_fields__
-    })
+    # Shared/imported preset files are untrusted input: drop fields that
+    # delete originals or overwrite outputs (#11). A "color preset" must not
+    # arrive carrying remove_original=True.
+    try:
+        return ProcessOptions(**_filter_preset_fields(data))
+    except TypeError:
+        return _builtin_options(name)
 
 
 def delete_preset(name: str) -> bool:
@@ -137,14 +166,15 @@ def delete_preset(name: str) -> bool:
 
 
 def import_presets_from_json(json_path: str) -> int:
-    """Import presets from a JSON file (one object per preset name)."""
+    """Import presets from a JSON file (one object per preset name).
+
+    Destructive fields (remove_original / overwrite) are stripped on import —
+    an imported "look" must never silently delete originals when applied.
+    """
     data = json.loads(Path(json_path).read_text(encoding="utf-8"))
     count = 0
     for name, fields in data.items():
         if isinstance(fields, dict):
-            save_preset(name, ProcessOptions(**{
-                k: v for k, v in fields.items()
-                if k in ProcessOptions.__dataclass_fields__
-            }))
+            save_preset(name, ProcessOptions(**_filter_preset_fields(fields)))
             count += 1
     return count

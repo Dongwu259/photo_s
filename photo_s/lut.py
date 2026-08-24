@@ -7,6 +7,8 @@ built-in trilinear engine with tetrahedral interpolation via the ``lut``
 provider slot.
 """
 
+import os
+
 import numpy as np
 from PIL import Image
 
@@ -14,13 +16,18 @@ from PIL import Image
 # (a 112MP photo would otherwise need several GB of float intermediates).
 _CHUNK_ROWS = 512
 
+# Parsed-LUT cache keyed by (path, mtime_ns, size) — a 1000-image batch
+# with --lut used to re-read and re-parse the same .cube 1000 times.
+# Tables are consumed read-only, so sharing across threads is safe.
+_CUBE_CACHE = {}
+
 
 class LutError(ValueError):
     """Invalid or unparseable .cube LUT file."""
 
 
 def load_cube(path):
-    """Parse an Adobe .cube file.
+    """Parse an Adobe .cube file (cached per path + mtime).
 
     Returns ``(kind, size, table)`` where ``kind`` is ``"3d"`` or ``"1d"``
     and ``table`` is float32:
@@ -31,6 +38,15 @@ def load_cube(path):
     blue (the Adobe convention), so ``table.reshape(size, size, size, 3)``
     lands on the ``[b, g, r]`` axes directly.
     """
+    try:
+        st = os.stat(path)
+        cache_key = (str(path), st.st_mtime_ns, st.st_size)
+    except OSError as e:
+        raise LutError(f"cannot read .cube LUT {path}: {e}") from e
+    cached = _CUBE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     kind = None
     size = 0
     rows = []
@@ -80,7 +96,11 @@ def load_cube(path):
             raise LutError(
                 f"{path}: expected {size} rows for LUT_1D_SIZE {size}, "
                 f"got {len(rows)}")
-    return kind, size, table
+    parsed = (kind, size, table)
+    if len(_CUBE_CACHE) >= 8:
+        _CUBE_CACHE.clear()
+    _CUBE_CACHE[cache_key] = parsed
+    return parsed
 
 
 def _apply_1d(img, table):
@@ -108,7 +128,8 @@ def _apply_1d(img, table):
         luts.append(np.clip(lut * 255, 0, 255).astype(np.uint8).tolist())
 
     if img.mode == "L":
-        # single band → the average channel curve (table rows are RGB-ish)
+        # single band → the GREEN channel curve (luts[1]) as the perceptual
+        # stand-in; 1D LUT rows are RGB-ordered
         out = img.point(luts[1])
         return out
     r, g, b = img.split()

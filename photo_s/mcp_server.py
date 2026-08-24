@@ -123,6 +123,20 @@ def process_tool(
     lens_distort: Optional[float] = None,
     lens_vignette: Optional[str] = None,
     lens_ca: Optional[str] = None,
+    # naming / organization / watermark / multi-size / RAW decode options
+    # (parity with the CLI batch surface)
+    rename_pattern: Optional[str] = None,
+    organize: Optional[str] = None,
+    watermark_text: Optional[str] = None,
+    watermark_image: Optional[str] = None,
+    watermark_position: Optional[str] = None,
+    watermark_opacity: Optional[int] = None,
+    sizes: Optional[list] = None,
+    raw_half_size: Optional[bool] = None,
+    raw_no_auto_bright: Optional[bool] = None,
+    raw_demosaic: Optional[str] = None,
+    raw_color_space: Optional[str] = None,
+    raw_16bit: Optional[bool] = None,
     jobs: Optional[int] = None,
     dry_run: bool = False,
     evaluate: bool = False,
@@ -154,8 +168,23 @@ def process_tool(
         "masks": masks, "mask_adjust": mask_adjust,
         "point_color": point_color, "lens_distort": lens_distort,
         "lens_vignette": lens_vignette, "lens_ca": lens_ca,
+        "watermark_text": watermark_text, "watermark_image": watermark_image,
+        "watermark_position": watermark_position,
+        "watermark_opacity": watermark_opacity,
+        "rename_pattern": rename_pattern,
+        "raw_half_size": raw_half_size,
+        "raw_demosaic": raw_demosaic, "raw_color_space": raw_color_space,
+        "raw_16bit": raw_16bit,
     }
     data = {k: v for k, v in data.items() if v is not None}
+    if organize:
+        from .engine import _resolve_folder_pattern
+        data["folder_pattern"] = _resolve_folder_pattern(organize)
+    if raw_no_auto_bright is not None:
+        data["raw_auto_bright"] = not raw_no_auto_bright
+    if sizes:
+        # accept [["thumb", 480, None], ...] like the REST endpoint
+        data["output_sizes"] = sizes
     if resize:
         w, h = _parse_dimensions(resize)
         data["max_width"], data["max_height"] = w, h
@@ -521,7 +550,14 @@ def hash_tool(
 
     files = collect_files(list(paths or []), recursive=recursive)
     entries = compute_checksums(files)
-    out = os.path.abspath(output or "manifest.csv")
+    if output:
+        out = os.path.abspath(output)
+    else:
+        # default used to be "manifest.csv" resolved against the SERVER's
+        # cwd — a surprise write wherever the MCP process happens to run.
+        import tempfile
+        fd, out = tempfile.mkstemp(prefix="photos-manifest-", suffix=".csv")
+        os.close(fd)
     write_manifest(out, entries)
     return {"output": out, "count": len(files), "entries": entries}
 
@@ -570,8 +606,16 @@ def plugin_tool(
     argv = (["install", "--quiet", dist] if action == "install"
             else ["uninstall", "-y", dist])
     if dry_run:
+        # argv preview only — no pip run, safe without the opt-in
         return {"ok": True, "name": name, "dry_run": True,
                 "pip_argv": [sys.executable, "-m", "pip", *argv]}
+    if not os.environ.get("PHOTO_S_ALLOW_REMOTE_PLUGINS"):
+        # pip install + auto-import on the next discover() = remote code
+        # execution; requires an explicit operator opt-in.
+        return {"ok": False, "name": name,
+                "error": ("plugin install/uninstall is disabled; set "
+                          "PHOTO_S_ALLOW_REMOTE_PLUGINS=1 in the server "
+                          "environment to enable")}
     try:
         proc = _pip_run(argv)
     except FileNotFoundError:
@@ -655,6 +699,7 @@ def watermark_tool(
     output_format: Optional[str] = None,
     quality: Optional[int] = None,
     output_dir: Optional[str] = None,
+    recursive: bool = False,
 ) -> dict:
     """Overlay a text or image watermark on images via the batch pipeline.
 
@@ -663,7 +708,7 @@ def watermark_tool(
     from .server import _options_from_dict
     from .cli import _collect_files
 
-    files = _collect_files(list(paths))
+    files = _collect_files(list(paths), recursive=recursive)
     if not files:
         return {"ok": False,
                 "error": "no supported image files found",
@@ -878,6 +923,7 @@ def analyze_tool(paths: list, recursive: bool = False,
             "count": len(results), "results": results}
 
 
+@_versioned
 def diff_tool(path_a: str, path_b: str, sample_size: int = 256) -> dict:
     """Numeric before/after comparison: PSNR / SSIM / mean-abs-diff.
 
@@ -889,9 +935,11 @@ def diff_tool(path_a: str, path_b: str, sample_size: int = 256) -> dict:
                           sample_size=max(16, min(1024, int(sample_size))))
 
 
+@_versioned
 def audit_tool(paths: list, recursive: bool = False,
-               overexposed_max: float = None, underexposed_max: float = None,
-               blur_min: float = None) -> dict:
+               overexposed_max: Optional[float] = None,
+               underexposed_max: Optional[float] = None,
+               blur_min: Optional[float] = None) -> dict:
     """Quality gate: pass/fail + reasons (overexposure/blur/luminance...).
 
     The agent's stop condition - a photo that passes audit is "good enough".
@@ -916,6 +964,7 @@ def audit_tool(paths: list, recursive: bool = False,
             "results": results}
 
 
+@_versioned
 def preview_tool(path: str, max_dim: int = 1024,
                  include_histogram: bool = True) -> dict:
     """Visual snapshot: downscaled JPEG + histogram PNG (base64).
@@ -934,6 +983,21 @@ _JOBS: dict = {}
 _JOBS_LOCK = threading.Lock()
 
 
+_MAX_JOBS = 50  # terminal records kept; oldest finished pruned first
+
+
+def _prune_jobs() -> None:
+    """Drop terminal job records beyond the cap (call with the lock held)."""
+    if len(_JOBS) <= _MAX_JOBS:
+        return
+    terminal = sorted(
+        ((k, v) for k, v in _JOBS.items() if v.get("phase") in
+         ("done", "error", "cancelled")),
+        key=lambda kv: kv[1].get("finished_at", 0))
+    for k, _v in terminal[: len(_JOBS) - _MAX_JOBS]:
+        _JOBS.pop(k, None)
+
+
 def _job_worker(job_id: str, files: list, options):
     from .engine import batch_process
     state = _JOBS[job_id]
@@ -948,14 +1012,26 @@ def _job_worker(job_id: str, files: list, options):
         with _JOBS_LOCK:
             return bool(state.get("cancelled"))
 
-    result = batch_process(files, options, progress_callback=cb,
-                           cancel_checker=cancel_checker)
+    try:
+        result = batch_process(files, options, progress_callback=cb,
+                               cancel_checker=cancel_checker)
+    except Exception as e:  # noqa: BLE001 — a crashed worker used to leave
+        # the job stuck in "processing" forever with no result at all
+        with _JOBS_LOCK:
+            state["phase"] = "error"
+            state["error"] = f"{type(e).__name__}: {e}"
+            state["finished_at"] = time.time()
+            _prune_jobs()
+        return
     with _JOBS_LOCK:
-        state["phase"] = "done"
+        state["phase"] = "cancelled" if cancel_checker() else "done"
         state["results"] = [r.to_dict() for r in result.results]
         state["fail_count"] = result.fail_count
+        state["finished_at"] = time.time()
+        _prune_jobs()
 
 
+@_versioned
 def batch_start_tool(paths: list, options: dict, recursive: bool = False,
                      jobs: int = 4) -> dict:
     """Start an async directory-level batch job. Returns ``job_id`` to poll
@@ -971,12 +1047,16 @@ def batch_start_tool(paths: list, options: dict, recursive: bool = False,
         return {"ok": False, "error": "no supported image files found",
                 "paths": list(paths)}
     try:
-        opts = ProcessOptions(**{k: v for k, v in options.items()
-                                 if k in ProcessOptions.__dataclass_fields__})
-    except TypeError as e:
+        # shared validator: type coercion, numeric ranges, traversal-safe
+        # prefix/suffix — the old bare ProcessOptions(**options) accepted
+        # arbitrary unvalidated values
+        from .server import _options_from_dict
+        opts = _options_from_dict(dict(options or {}),
+                                  base=_base_options)
+    except (TypeError, ValueError) as e:
         return {"ok": False, "error": f"invalid options: {e}"}
-    opts.jobs = max(1, int(jobs))
-    job_id = uuid.uuid4().hex[:12]
+    opts.jobs = max(1, min(64, int(jobs)))
+    job_id = secrets.token_urlsafe(12)  # 96-bit, same width as /tasks ids
     with _JOBS_LOCK:
         _JOBS[job_id] = {"job_id": job_id, "phase": "starting",
                          "total": len(files), "done": 0, "current": "",
@@ -986,6 +1066,7 @@ def batch_start_tool(paths: list, options: dict, recursive: bool = False,
     return {"ok": True, "job_id": job_id, "total": len(files)}
 
 
+@_versioned
 def batch_status_tool(job_id: str) -> dict:
     """Poll a batch job: phase (starting/processing/done/cancelled),
     progress (done/total) and full per-file results when finished.
@@ -996,12 +1077,15 @@ def batch_status_tool(job_id: str) -> dict:
         return {"ok": False, "error": f"unknown job {job_id}"}
     out = {k: state[k] for k in ("job_id", "phase", "total", "done",
                                  "current", "fail_count")}
+    if state.get("error"):
+        out["error"] = state["error"]
     out["ok"] = True
     if state.get("results") is not None:
         out["results"] = state["results"]
     return out
 
 
+@_versioned
 def batch_cancel_tool(job_id: str) -> dict:
     """Cancel a running batch job (in-flight images finish, pending are
     skipped as cancelled)."""

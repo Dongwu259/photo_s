@@ -2,7 +2,7 @@
 
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Ensure src package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,7 +31,9 @@ class TestParseGpx:
         p.write_text(GPX)
         points = parse_gpx(str(p))
         assert len(points) == 2
-        assert points[0][0] == datetime(2024, 7, 30, 10, 0)
+        # GPX 'Z' timestamps parse to timezone-aware UTC datetimes
+        assert points[0][0] == datetime(2024, 7, 30, 10, 0,
+                                        tzinfo=timezone.utc)
         assert points[0][1] == 10.0
         assert points[0][2] == 20.0
 
@@ -91,6 +93,31 @@ class TestPositionAt:
     def test_unknown_file_none(self, tmp_path):
         assert position_at(str(tmp_path / "nope.gpx"),
                            datetime(2024, 1, 1)) is None
+
+    def test_naive_local_time_with_offset(self, tmp_path):
+        # Regression: naive camera-local EXIF time + tz_offset must be
+        # converted to UTC before matching (UTC+8 local 18:05 == 10:05 UTC).
+        path = self._gpx(tmp_path)
+        lat, lon = position_at(path, datetime(2024, 7, 30, 18, 5),
+                               tz_offset="+08:00")
+        assert abs(lat - 10.05) < 1e-6
+        assert abs(lon - 20.05) < 1e-6
+
+    def test_aware_ts_compared_directly(self, tmp_path):
+        path = self._gpx(tmp_path)
+        lat, _ = position_at(path, datetime(2024, 7, 30, 10, 5,
+                                            tzinfo=timezone.utc))
+        assert abs(lat - 10.05) < 1e-6
+
+    def test_antimeridian_shortest_path(self, tmp_path):
+        # 179.9°E → 179.9°W crosses the dateline: midpoint must be ±180°,
+        # not 0° (the old linear interpolation swung through Greenwich).
+        gpx = GPX.replace('lon="20.0"', 'lon="179.9"') \
+                 .replace('lon="20.1"', 'lon="-179.9"')
+        p = tmp_path / "am.gpx"
+        p.write_text(gpx)
+        _, lon = position_at(str(p), datetime(2024, 7, 30, 10, 5))
+        assert abs(abs(lon) - 180.0) < 1e-6
 
 
 class TestToDmsRational:

@@ -60,6 +60,24 @@ def _resolve_dest(path: str, dest_dir: str) -> str:
     return os.path.join(dest, os.path.basename(path))
 
 
+def _unique_target(target: str) -> str:
+    """First free ``stem_N.ext`` variant — never silently overwrite.
+
+    Two source dirs can each hold ``DSC_0001.jpg``; flattening to a basename
+    collides, and the old code os.replace()'d the first file away and then
+    removed its source — one photo gone for good.
+    """
+    if not os.path.exists(target):
+        return target
+    stem, ext = os.path.splitext(target)
+    n = 1
+    while True:
+        candidate = f"{stem}_{n}{ext}"
+        if not os.path.exists(candidate):
+            return candidate
+        n += 1
+
+
 def select_files(
     files: List[str],
     keep_min: int = 4,
@@ -109,11 +127,20 @@ def select_files(
             continue
         src = row["path"]
         target = _resolve_dest(src, row["dest"])
+        if os.path.abspath(src) == target:
+            # dest == source dir: the replace-then-remove dance would delete
+            # the photo outright. Nothing to sort — report and move on.
+            row["ok"] = False
+            row["error"] = "destination is the source path; skipped"
+            continue
         if dry_run:
             row["action"] = "would_" + row["action"]
             row["dest"] = target
             continue
         os.makedirs(row["dest"], exist_ok=True)
+        # Same-basename inputs from different folders must not clobber each
+        # other — pick the first free _1/_2/... variant instead of replacing.
+        target = _unique_target(target)
         tmp = target + ".photos-tmp"
         try:
             shutil.copy2(src, tmp)          # copy2 preserves mtime

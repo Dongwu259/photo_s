@@ -33,7 +33,7 @@
 #    不传则 AI 蒙版首次使用下载失败（不静默）。
 
 # 1. 本地验证（必须全绿）
-python3 -m pytest tests/ -q                 # 1075 个
+python3 -m pytest tests/ -q                 # 1164 个
 python3 -m photo_s.cli --help               # CLI 冒烟
 python3 -m photo_s.cli plugin list --json   # 官方插件目录
 
@@ -83,7 +83,7 @@ photo-s batch ~/highiso/ --denoise 12       # 端到端（首次使用自动下�
 >
 > **新插件发布（v1.3.0 起）**：publish.yml 的 publish-plugin job 已参数化——插件
 > 目录从 tag 前缀自动推导（`scunet-v*` → plugins/scunet，`lut-v*` → plugins/lut，
-> `auto-tone-v*` → plugins/auto_tone）。
+> `auto-tone-v*` → plugins/auto-tone）。
 > 发布 `photo-s-plugin-lut`（纯 numpy，无权重）：
 > ```bash
 > git tag lut-v0.1.0 && git push origin lut-v0.1.0

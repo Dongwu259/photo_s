@@ -49,6 +49,18 @@ def train(args) -> None:
         raise SystemExit(f"样本不足（{len(X)} < 30），先合并各电脑数据")
     print(f"样本 {len(X)} 张，目标 {len(TARGETS)} 项")
 
+    # reproducibility + best available device (the old script always ran
+    # on CPU even with a CUDA/MPU present)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    device = "cpu"
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif getattr(torch.backends, "mps", None) is not None \
+            and torch.backends.mps.is_available():
+        device = "mps"
+    print(f"device: {device}")
+
     model, _, preprocess = open_clip.create_model_and_transforms(
         args.clip_model, pretrained=args.clip_pretrained)
     model.eval()
@@ -60,10 +72,20 @@ def train(args) -> None:
     for _x, meta in zip(X, metas):
         img = Image.open(meta["image"]).convert("RGB")
         with torch.no_grad():
-            f = model.encode_image(preprocess(img).unsqueeze(0))
+            f = model.encode_image(
+                preprocess(img).unsqueeze(0).to(device)).cpu()
         feats.append(f.squeeze(0).numpy())
     F = np.stack(feats)
     Yn = np.asarray(Y, dtype=np.float32)
+
+    # held-out validation split: R² on the training set is optimistic and
+    # hid overfitting (the old script reported train R² only)
+    n_total = len(F)
+    val_n = max(1, n_total // 10) if n_total >= 40 else 0
+    rng = np.random.RandomState(args.seed)
+    val_idx = set(rng.choice(n_total, size=val_n, replace=False).tolist())
+    train_idx = [i for i in range(n_total) if i not in val_idx]
+    val_idx = sorted(val_idx)
 
     head = torch.nn.Sequential(
         torch.nn.Linear(emb_dim, 256),
@@ -71,19 +93,21 @@ def train(args) -> None:
         torch.nn.Dropout(args.dropout),
         torch.nn.Linear(256, len(TARGETS)),
     )
+    head = head.to(device)
     opt = torch.optim.AdamW(head.parameters(), lr=args.lr, weight_decay=1e-4)
     loss_fn = torch.nn.MSELoss()
-    Xt = torch.from_numpy(F)
-    Yt = torch.from_numpy(Yn)
-    n = len(F)
+    Xt = torch.from_numpy(F).to(device)
+    Yt = torch.from_numpy(Yn).to(device)
+    n = len(train_idx)
+    Xtr, Ytr = Xt[train_idx], Yt[train_idx]
     for epoch in range(args.epochs):
         head.train()
         total = 0.0
         perm = torch.randperm(n)
         for i in range(0, n, args.batch):
             idx = perm[i:i + args.batch]
-            pred = head(Xt[idx])
-            loss = loss_fn(pred, Yt[idx])
+            pred = head(Xtr[idx])
+            loss = loss_fn(pred, Ytr[idx])
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -93,10 +117,19 @@ def train(args) -> None:
 
     head.eval()
     with torch.no_grad():
-        pred = head(Xt).numpy()
-    ss_res = float(((Yn - pred) ** 2).sum())
-    ss_tot = float(((Yn - Yn.mean(axis=0)) ** 2).sum())
+        pred = head(Xtr).cpu().numpy()
+    ytr = Yn[train_idx]
+    ss_res = float(((ytr - pred) ** 2).sum())
+    ss_tot = float(((ytr - ytr.mean(axis=0)) ** 2).sum())
     r2 = 1.0 - ss_res / max(ss_tot, 1e-12)
+    if val_idx:
+        with torch.no_grad():
+            vpred = head(Xt[val_idx]).cpu().numpy()
+        yv = Yn[val_idx]
+        vres = float(((yv - vpred) ** 2).sum())
+        vtot = float(((yv - yv.mean(axis=0)) ** 2).sum())
+        r2_val = 1.0 - vres / max(vtot, 1e-12)
+        print(f"val R²: {r2_val:.3f} (held-out {len(val_idx)})")
 
     W = head[0].weight.detach().numpy()
     b0 = head[0].bias.detach().numpy()
@@ -135,6 +168,7 @@ def main() -> None:
     t.add_argument("--batch", type=int, default=32)
     t.add_argument("--lr", type=float, default=1e-3)
     t.add_argument("--dropout", type=float, default=0.1)
+    t.add_argument("--seed", type=int, default=42)
     t.set_defaults(func=train)
     p = sub.add_parser("predict")
     p.add_argument("--predict", required=True)

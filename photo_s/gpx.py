@@ -6,22 +6,27 @@ arbitrary timestamp, so photos can be geo-tagged from a recorded track.
 """
 
 import math
+import re
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import List, Optional, Tuple
 
-Point = Tuple[datetime, float, float]  # (timestamp, latitude, longitude)
+Point = Tuple[datetime, float, float]  # (timestamp[UTC-aware], lat, lon)
+
+_TZ_OFFSET_RE = re.compile(r"\s*([+-])(\d{1,2}):(\d{2})\s*")
 
 
 def parse_gpx(path: str) -> List[Point]:
-    """Parse a GPX file into sorted (time, lat, lon) points.
+    """Parse a GPX file into sorted (utc_time, lat, lon) points.
 
     Matches <trkpt lat=".." lon=".."><time>ISO8601</time></trkpt> anywhere in
     the document (namespace-agnostic). Points without a time are skipped.
-    Times are normalized to naive local (tzinfo stripped) so they compare
-    against camera EXIF datetimes — assume the track and the photos share a
-    timezone (typical for phones / action cameras).
+    GPX timestamps are UTC per spec, so parsed times are normalized to
+    timezone-aware UTC (a rare naive time is ASSUMED UTC) — stripping tzinfo
+    and comparing against camera-local EXIF times used to skew matching by
+    the whole timezone offset (8 hours in UTC+8). Pass the camera's EXIF
+    ``OffsetTime`` to ``position_at`` to bridge the two frames correctly.
     Returns [] for unreadable or empty files.
     """
     points = []
@@ -46,7 +51,10 @@ def parse_gpx(path: str) -> List[Point]:
                     if raw.endswith("Z") or raw.endswith("z"):
                         raw = raw[:-1] + "+00:00"
                     ts = datetime.fromisoformat(raw)
-                    ts = ts.replace(tzinfo=None)  # naive UTC/local frame
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    else:
+                        ts = ts.astimezone(timezone.utc)
                 except (ValueError, AttributeError):
                     ts = None
         if lat is None or lon is None or ts is None:
@@ -67,15 +75,46 @@ def _cached_points(path: str) -> List[Point]:
     return parse_gpx(path)
 
 
-def position_at(path: str, ts: datetime) -> Optional[Tuple[float, float]]:
+def parse_tz_offset(spec) -> Optional[timedelta]:
+    """Parse an EXIF OffsetTime string ("+08:00" / "-05:30") → timedelta.
+
+    None for None/empty/unparseable input.
+    """
+    if spec is None or spec == "":
+        return None
+    if isinstance(spec, timedelta):
+        return spec
+    m = _TZ_OFFSET_RE.fullmatch(str(spec))
+    if not m:
+        return None
+    sign = 1 if m.group(1) == "+" else -1
+    hours, minutes = int(m.group(2)), int(m.group(3))
+    if hours > 14 or minutes > 59:
+        return None
+    return sign * timedelta(hours=hours, minutes=minutes)
+
+
+def position_at(path: str, ts: datetime,
+                tz_offset=None) -> Optional[Tuple[float, float]]:
     """Interpolate (lat, lon) for a timestamp from a GPX file.
 
-    Linear interpolation between the bracketing track points; None when the
-    timestamp is outside the recorded range or the file is empty.
+    ``ts`` may be timezone-aware (compared directly against the UTC track)
+    or naive camera-local EXIF time; for the latter pass ``tz_offset`` —
+    the EXIF ``OffsetTime`` string ("+08:00") or a timedelta — so the local
+    wall time can be converted to UTC first. Without an offset a naive time
+    is assumed to already be UTC (the camera-clock-set-to-UTC case).
+
+    Linear interpolation between the bracketing track points; longitude
+    interpolation takes the short way across the ±180° antimeridian. None
+    when the timestamp is outside the recorded range or the file is empty.
     """
     points = _cached_points(path)
     if not points:
         return None
+    if ts.tzinfo is None:
+        offset = parse_tz_offset(tz_offset) or timedelta(0)
+        # local = UTC + offset → UTC = local − offset
+        ts = ts.replace(tzinfo=timezone.utc) - offset
     if ts < points[0][0] or ts > points[-1][0]:
         return None
     if len(points) == 1:
@@ -89,7 +128,19 @@ def position_at(path: str, ts: datetime) -> Optional[Tuple[float, float]]:
                 return (lat1, lon1)
             frac = (ts - t0).total_seconds() / (t1 - t0).total_seconds()
             lat = lat0 + (lat1 - lat0) * frac
+            # |Δlon| > 180° means the segment crosses the antimeridian:
+            # interpolate the short way (through ±180°), then normalize
+            # back — plain linear interpolation would swing through 0°.
+            if abs(lon1 - lon0) > 180.0:
+                if lon1 > lon0:
+                    lon0 += 360.0
+                else:
+                    lon1 += 360.0
             lon = lon0 + (lon1 - lon0) * frac
+            if lon > 180.0:
+                lon -= 360.0
+            elif lon < -180.0:
+                lon += 360.0
             return (lat, lon)
     return None
 

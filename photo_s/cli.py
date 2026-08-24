@@ -51,6 +51,23 @@ from .i18n import _t  # reads i18n.CURRENT_LANG at call time; set in run_cli
 from .contract import versioned  # additive schema_version on every --json output
 
 
+def _no_files_exit(parsed, msg_key: str = "msg_no_images") -> int:
+    """'No input files found' exit path (always exit 1).
+
+    --json mode must keep stdout a single JSON document (schema_version
+    contract) — the old human-readable ❌ line on stdout broke every agent
+    consumer. Human text stays on stdout for interactive use.
+    """
+    if getattr(parsed, 'json', False):
+        import json
+        print(json.dumps(versioned({"ok": False, "error": _t(msg_key),
+                                    "files": []}),
+                         indent=2, ensure_ascii=False))
+    else:
+        print(_t(msg_key))
+    return 1
+
+
 def _collect_files(patterns: List[str], recursive: bool = False) -> List[str]:
     """Collect image files from glob patterns and/or directories."""
     all_files = set()
@@ -90,6 +107,7 @@ def _parse_size(size_str: str) -> int:
 
     Examples: '500' → 500, '500KB' → 512000, '2MB' → 2097152, '1.5MB' → 1572864
     """
+    original = str(size_str)
     size_str = size_str.strip().upper()
     if not size_str:
         return 0
@@ -106,11 +124,35 @@ def _parse_size(size_str: str) -> int:
     try:
         value = float(size_str)
     except ValueError:
+        # report the user's original spelling, not the .upper()'ed copy
         raise argparse.ArgumentTypeError(
-            _t("val_size", val=size_str, supported="500, 500KB, 2MB, 1.5MB")
+            _t("val_size", val=original, supported="500, 500KB, 2MB, 1.5MB")
         )
 
     return int(value * multiplier)
+
+
+def _target_size_arg(size_str: str) -> int:
+    """argparse type for --target-size: clean error instead of a traceback."""
+    return _parse_size(size_str)
+
+
+def _dimensions_arg(dim_str: str) -> tuple:
+    """argparse type for WxH args (--resize/--thumb): validate up front.
+
+    '' / non-numeric / non-positive parts are rejected with an argparse
+    error — the old deferred _parse_dimensions call raised a bare ValueError
+    traceback from deep inside the command handler.
+    """
+    try:
+        w, h = _parse_dimensions(dim_str)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid dimensions {dim_str!r} (expected WxH, Wx, xH)")
+    if (w is not None and w <= 0) or (h is not None and h <= 0):
+        raise argparse.ArgumentTypeError(
+            f"invalid dimensions {dim_str!r} (W/H must be positive)")
+    return (w, h)
 
 
 def _parse_sizes(sizes_str: Optional[str]) -> Optional[List[Tuple[str, Optional[int], Optional[int]]]]:
@@ -341,7 +383,7 @@ def _add_transform_args(parser):
         help=_t('help___lens_profile'),
     )
     parser.add_argument(
-        "--log-curve", type=str, default=argparse.SUPPRESS, metavar="NAME",
+        "--log-curve", type=str.upper, default=argparse.SUPPRESS, metavar="NAME",
         choices=["SLOG3", "CLOG3", "LOGC3", "DLOG", "VLOG", "HLG"],
         help=_t('help___log_curve'),
     )
@@ -525,15 +567,23 @@ def _apply_config_defaults(options: ProcessOptions, parsed, cfg: dict) -> Proces
             setattr(options, field, _coerce_value(config_key, field,
                                                   opts[config_key]))
 
-    # inverse boolean flags (CLI uses --no-*, config uses positive form)
-    if "preserve_exif" in opts and not getattr(parsed, "no_exif", False):
-        options.preserve_exif = bool(opts["preserve_exif"])
-    if "auto_rotate" in opts and not getattr(parsed, "no_auto_rotate", False):
-        options.auto_rotate = bool(opts["auto_rotate"])
-    if "optimize" in opts and not getattr(parsed, "no_optimize", False):
-        options.optimize = bool(opts["optimize"])
-    if "raw_auto_bright" in opts and not getattr(parsed, "raw_no_auto_bright", False):
-        options.raw_auto_bright = bool(opts["raw_auto_bright"])
+    # inverse boolean flags (CLI uses --no-*, config uses positive form).
+    # Values go through _coerce_value so a quoted TOML string like
+    # preserve_exif = "false" resolves the SAME way here as it does in
+    # `config show` / `serve` (bool("false") used to be True — the two
+    # code paths disagreed about the same file).
+    for cfg_key, cli_flag, field in (
+            ("preserve_exif", "no_exif", "preserve_exif"),
+            ("auto_rotate", "no_auto_rotate", "auto_rotate"),
+            ("optimize", "no_optimize", "optimize"),
+            ("raw_auto_bright", "raw_no_auto_bright", "raw_auto_bright")):
+        if cfg_key in opts and opts[cfg_key] is not None \
+                and not getattr(parsed, cli_flag, False):
+            try:
+                setattr(options, field,
+                        _coerce_value(cfg_key, field, opts[cfg_key]))
+            except ValueError as e:
+                print(f"⚠️  {e}", file=sys.stderr)
 
     if "target_size" in opts and not getattr(parsed, "target_size", None):
         from .config import _parse_size as _cfg_parse_size
@@ -568,11 +618,15 @@ def _build_process_options(parsed) -> ProcessOptions:
     Shared by the batch/compress/convert shared handler and ``preset save``
     (which captures the full option set as a named preset).
     """
-    # Parse target size if provided
-    target_size_bytes = None
-    target_size_str = getattr(parsed, 'target_size', None)
-    if target_size_str:
-        target_size_bytes = _parse_size(target_size_str)
+    # Parse target size if provided (the argparse type already returns
+    # bytes for CLI flags; plain strings here come from direct callers/tests)
+    target_size_val = getattr(parsed, 'target_size', None)
+    if isinstance(target_size_val, int):
+        target_size_bytes = target_size_val
+    elif target_size_val:
+        target_size_bytes = _parse_size(target_size_val)
+    else:
+        target_size_bytes = None
 
     # auto-jobs: explicit -j / config wins, else smart default (CPU count)
     _jobs = getattr(parsed, 'jobs', None)
@@ -670,10 +724,13 @@ def _build_process_options(parsed) -> ProcessOptions:
         jobs=_jobs,
     )
 
-    # Handle --resize
-    resize_str = getattr(parsed, 'resize', None)
-    if resize_str:
-        w, h = _parse_dimensions(resize_str)
+    # Handle --resize (the argparse type already returns a validated
+    # (w, h) tuple; plain strings here come from direct callers/tests)
+    resize_val = getattr(parsed, 'resize', None)
+    if isinstance(resize_val, tuple):
+        options.max_width, options.max_height = resize_val
+    elif resize_val:
+        w, h = _parse_dimensions(resize_val)
         options.max_width = w
         options.max_height = h
 
@@ -793,22 +850,25 @@ def _print_batch_summary(result: BatchResult):
 
 
 def _pre_parse_language(args):
-    """Peek at --language/--lang and --config before the real parse.
+    """Peek at --language/--lang, --json and --config before the real parse.
 
     argparse bakes help= strings at parser-construction time, so the language
     must be resolved BEFORE the parser tree is built. A throwaway parser with
     ``parse_known_args`` tolerates the full real CLI, handles both
     ``--language zh`` and ``--language=zh``, and also surfaces ``--config`` so
-    an explicit config file's ``language`` key takes effect.
+    an explicit config file's ``language`` key takes effect. ``--json`` is
+    captured for the same reason: a subparser's own ``--json`` default used
+    to overwrite a top-level ``photo-s --json <cmd>`` back to False.
     """
     p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--json", action="store_true", default=False)
     p.add_argument("--language", "--lang", default=None)
     p.add_argument("--config", default=None)
     try:
         ns, _ = p.parse_known_args(args)
-        return ns.language, ns.config
+        return ns.language, ns.config, ns.json
     except SystemExit:
-        return None, None
+        return None, None, False
 
 
 def run_cli(args: List[str] = None) -> int:
@@ -822,7 +882,7 @@ def run_cli(args: List[str] = None) -> int:
 
     # Resolve language first: all help= / message strings below are rendered
     # via i18n._t, which reads i18n.CURRENT_LANG at call time.
-    lang_explicit, cfg_override = _pre_parse_language(args)
+    lang_explicit, cfg_override, json_flag = _pre_parse_language(args)
     from . import i18n
     i18n.CURRENT_LANG = i18n.resolve_language(
         explicit=lang_explicit, config_path=cfg_override,
@@ -882,7 +942,8 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___no_exif'),
     )
     compress_parser.add_argument(
-        "--resize", type=str, default=argparse.SUPPRESS, metavar="WxH",
+        "--resize", type=_dimensions_arg, default=argparse.SUPPRESS,
+        metavar="WxH",
         help=_t('help___resize'),
     )
     compress_parser.add_argument(
@@ -902,7 +963,8 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___jobs'),
     )
     compress_parser.add_argument(
-        "--target-size", type=str, default=argparse.SUPPRESS, metavar="SIZE",
+        "--target-size", type=_target_size_arg, default=argparse.SUPPRESS,
+        metavar="SIZE",
         help=_t('help___target_size'),
     )
     _add_raw_args(compress_parser)
@@ -936,6 +998,8 @@ def run_cli(args: List[str] = None) -> int:
     )
     compress_parser.add_argument(
         "--watermark-pos", type=str, default=argparse.SUPPRESS,
+        choices=["CENTER", "TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT",
+                 "BOTTOM_RIGHT", "TOP", "BOTTOM"],
         help=_t('help___watermark_pos'),
     )
     compress_parser.add_argument(
@@ -981,7 +1045,8 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___no_exif'),
     )
     convert_parser.add_argument(
-        "--resize", type=str, default=argparse.SUPPRESS, metavar="WxH",
+        "--resize", type=_dimensions_arg, default=argparse.SUPPRESS,
+        metavar="WxH",
         help=_t('help___resize'),
     )
     convert_parser.add_argument(
@@ -1001,7 +1066,8 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___overwrite'),
     )
     convert_parser.add_argument(
-        "--target-size", type=str, default=argparse.SUPPRESS, metavar="SIZE",
+        "--target-size", type=_target_size_arg, default=argparse.SUPPRESS,
+        metavar="SIZE",
         help=_t('help___target_size'),
     )
     _add_raw_args(convert_parser)
@@ -1056,7 +1122,8 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___suffix'),
     )
     batch_parser.add_argument(
-        "--resize", type=str, default=argparse.SUPPRESS, metavar="WxH",
+        "--resize", type=_dimensions_arg, default=argparse.SUPPRESS,
+        metavar="WxH",
         help=_t('help___resize'),
     )
     batch_parser.add_argument(
@@ -1092,7 +1159,8 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___dry_run'),
     )
     batch_parser.add_argument(
-        "--target-size", type=str, default=argparse.SUPPRESS, metavar="SIZE",
+        "--target-size", type=_target_size_arg, default=argparse.SUPPRESS,
+        metavar="SIZE",
         help=_t('help___target_size'),
     )
     _add_raw_args(batch_parser)
@@ -1405,8 +1473,12 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___remove_original'),
     )
     watch_parser.add_argument(
-        "--resize", type=str, default=None, metavar="WxH",
+        "--resize", type=_dimensions_arg, default=None, metavar="WxH",
         help=_t('help___resize'),
+    )
+    watch_parser.add_argument(
+        "-y", "--yes", action="store_true",
+        help=_t('help___yes'),
     )
 
     # ── dedup subcommand ────────────────────────────────────────────────────
@@ -1515,7 +1587,7 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___cols'),
     )
     sheet_parser.add_argument(
-        "--thumb", type=str, default="240x240", metavar="WxH",
+        "--thumb", type=_dimensions_arg, default=(240, 240), metavar="WxH",
         help=_t('help___thumb'),
     )
     sheet_parser.add_argument(
@@ -1605,6 +1677,10 @@ def run_cli(args: List[str] = None) -> int:
     select_parser.add_argument(
         "--dry-run", action="store_true",
         help=_t('help___dry_run'),
+    )
+    select_parser.add_argument(
+        "-y", "--yes", action="store_true",
+        help=_t('help___yes'),
     )
     select_parser.add_argument(
         "--json", action="store_true",
@@ -1977,6 +2053,10 @@ def run_cli(args: List[str] = None) -> int:
         "--path", type=str, default=None,
         help=_t('help___path'),
     )
+    config_init.add_argument(
+        "--force", action="store_true",
+        help="overwrite an existing config file",
+    )
     config_show = config_subs.add_parser(
         "show", help=_t('cmd_show'),
     )
@@ -2035,14 +2115,24 @@ def run_cli(args: List[str] = None) -> int:
                  lr_train_parser, lr_predict_parser, lr_recipes_parser,
                  lr_similar_parser, lr_eval_parser, lr_merge_parser,
                  diff_parser, audit_parser, preview_parser, lens_prof_parser,
-                 preset_save, preset_load, preset_delete,
+                 preset_save, preset_list, preset_load, preset_delete,
                  plugin_install, plugin_uninstall, plugin_info, plugin_fetch,
+                 plugin_list, plugin_scaffold, lp_save, lp_delete,
                  config_init, config_show):
         _sub.add_argument("--language", "--lang",
                           choices=["en", "zh", "auto"],
                           default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
     parsed = parser.parse_args(args)
+
+    # A top-level `photo-s --json info` gets silently undone by the
+    # subparser's own `--json` default (argparse re-writes the namespace).
+    # The pre-parsed flag restores the user's intent either way.
+    if json_flag:
+        try:
+            parsed.json = True
+        except AttributeError:
+            pass
 
     if not parsed.command:
         parser.print_help()
@@ -2057,7 +2147,24 @@ def run_cli(args: List[str] = None) -> int:
             print(f"{_t('msg_dir_not_found')}: {watch_dir}")
             return 1
 
-        w, h = _parse_dimensions(parsed.resize) if parsed.resize else (None, None)
+        # Deleting originals from a long-running watcher is irreversible and
+        # easy to leave running unattended — confirm unless -y.
+        if getattr(parsed, 'remove_original', False) \
+                and not getattr(parsed, 'yes', False):
+            print("⚠️  watch --remove-original 会在处理成功后删除原图 "
+                  "(will DELETE originals after processing).")
+            try:
+                confirm = input("   继续请输入 y (type y to continue): ").strip().lower()
+            except EOFError:
+                confirm = ""
+            if confirm not in ("y", "yes"):
+                print(_t('msg_cancelled'))
+                return 0
+
+        if isinstance(parsed.resize, tuple):
+            w, h = parsed.resize
+        else:
+            w, h = _parse_dimensions(parsed.resize) if parsed.resize else (None, None)
         options = ProcessOptions(
             quality=parsed.quality,
             output_format=parsed.format,
@@ -2074,8 +2181,7 @@ def run_cli(args: List[str] = None) -> int:
 
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print(_t("msg_no_images"))
-            return 1
+            return _no_files_exit(parsed)
 
         dedup_json = getattr(parsed, 'json', False)
         print(_t("msg_scanning", n=len(files)), file=sys.stderr)
@@ -2093,15 +2199,56 @@ def run_cli(args: List[str] = None) -> int:
         savings = sum(os.path.getsize(p)
                       for g in dup_groups.values() for p in g[1:])
 
+        # JSON mode prints ONE document (summary + action result merged).
+        # The old flow printed two concatenated documents and any consumer's
+        # json.loads() on the output raised.
+        json_payload = {
+            "count": len(dup_groups),
+            "duplicate_count": total_dupes,
+            "savings_bytes": savings,
+            "groups": [{"hash": h, "paths": ps}
+                       for h, ps in dup_groups.items()],
+        }
+
+        if parsed.action in ("move", "delete", "keep-sharpest"):
+            if parsed.dry_run:
+                if not dedup_json:
+                    print()
+                    print(_t("msg_dry_run"))
+                kept, removed = handle_duplicates(dup_groups,
+                                                   action=parsed.action,
+                                                   dry_run=True)
+                json_payload["action"] = parsed.action
+                json_payload["dry_run"] = True
+                json_payload["kept"] = kept
+                json_payload["removed"] = removed
+            elif not dedup_json:
+                verb = (_t("msg_verb_keep_sharpest")
+                        if parsed.action == "keep-sharpest"
+                        else (_t("msg_verb_move")
+                              if parsed.action == "move" else _t("msg_verb_delete")))
+                confirm = input(_t("msg_confirm_dedup", verb=verb,
+                                   n=total_dupes)).strip().lower()
+                if confirm not in ("y", "yes"):
+                    print(_t("msg_cancelled"))
+                    return 0
+                kept, removed = handle_duplicates(dup_groups,
+                                                  action=parsed.action,
+                                                  dry_run=False)
+            else:
+                # JSON callers have no stdin; requesting the action explicitly
+                # IS the confirmation (same rule as --remove-original --json).
+                kept, removed = handle_duplicates(dup_groups,
+                                                  action=parsed.action,
+                                                  dry_run=False)
+                json_payload["action"] = parsed.action
+                json_payload["kept"] = kept
+                json_payload["removed"] = removed
+
         if dedup_json:
             import json
-            print(json.dumps(versioned({
-                "count": len(dup_groups),
-                "duplicate_count": total_dupes,
-                "savings_bytes": savings,
-                "groups": [{"hash": h, "paths": ps}
-                           for h, ps in dup_groups.items()],
-            }), indent=2, ensure_ascii=False))
+            print(json.dumps(versioned(json_payload),
+                             indent=2, ensure_ascii=False))
         else:
             if not dup_groups:
                 print(_t("msg_no_dupes"))
@@ -2115,31 +2262,8 @@ def run_cli(args: List[str] = None) -> int:
                               f"({format_size(os.path.getsize(p))})")
                     print()
                 print(_t("msg_dupes_total", n=total_dupes, savings=savings))
-
-        if parsed.action in ("move", "delete", "keep-sharpest"):
-            if parsed.dry_run:
-                print()
-                print(_t("msg_dry_run"))
-            elif not dedup_json:
-                # JSON callers have no stdin; requesting the action explicitly
-                # IS the confirmation (same rule as --remove-original --json).
-                verb = (_t("msg_verb_keep_sharpest")
-                        if parsed.action == "keep-sharpest"
-                        else (_t("msg_verb_move")
-                              if parsed.action == "move" else _t("msg_verb_delete")))
-                confirm = input(_t("msg_confirm_dedup", verb=verb,
-                                   n=total_dupes)).strip().lower()
-                if confirm not in ("y", "yes"):
-                    print(_t("msg_cancelled"))
-                    return 0
-
-            kept, removed = handle_duplicates(dup_groups, action=parsed.action,
-                                              dry_run=parsed.dry_run)
-            if dedup_json:
-                print(json.dumps(versioned({"action": parsed.action, "kept": kept,
-                                  "removed": removed}),
-                                 indent=2, ensure_ascii=False))
-            else:
+            if parsed.action in ("move", "delete", "keep-sharpest") \
+                    and not parsed.dry_run:
                 _will = {
                     "move": _t("msg_will_move", removed=removed, kept=kept),
                     "delete": _t("msg_will_delete", removed=removed, kept=kept),
@@ -2150,7 +2274,7 @@ def run_cli(args: List[str] = None) -> int:
                     "delete": _t("msg_done_delete", removed=removed, kept=kept),
                     "keep-sharpest": _t("msg_done_keep", removed=removed, kept=kept),
                 }[parsed.action]
-                print(_will if parsed.dry_run else _done)
+                print(_done if not parsed.dry_run else _will)
 
         # report mode: exit 1 when duplicates were found — agents can branch on
         # the exit code, consistent with `check` (1 = problems found)
@@ -2316,8 +2440,7 @@ def run_cli(args: List[str] = None) -> int:
             files = _collect_files(parsed.files,
                                    recursive=getattr(parsed, 'recursive', False))
             if not files:
-                print(_t("msg_no_images"))
-                return 1
+                return _no_files_exit(parsed)
 
             rating_min = parsed.rating_min
             rating_exact = parsed.rating          # --rating = exact filter in --show
@@ -2397,25 +2520,39 @@ def run_cli(args: List[str] = None) -> int:
         files = _collect_files(parsed.files,
                                recursive=getattr(parsed, 'recursive', False))
         if not files:
-            print(_t("msg_no_images"))
-            return 1
+            return _no_files_exit(parsed)
 
-        print(f"{_t('msg_editing_exif')} ({len(files)} {_t('msg_files_suffix')})...")
+        jout = sys.stderr if exif_json else sys.stdout
+        print(f"{_t('msg_editing_exif')} ({len(files)} {_t('msg_files_suffix')})...",
+              file=jout)
         for tag, val in tags.items():
-            print(f"   {tag}: {val}")
-        print()
+            print(f"   {tag}: {val}", file=jout)
+        print(file=jout)
 
+        write_results = []
         failed = 0
         for f in files:
             try:
                 msg = apply_exif_tags(f, tags)
             except Exception as e:  # per-file: keep going, report at end
                 failed += 1
-                print(f"  ❌ {os.path.basename(f)}: {e}")
+                print(f"  ❌ {os.path.basename(f)}: {e}", file=jout)
+                write_results.append({"path": f, "ok": False, "error": str(e)})
                 continue
-            print(f"  {os.path.basename(f)}: {msg}")
+            print(f"  {os.path.basename(f)}: {msg}", file=jout)
+            write_results.append({"path": f, "ok": True, "message": msg})
 
-        print(f"\n{_t('msg_exif_done')}")
+        if exif_json:
+            # write mode used to print pure human text and ignore --json
+            import json
+            print(json.dumps(versioned({
+                "count": len(files),
+                "ok": len(files) - failed,
+                "failed": failed,
+                "results": write_results,
+            }), indent=2, ensure_ascii=False))
+        else:
+            print(f"\n{_t('msg_exif_done')}")
         if failed:
             print(_t("msg_write_failed", n=failed), file=sys.stderr)
         return 0 if failed == 0 else 1
@@ -2477,6 +2614,14 @@ def run_cli(args: List[str] = None) -> int:
                              save_config, apply_config)
         if parsed.config_action == "init":
             path = parsed.path or "photo-s.toml"
+            if os.path.exists(path) and not getattr(parsed, "force", False):
+                # Never clobber a live config silently — it may carry
+                # carefully tuned options (and auto-discovery makes it
+                # load-bearing for every run in that directory tree).
+                print(f"❌ {_t('msg_config_load_err')}: "
+                      f"{os.path.abspath(path)} already exists "
+                      "(use --force to overwrite)")
+                return 1
             save_config(path, default_config_text())
             print(f"{_t('msg_config_created')}: {os.path.abspath(path)}")
             print(f"   {_t('msg_config_hint')}")
@@ -2552,8 +2697,7 @@ def run_cli(args: List[str] = None) -> int:
 
         files = _collect_files(parsed.files, recursive=parsed.recursive)
         if not files:
-            print(_t("msg_no_images"))
-            return 1
+            return _no_files_exit(parsed)
 
         rename_json = getattr(parsed, 'json', False)
         if rename_json:
@@ -2597,8 +2741,7 @@ def run_cli(args: List[str] = None) -> int:
 
         files = _collect_files(parsed.files, recursive=parsed.recursive)
         if not files:
-            print(_t("msg_no_images"))
-            return 1
+            return _no_files_exit(parsed)
 
         results = verify_images(files)
         corrupt = [r for r in results if not r["ok"]]
@@ -2628,10 +2771,10 @@ def run_cli(args: List[str] = None) -> int:
 
         files = _collect_files(parsed.files, recursive=parsed.recursive)
         if not files:
-            print(_t("msg_no_images"))
-            return 1
+            return _no_files_exit(parsed)
 
-        tw, th = _parse_dimensions(parsed.thumb) if parsed.thumb else (240, 240)
+        tw, th = parsed.thumb if isinstance(parsed.thumb, tuple) else (
+            _parse_dimensions(parsed.thumb) if parsed.thumb else (240, 240))
         try:
             bg = hex_to_rgb(parsed.bg)
         except ValueError:
@@ -2655,8 +2798,7 @@ def run_cli(args: List[str] = None) -> int:
         from .cull import cull_files
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print(_t("msg_no_images"))
-            return 1
+            return _no_files_exit(parsed)
 
         results = cull_files(
             files,
@@ -2689,11 +2831,31 @@ def run_cli(args: List[str] = None) -> int:
 
     # ── Handle 'select' command (keeper workflow by rating) ────────────────
     if parsed.command == "select":
-        from .select import select_files
+        from .select import select_files, _rated_paths
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print(_t("msg_no_images"))
-            return 1
+            return _no_files_exit(parsed)
+
+        mode = "copy" if parsed.copy else "move"
+        # Moving files off their source directory is destructive; classify
+        # first (no writes) so the confirmation happens BEFORE any move.
+        # Interactive sessions get a prompt unless -y/--copy/--dry-run.
+        if mode == "move" and not parsed.dry_run \
+                and not getattr(parsed, 'yes', False) and sys.stdin.isatty():
+            pre = _rated_paths(files, parsed.keep_min, parsed.reject_max,
+                               parsed.selects_dir, parsed.rejects_dir,
+                               mode, True)
+            n_move = sum(1 for r in pre if r["action"] == "move")
+            if n_move:
+                print(f"⚠️  select 将移动 {n_move} 个文件（默认 move，原位置不保留）。"
+                      f" (will MOVE {n_move} files; originals leave the source dir)")
+                try:
+                    confirm = input("   继续请输入 y (type y to continue): ").strip().lower()
+                except EOFError:
+                    confirm = ""
+                if confirm not in ("y", "yes"):
+                    print(_t('msg_cancelled'))
+                    return 0
 
         try:
             results = select_files(
@@ -2702,7 +2864,7 @@ def run_cli(args: List[str] = None) -> int:
                 reject_max=parsed.reject_max,
                 selects_dir=parsed.selects_dir,
                 rejects_dir=parsed.rejects_dir,
-                mode="copy" if parsed.copy else "move",
+                mode=mode,
                 dry_run=parsed.dry_run,
             )
         except ValueError as e:  # keep_min <= reject_max
@@ -2771,8 +2933,7 @@ def run_cli(args: List[str] = None) -> int:
         from . import engine as _engine
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print(_t("msg_no_images"))
-            return 1
+            return _no_files_exit(parsed)
         opts = _engine.ProcessOptions(
             output_dir=getattr(parsed, 'output_dir', None),
             blur_faces=parsed.mode,
@@ -2827,8 +2988,7 @@ def run_cli(args: List[str] = None) -> int:
         # Hash every file (not just images — for archives)
         files = collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print(_t("msg_no_files"))
-            return 1
+            return _no_files_exit(parsed, msg_key="msg_no_files")
 
         print(_t("msg_hashing_start", n=len(files)), file=sys.stderr)
         entries = compute_checksums(files)
@@ -2847,8 +3007,7 @@ def run_cli(args: List[str] = None) -> int:
         from .metrics import analyze_image
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print(_t("msg_no_images"))
-            return 1
+            return _no_files_exit(parsed)
         results = [analyze_image(p, sample_size=parsed.sample_size,
                                  grid=getattr(parsed, 'grid', 0))
                    for p in files]
@@ -2870,7 +3029,9 @@ def run_cli(args: List[str] = None) -> int:
                       f"  kelvin~{wb['kelvin_estimate']}"
                       f"  over={ex['overexposed_pct']}%"
                       f"  under={ex['underexposed_pct']}%")
-        return 0
+        # unreadable inputs must surface in the exit code (agent termination
+        # condition per the JSON contract)
+        return 0 if all(r.get("ok") for r in results) else 1
 
     if parsed.command == "lr-scan":
         from .lrxmp import render_before_images, scan_and_report, write_export
@@ -3042,7 +3203,7 @@ def run_cli(args: List[str] = None) -> int:
                   f"MAD={res['mean_abs_diff']}")
         else:
             print(f"❌ {res.get('error', '')}")
-        return 0
+        return 0 if res.get("ok") else 1
 
     if parsed.command == "audit":
         import json
@@ -3050,8 +3211,7 @@ def run_cli(args: List[str] = None) -> int:
         from . import engine as _engine
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print(_t("msg_no_images"))
-            return 1
+            return _no_files_exit(parsed)
         results = [audit_image(p, overexposed_max=parsed.over_max,
                                underexposed_max=parsed.under_max,
                                blur_min=parsed.blur_min)
@@ -3066,7 +3226,9 @@ def run_cli(args: List[str] = None) -> int:
             for r in results:
                 mark = "✅" if r.get("passed") else "❌"
                 print(f"  {mark} {r['path']}  {r.get('reason', r.get('error', ''))}")
-        return 0
+        # agents branch on the exit code ("termination condition" per the
+        # JSON contract) — a failed audit must not exit 0
+        return 0 if all(r.get("passed") for r in results) else 1
 
     if parsed.command == "preview":
         import json
@@ -3081,7 +3243,7 @@ def run_cli(args: List[str] = None) -> int:
                   f"{' +histogram' if 'histogram_png_base64' in res else ''}")
         else:
             print(f"❌ {res.get('error', '')}")
-        return 0
+        return 0 if res.get("ok") else 1
 
     if parsed.command == "bench":
         import json as _json
@@ -3138,8 +3300,7 @@ def run_cli(args: List[str] = None) -> int:
         from .gallery import build_gallery
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
-            print(_t("msg_no_images"))
-            return 1
+            return _no_files_exit(parsed)
         res = build_gallery(files, parsed.output, title=parsed.title,
                             thumb_size=parsed.thumb)
         if getattr(parsed, 'json', False):
@@ -3182,8 +3343,7 @@ def run_cli(args: List[str] = None) -> int:
     files = _collect_files(file_patterns, recursive=recursive)
 
     if not files:
-        print(_t("msg_no_images"))
-        return 1
+        return _no_files_exit(parsed)
 
     is_json = getattr(parsed, 'json', False)
     jout = sys.stderr if is_json else sys.stdout
@@ -3246,21 +3406,38 @@ def run_cli(args: List[str] = None) -> int:
             print(f"  {_t('msg_done', n=total)}" + " " * 20, file=jout)
 
     # ── Safety check for --remove-original ──────────────────────────────────
-    # In --json mode the caller is an agent with no stdin to confirm against;
-    # passing --remove-original explicitly IS the confirmation, so skip the
-    # prompt (otherwise input() hangs forever on a closed stdin).
-    if (options.remove_original and not getattr(parsed, 'yes', False)
-            and not is_json):
-        print(_t("msg_confirm_delete", n=len(files)))
-        try:
-            confirm = input(f"   {_t('msg_confirm_continue')}").strip().lower()
-        except EOFError:
-            # stdin closed (pipe/agent): treat as refusal, not a traceback
-            print(_t("msg_cancel_input_err"), file=sys.stderr)
-            return 1
-        if confirm not in ("y", "yes"):
-            print(f"   {_t('msg_cancelled')}")
-            return 0
+    # Rules:
+    #   * interactive: always confirm (unless -y).
+    #   * --json + flag on the command line: the explicit flag IS the
+    #     confirmation (agents have no stdin to answer a prompt).
+    #   * --json + value sourced from a CONFIG FILE (auto-discovered from the
+    #     cwd!): refuse. A photo-s.toml someone left in a parent directory
+    #     must never turn an agent's batch into silent mass deletion with
+    #     exit 0.
+    if options.remove_original and not getattr(parsed, 'yes', False):
+        remove_flag_on_cli = hasattr(parsed, "remove_original")  # SUPPRESS default
+        if is_json:
+            if not remove_flag_on_cli:
+                import json
+                print(json.dumps(versioned({
+                    "ok": False,
+                    "error": (
+                        "remove_original=true is set in a config file; "
+                        "--json mode refuses implicit deletion of originals. "
+                        "Pass --remove-original explicitly (or -y) to confirm."),
+                }), indent=2, ensure_ascii=False))
+                return 1
+        else:
+            print(_t("msg_confirm_delete", n=len(files)))
+            try:
+                confirm = input(f"   {_t('msg_confirm_continue')}").strip().lower()
+            except EOFError:
+                # stdin closed (pipe/agent): treat as refusal, not a traceback
+                print(_t("msg_cancel_input_err"), file=sys.stderr)
+                return 1
+            if confirm not in ("y", "yes"):
+                print(f"   {_t('msg_cancelled')}")
+                return 0
 
     # ── Multi-profile batch run (--profiles web,thumb) ──────────────────────
     if getattr(parsed, 'profiles', None):

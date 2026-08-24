@@ -9,6 +9,7 @@ with sips fallback on macOS.
 import os
 import re
 import sys
+import threading
 import warnings
 import subprocess
 import tempfile
@@ -80,6 +81,7 @@ SUPPORTED_FORMATS = {
 # resolution vs luma — visible as soft color edges. 4:4:4 keeps full color
 # detail at the cost of larger files; 4:2:2 is the middle ground.
 _JPEG_SUBSAMPLING = {"444": 0, "422": 1, "420": 2}
+_SUBSAMPLING_WARNED = False  # warn once per process, not once per file
 
 INPUT_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".webp", ".tiff", ".tif",
@@ -430,6 +432,14 @@ def _get_output_path(input_path: str, output_format: str, output_dir: Optional[s
     fmt_info = SUPPORTED_FORMATS[fmt]
     in_path = Path(input_path)
 
+    # prefix/suffix are user/REST-supplied strings joined into the output
+    # filename — a suffix like "/../../../tmp/pwned" must not escape the
+    # output dir (same defense as the smart-rename branch below).
+    if _has_path_traversal(prefix) or _has_path_traversal(suffix):
+        raise ValueError(
+            "output filename prefix/suffix must not contain path separators "
+            f"or traversal segments (got prefix={prefix!r}, suffix={suffix!r})")
+
     if rename_pattern and exif_meta is not None:
         # Smart rename mode
         seq = seq_counter[0] if seq_counter else 0
@@ -442,6 +452,7 @@ def _get_output_path(input_path: str, output_format: str, output_dir: Optional[s
             new_stem = f"{prefix}{in_path.stem}{suffix}"
     else:
         new_stem = f"{prefix}{in_path.stem}{suffix}"
+    new_stem = _sanitize_stem(new_stem)
 
     if output_dir:
         out_dir = Path(output_dir)
@@ -484,6 +495,7 @@ def _extract_exif_metadata(img: Image.Image, path: str) -> dict:
         "date": "", "time": "", "camera": "", "original": Path(path).stem,
         "iso": "", "focal": "", "make": "",
         "year": "", "month": "", "day": "",
+        "tz_offset": "",  # EXIF OffsetTime("+08:00") — bridges local↔UTC
     }
 
     try:
@@ -564,6 +576,15 @@ def _extract_exif_metadata(img: Image.Image, path: str) -> dict:
             else:
                 meta["focal"] = f"{int(float(focal))}mm"
 
+        # Timezone offset (OffsetTimeOriginal 0x9011 / OffsetTime 0x9010,
+        # "+08:00" format) — needed to match camera-local EXIF datetimes
+        # against UTC GPX timestamps when geo-tagging.
+        tz = exif_sub.get(0x9011) or exif_sub.get(0x9010) \
+            or exif.get(0x9010) or ""
+        if isinstance(tz, bytes):
+            tz = tz.decode("ascii", "ignore")
+        meta["tz_offset"] = str(tz).strip() if tz else ""
+
     except Exception:
         pass
 
@@ -580,6 +601,27 @@ def _has_path_traversal(name: str) -> bool:
     if name in (".", ".."):
         return True
     return "/" in name or "\\" in name or ":" in name
+
+
+# Windows forbids these bare stems (plus COM1-9 / LPT1-9) and any name ending
+# in a dot or space — such files cannot exist on NTFS, so makedirs/save would
+# fail late with a confusing error (or Explorer would mangle them).
+_WIN_RESERVED = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + [f"COM{i}" for i in range(1, 10)]
+    + [f"LPT{i}" for i in range(1, 10)]
+)
+
+
+def _sanitize_stem(stem: str) -> str:
+    """Make a filename stem safe on Windows as well as POSIX.
+
+    Strips trailing dots/spaces and prefixes reserved device names with "_".
+    """
+    stem = stem.rstrip(". ")
+    if stem.split(".")[0].upper() in _WIN_RESERVED:
+        stem = "_" + stem
+    return stem
 
 
 def _render_rename_pattern(pattern: str, meta: dict, seq: int = 0) -> str:
@@ -689,11 +731,14 @@ def _compress_to_temp(img: Image.Image, fmt: str, quality: int,
 
 
 def _find_quality_for_target(img: Image.Image, fmt: str,
-                             options: ProcessOptions) -> int:
+                             options: ProcessOptions) -> Tuple[int, Optional[int]]:
     """Binary search to find the highest quality ∈ [5, quality_ceiling]
     that produces output ≤ target_size_bytes.
 
-    Returns the found quality (best-effort if target can't be met).
+    Returns ``(quality, min_size)``: the found quality (best-effort if the
+    target can't be met) and, when even q=5 overshoots, the q=5 size so the
+    caller can report the unreachable-target warning WITHOUT re-encoding
+    (the old flow encoded q=5 twice for every such file).
 
     Algorithm:
       - low=5, high=options.quality (the user's quality setting is the ceiling)
@@ -705,11 +750,12 @@ def _find_quality_for_target(img: Image.Image, fmt: str,
 
     # Quick check: is even the ceiling already small enough?
     if _compress_to_temp(img, fmt, ceiling, options) <= target:
-        return ceiling  # No additional compression needed
+        return ceiling, None  # No additional compression needed
 
     # Quick check: can even the lowest quality meet the target?
-    if _compress_to_temp(img, fmt, 5, options) > target:
-        return 5  # Best effort — target is too aggressive
+    size_at_5 = _compress_to_temp(img, fmt, 5, options)
+    if size_at_5 > target:
+        return 5, size_at_5  # Best effort — target is too aggressive
 
     low, high = 5, ceiling
     best_q = low
@@ -736,7 +782,7 @@ def _find_quality_for_target(img: Image.Image, fmt: str,
             best_q = mid
             break
 
-    return best_q
+    return best_q, None
 
 
 # ── Auto-rotate by EXIF Orientation ──────────────────────────────────────
@@ -829,6 +875,7 @@ _RAW_COLOR_SPACES = {
 }
 
 _SRGB_ICC: Optional[bytes] = None
+_SRGB_ICC_LOCK = threading.Lock()
 
 
 def _sRGB_icc_bytes() -> bytes:
@@ -843,9 +890,11 @@ def _sRGB_icc_bytes() -> bytes:
     """
     global _SRGB_ICC
     if _SRGB_ICC is None:
-        from PIL import ImageCms
-        _SRGB_ICC = ImageCms.ImageCmsProfile(
-            ImageCms.createProfile("sRGB")).tobytes()
+        with _SRGB_ICC_LOCK:
+            if _SRGB_ICC is None:
+                from PIL import ImageCms
+                _SRGB_ICC = ImageCms.ImageCmsProfile(
+                    ImageCms.createProfile("sRGB")).tobytes()
     return _SRGB_ICC
 
 
@@ -937,23 +986,25 @@ def _load_raw(path: str, options: ProcessOptions) -> Image.Image:
     brightness/colors behind the user's back.
     """
     # Try rawpy first (most capable)
+    rawpy_error: Optional[BaseException] = None
     try:
         return _load_raw_via_rawpy(path, options)
     except RawOptionError:
         raise
-    except Exception:
-        pass
+    except Exception as rawpy_err:
+        # Keep the real rawpy failure — the final error used to be a bare
+        # "Cannot decode RAW file" that hid import errors / corrupt files.
+        rawpy_error = rawpy_err
 
     # Fallback: macOS sips
     try:
         return _load_raw_via_sips(path)
-    except Exception:
-        pass
-
-    raise UnidentifiedImageError(
-        f"Cannot decode RAW file: {path}. "
-        f"Install rawpy (pip install rawpy) for best RAW support."
-    )
+    except Exception as sips_err:
+        raise UnidentifiedImageError(
+            f"Cannot decode RAW file: {path}. "
+            f"rawpy: {rawpy_error}; sips: {sips_err}. "
+            f"Install rawpy (pip install rawpy) for best RAW support."
+        ) from sips_err
 
 
 # ── Core processing ─────────────────────────────────────────────────────────
@@ -1027,6 +1078,13 @@ def _save_image(img: Image.Image, output_path: str, fmt: str,
         save_kwargs["optimize"] = options.optimize
         save_kwargs["progressive"] = options.progressive
         # chroma subsampling: explicit choice, PIL default (4:2:0) otherwise
+        if options.jpeg_subsampling not in _JPEG_SUBSAMPLING:
+            global _SUBSAMPLING_WARNED
+            if not _SUBSAMPLING_WARNED:
+                _SUBSAMPLING_WARNED = True
+                print(f"⚠️  unknown jpeg_subsampling "
+                      f"{options.jpeg_subsampling!r}; falling back to 4:2:0 "
+                      f"(valid: 444/422/420)", file=sys.stderr)
         save_kwargs["subsampling"] = _JPEG_SUBSAMPLING.get(
             options.jpeg_subsampling, 2)
         # Convert RGBA → RGB for JPEG (JPEG doesn't support alpha).
@@ -1079,6 +1137,9 @@ def _save_image(img: Image.Image, output_path: str, fmt: str,
                 exif = None  # no piexif — drop all EXIF rather than leak GPS
         if exif is not None and fmt in ("JPEG", "TIFF", "HEIC", "WebP"):
             save_kwargs["exif"] = exif
+        # PNG is deliberately not in that list: Pillow's PNG encoder ignores
+        # the exif kwarg, so "preserving" it there would be a silent lie.
+        # PNG outputs keep ICC (via icc_profile below) but drop EXIF.
 
     if options.scrub:
         # strip ALL metadata segments regardless of preserve_exif
@@ -1102,9 +1163,21 @@ def _save_image(img: Image.Image, output_path: str, fmt: str,
                 ["sips", "-s", "format", "heic", tmp_png.name, "--out", output_path],
                 check=True, capture_output=True, timeout=30,
             )
+            if exif is not None:
+                # sips rebuilds the container from the PNG — every metadata
+                # segment is gone. Say so instead of silently dropping EXIF
+                # the user asked to preserve (install pillow-heif to keep it).
+                print("⚠️  sips HEIC conversion drops all metadata "
+                      "(preserve_exif ineffective; install pillow-heif)",
+                      file=sys.stderr)
         finally:
             if os.path.exists(tmp_png.name):
                 os.unlink(tmp_png.name)
+    elif fmt == "AVIF":
+        raise RuntimeError(
+            f"Cannot save as {fmt}. "
+            f"Install pillow-avif for AVIF support: pip install pillow-avif"
+        )
     else:
         raise RuntimeError(
             f"Cannot save as {fmt}. "
@@ -1346,6 +1419,10 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
             w, h = img.size
             new_w = int(w * options.scale_percent / 100)
             new_h = int(h * options.scale_percent / 100)
+            if new_w < 1 or new_h < 1:
+                raise ValueError(
+                    f"scale_percent {options.scale_percent}% would shrink "
+                    f"{w}x{h} to {new_w}x{new_h}; use a larger percentage")
             img = img.resize((new_w, new_h), Image.LANCZOS)
         elif options.max_width or options.max_height or options.max_pixels:
             w, h = img.size
@@ -1421,9 +1498,19 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
                     dt_str = (f"{exif_meta['date']} "
                               f"{exif_meta['time'].replace('-', ':')}")
                     ts = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-                    gpx_pos = position_at(options.gpx_trace, ts)
+                    # EXIF datetimes are camera-local; GPX timestamps are UTC.
+                    # OffsetTime (when present) bridges the two frames.
+                    gpx_pos = position_at(options.gpx_trace, ts,
+                                          tz_offset=exif_meta.get("tz_offset"))
                 except ValueError:
                     gpx_pos = None
+            else:
+                # A photo with no readable EXIF datetime silently skipped
+                # geo-tagging before — the user never learned why the output
+                # had no GPS data.
+                print(f"⚠️  geotag: {input_path} 没有可读的 EXIF 拍摄时间, "
+                      f"跳过 GPS 标记 (no EXIF datetime; GPS not written)",
+                      file=sys.stderr)
             options._gpx_pos = gpx_pos  # consumed by _save_image
 
         # ── Output path ─────────────────────────────────────────────────────
@@ -1440,8 +1527,13 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
             preassigned=getattr(options, '_preassigned_output', None),
         )
 
-        # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        # Ensure output directory exists. A bare filename (no directory
+        # component) has dirname == "" — makedirs("") raises a baffling
+        # "[Errno 2] No such file or directory: ''", so only mkdir when there
+        # is something to create (the CWD already exists).
+        out_parent = os.path.dirname(output_path)
+        if out_parent:
+            os.makedirs(out_parent, exist_ok=True)
 
         # ── Auto-tune quality if target size is set ─────────────────────────
         achieved_quality = options.quality
@@ -1449,21 +1541,17 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
 
         if (options.target_size_bytes
                 and options.output_format in _QUALITY_AWARE_FORMATS):
-            achieved_quality = _find_quality_for_target(
+            achieved_quality, min_possible = _find_quality_for_target(
                 img, options.output_format, options,
             )
-            if achieved_quality == 5:
-                # Check if even q=5 meets target
-                test_size = _compress_to_temp(
-                    img, options.output_format, 5, options,
+            if (min_possible is not None
+                    and min_possible > options.target_size_bytes):
+                target_warning = (
+                    f" (目标 {format_size(options.target_size_bytes)} "
+                    f"无法达到, 最小可能体积 {format_size(min_possible)})"
+                    f" (target {format_size(options.target_size_bytes)} "
+                    f"unreachable, min possible {format_size(min_possible)})"
                 )
-                if test_size > options.target_size_bytes:
-                    target_warning = (
-                        f" (目标 {format_size(options.target_size_bytes)} "
-                        f"无法达到, 最小可能体积 {format_size(test_size)})"
-                        f" (target {format_size(options.target_size_bytes)} "
-                        f"unreachable, min possible {format_size(test_size)})"
-                    )
 
         # ── Save (with optional multi-size output) ──────────────────────────
         def _do_save(img_obj, path, fmt, opts):
@@ -1704,7 +1792,10 @@ def batch_process(
         per_image_options.append(opts_copy)
 
     # ── Process images ─────────────────────────────────────────────────────
-    workers = max(1, min(options.jobs, total))
+    # Worker count comes from the batch-level options — after the per-file
+    # hook loop above, the local `options` variable holds the LAST file's
+    # options, so a hook overriding jobs used to leak into this line.
+    workers = max(1, min(base_options.jobs, total))
     results: List[Optional[ProcessResult]] = [None] * total
     progress_lock = threading.Lock()
     completed_count = [0]  # mutable for closure
@@ -1813,17 +1904,13 @@ def scan_directory(directory: str, recursive: bool = False) -> List[str]:
     base = Path(directory)
 
     if recursive:
-        for ext in ALL_INPUT_EXTENSIONS:
-            image_paths.extend(
-                str(p.absolute()) for p in base.rglob(f"*{ext}")
-                if p.is_file()
-            )
-        # Also catch uppercase variants
-        for ext in list(ALL_INPUT_EXTENSIONS):
-            image_paths.extend(
-                str(p.absolute()) for p in base.rglob(f"*{ext.upper()}")
-                if p.is_file()
-            )
+        # One os.walk pass with a case-insensitive extension check. The old
+        # code rglob'd once per extension × case (44 tree walks) — quadratic
+        # pain on big NAS trees.
+        for root, _dirs, files in os.walk(directory):
+            for name in files:
+                if os.path.splitext(name)[1].lower() in ALL_INPUT_EXTENSIONS:
+                    image_paths.append(os.path.abspath(os.path.join(root, name)))
     else:
         for entry in base.iterdir():
             if entry.is_file() and entry.suffix.lower() in ALL_INPUT_EXTENSIONS:

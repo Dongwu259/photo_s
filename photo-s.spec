@@ -21,12 +21,23 @@ from PyInstaller.utils.hooks import collect_submodules
 # Optional runtime deps — bundled when installed at build time.
 hiddenimports = []
 for mod in ("piexif", "tomli", "pillow_heif", "pillow_avif_plugin",
-            "rawpy", "watchdog", "tkinterdnd2"):
+            "rawpy", "watchdog", "tkinterdnd2",
+            # lazy imports the AST scan can't see (mcp_server imports these
+            # inside functions; without them the packaged `photo-s mcp`
+            # dies on startup)
+            "cv2", "tifffile", "onnxruntime"):
     try:
         __import__(mod)
         hiddenimports.append(mod)
     except ImportError:
         pass
+# mcp is imported lazily inside functions (py3.9 support) — bundle the
+# whole package when the extra is installed, or `photo-s mcp` breaks
+try:
+    __import__("mcp")
+    hiddenimports += collect_submodules("mcp")
+except ImportError:
+    pass
 # Pillow plugins are loaded via entry points / dynamic registration
 hiddenimports += collect_submodules("PIL")
 
@@ -40,8 +51,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=["pytest", "tests"],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
     cipher=None,
     noarchive=False,
 )

@@ -70,11 +70,23 @@ def to_dict(o: OfficialPlugin) -> dict:
     }
 
 
+def _version_tuple(text: str):
+    """'1.9.0' → (1, 9, 0); None for non-numeric parts (non-semver)."""
+    parts = str(text).strip().split(".")
+    if not parts or not all(p.isdigit() for p in parts):
+        return None
+    return tuple(int(p) for p in parts)
+
+
 def version_ok(o: OfficialPlugin) -> bool:
-    """True iff the running core version meets the plugin's requirement."""
-    try:
-        cur = tuple(int(x) for x in __version__.split("."))
-        req = tuple(int(x) for x in o.min_photo_s_version.split("."))
-    except ValueError:
-        return True  # non-semver — don't block on a parse quirk
+    """True iff the running core version meets the plugin's requirement.
+
+    Non-semver requirement strings fail CLOSED (used to pass open) — a
+    malformed requirement the registry can't interpret must not silently
+    wave an incompatible plugin through.
+    """
+    cur = _version_tuple(__version__)
+    req = _version_tuple(o.min_photo_s_version)
+    if cur is None or req is None:
+        return False
     return cur >= req

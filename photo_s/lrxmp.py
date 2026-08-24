@@ -64,6 +64,7 @@ import math
 import os
 import re
 import sqlite3
+import sys
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -112,6 +113,11 @@ def parse_xmp_sidecar(source: Any) -> Dict[str, str]:
             text = f.read()
     else:
         text = str(source)
+    if "<!ENTITY" in text:
+        # stdlib ElementTree expands internal entities — a crafted sidecar
+        # (billion laughs) would balloon memory. Real XMP files from
+        # Lightroom never carry entity definitions.
+        raise LrError("XMP 包含实体定义, 已拒绝 (entity definitions rejected)")
     try:
         root = ET.fromstring(text)
     except ET.ParseError as e:
@@ -720,6 +726,12 @@ def discover_inputs(paths: Optional[Sequence[str]] = None,
     if paths:
         roots = [os.path.abspath(os.path.expanduser(p)) for p in paths]
     else:
+        # No explicit paths: fall back to the common Lightroom locations.
+        # Say so loudly — silently walking ~/Desktop surprised people who
+        # only meant to test the command.
+        print("⚠️  未指定路径, 默认扫描 ~/Pictures 与 ~/Desktop "
+              "(no paths given; scanning ~/Pictures and ~/Desktop by default)",
+              file=sys.stderr)
         roots = [os.path.join(os.path.expanduser("~"), d)
                  for d in ("Pictures", "Desktop")]
     for root in roots:
@@ -943,15 +955,22 @@ def merge_packages(pkg_dirs: Sequence[str], out_dir: str) -> Dict[str, Any]:
             if not stem:
                 continue
             if stem in seen:
-                dupes.append(stem)
-                continue
+                # Cameras reuse filenames (DSC0001.NEF everywhere): dropping
+                # the record threw away a DIFFERENT photo's training data.
+                # Disambiguate with the package name instead.
+                stem = f"{stem}__{name}"
+                if stem in seen:
+                    dupes.append(stem)
+                    continue
+                rec["path"] = rec.get("path") or ""
+                dupes.append(os.path.basename(rec["path"]))
             seen.add(stem)
             img = rec.get("image")
             if img:
                 img_name = os.path.basename(img)
                 src_img = os.path.join(src_before, img_name)
                 if os.path.exists(src_img):
-                    dst = os.path.join(out_before, img_name)
+                    dst = os.path.join(out_before, f"{stem}{os.path.splitext(img_name)[1]}")
                     if not os.path.exists(dst):
                         os.makedirs(out_before, exist_ok=True)
                         shutil.copy2(src_img, dst)
@@ -959,10 +978,13 @@ def merge_packages(pkg_dirs: Sequence[str], out_dir: str) -> Dict[str, Any]:
                     rec["image"] = dst  # 绝对路径，训练侧零配置
             rec["source_pkg"] = name
             records.append(rec)
-    with open(os.path.join(out_dir, "lr_records.jsonl"), "w",
-              encoding="utf-8") as f:
+    out_jsonl = os.path.join(out_dir, "lr_records.jsonl")
+    tmp_jsonl = out_jsonl + f".tmp.{os.getpid()}"
+    with open(tmp_jsonl, "w", encoding="utf-8") as f:
         for rec in records:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    os.replace(tmp_jsonl, out_jsonl)  # atomic: a crashed merge no longer
+    # leaves a truncated half-written training set
     return {
         "packages": len(pkg_dirs),
         "records": len(records),
@@ -1080,6 +1102,10 @@ def _content_features(img) -> List[float]:
                np.minimum.reduce([r, g, b])).mean()) / 255.0,
         float(luma.std() / (luma.mean() + 1e-6)),
     ])
+    # intercept column: the ridge solver assumed one was here (the comment
+    # said "X 已含截距列" but no constant was appended) — without it the
+    # fit is forced through the origin and biases every target
+    feats.append(1.0)
     return feats
 
 
@@ -1196,7 +1222,9 @@ def train_auto_tone(records: Sequence[Dict[str, Any]],
     Xa = np.asarray(X, dtype=np.float64)
     Ya = np.asarray(Y, dtype=np.float64)
     n, d = Xa.shape
-    # 闭式解 (XᵀX + λI)⁻¹XᵀY；X 已含截距列
+    # 闭式解 (XᵀX + λI)⁻¹XᵀY；截距列由 _content_features 追加（λI 的
+    # 截距行/列保持单位值，正则化不作用于常数项的均值估计——小数据下
+    # 简化处理，可接受）
     A = Xa.T @ Xa + ridge_lambda * np.eye(d)
     W = np.linalg.solve(A, Xa.T @ Ya)
     pred = Xa @ W

@@ -509,11 +509,15 @@ def test_merge_packages(tmp_path):
     pkgs.append(str(pkg3))
 
     res = lrxmp.merge_packages(pkgs, str(tmp_path / "merged"))
-    assert res["records"] == 2      # DSC0001 重复被去
+    # Same-basename records from different machines are DIFFERENT photos —
+    # the merge keeps them (renamed with the package suffix) instead of
+    # silently discarding training data.
+    assert res["records"] == 3
     assert res["edited"] == 2
     assert res["images_copied"] == 2
-    assert res["duplicates"] == ["DSC0001"]
+    assert res["duplicates"] == ["DSC0001.ARW"]
     merged = open(tmp_path / "merged" / "lr_records.jsonl",
                   encoding="utf-8").read()
     assert '"source_pkg": "pkg0"' in merged
+    assert '"source_pkg": "pkg3"' in merged
     assert (tmp_path / "merged" / "before" / "DSC0001.jpg").exists()

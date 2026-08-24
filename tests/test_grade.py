@@ -333,8 +333,16 @@ class TestVignette:
 
 class TestGrain:
     def test_parse(self):
-        assert _parse_grain("0.2") == (0.2, 1.0)
-        assert _parse_grain("0.2,2.5") == (0.2, 2.5)
+        assert _parse_grain("0.2") == (0.2, 1.0, None)
+        assert _parse_grain("0.2,2.5") == (0.2, 2.5, None)
+        assert _parse_grain("0.2,2.5,42") == (0.2, 2.5, 42)
+
+    def test_deterministic_seed(self):
+        # grain is seeded from the image size → same input, same pattern
+        im = Image.new("RGB", (16, 16), (100, 100, 100))
+        a = apply_grain(im, 0.5)
+        b = apply_grain(im, 0.5)
+        assert list(a.getdata()) == list(b.getdata())
 
     def test_zero_noop(self):
         im = Image.new("RGB", (8, 8), (100, 100, 100))
@@ -612,3 +620,30 @@ class TestHighlightRecovery:
         row = np.asarray(out.convert("L"))[0]
         assert np.all(np.diff(row) >= 0)      # monotone
         assert out.getpixel((0, 0))[3] == 180  # alpha untouched
+
+
+class TestCurveDuplicateX:
+    def test_duplicate_x_no_divide_by_zero(self):
+        """'128,100;128,140' used to hit 0/0 in the PCHIP slopes."""
+        import warnings
+        from photo_s.grade import _build_curve_lut, apply_curves, _parse_curves
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            lut = _build_curve_lut([(128, 100), (128, 140)])
+        assert len(lut) == 256
+        assert all(0 <= v <= 255 for v in lut)
+        img = Image.new("RGB", (8, 8), (128, 128, 128))
+        out = apply_curves(img, _parse_curves("128,100;128,140"))
+        assert out.size == img.size
+
+    def test_vignette_midpoint_one_no_nan(self):
+        import numpy as np
+        from photo_s.grade import apply_vignette
+        img = Image.new("RGB", (32, 32), (100, 100, 100))
+        out = apply_vignette(img, amount=0.5, midpoint=1.0, feather=0.05)
+        arr = np.asarray(out)
+        assert np.isfinite(arr).all()
+
+    def test_levels_white_capped_at_255(self):
+        from photo_s.grade import _parse_levels
+        assert _parse_levels("255,999") == (254.0, 255.0, 1.0)

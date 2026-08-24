@@ -96,7 +96,7 @@ photo-s blurfaces "share/clean/*.jpg" --mode pixelate
 
 ### 3. Client delivery
 ```bash
-photo-s batch "picked/*.jpg" -o deliver/ --resize 2000x2000 -q 92 --watermark "© you"
+photo-s batch "picked/*.jpg" -o deliver/ --resize 2000x2000 -q 92 --watermark-text "© you"
 photo-s contact-sheet "picked/*.jpg" -o sheet.jpg --caption
 photo-s hash deliver/ -o deliver/manifest.csv --verify deliver/manifest.csv
 ```

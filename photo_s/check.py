@@ -88,11 +88,13 @@ def compute_checksums(paths: List[str], algorithm: str = "sha256",
     """
     # No silent fallback: an unknown algorithm name would otherwise compute
     # sha256 but label it with the bogus name — an invisible wrong result.
-    algo = getattr(hashlib, algorithm, None)
-    if algo is None:
+    # algorithms_available is a name SET, so the getattr(hashlib, ...) "new"
+    # constructor bypass is closed as well.
+    if algorithm not in hashlib.algorithms_available:
         raise ValueError(
             f"unsupported checksum algorithm {algorithm!r}; "
             f"supported: {sorted(h for h in hashlib.algorithms_available)}")
+    algo = getattr(hashlib, algorithm)
     results = []
     for i, path in enumerate(paths):
         if progress_callback:

@@ -10,7 +10,8 @@ import shutil
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from .engine import _extract_exif_metadata, _has_path_traversal, _render_rename_pattern
+from .engine import (_extract_exif_metadata, _has_path_traversal,
+                     _render_rename_pattern, _sanitize_stem)
 
 
 def _load_meta(path: str) -> dict:
@@ -39,6 +40,26 @@ def _unique_target(target: str, overwrite: bool) -> str:
         p = base.with_name(f"{base.stem}_{counter}{base.suffix}")
         counter += 1
     return str(p)
+
+
+def _claim(target: str) -> bool:
+    """Atomically reserve ``target`` (multi-process safe).
+
+    The exists()-loop in _unique_target races when two workers rename into
+    the same directory: both see "free", both os.replace, one file silently
+    disappears. An O_CREAT|O_EXCL placeholder reserves the name; the winner
+    overwrites its own placeholder at the end. Returns False when the name
+    is already taken.
+    """
+    try:
+        fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except OSError:
+        # e.g. permission issues — fall back to the non-claiming path
+        return True
 
 
 def rename_files(
@@ -72,6 +93,10 @@ def rename_files(
         new_stem = _render_rename_pattern(pattern, meta, seq)
         seq += 1
 
+        # Windows reserved device names (CON/PRN/COM1...) and trailing
+        # dots/spaces can't exist on NTFS — sanitize before use.
+        new_stem = _sanitize_stem(new_stem)
+
         if _has_path_traversal(new_stem):
             # Defense-in-depth: EXIF-derived values are sanitized at the
             # source, but never let a rendered stem escape the target dir.
@@ -93,8 +118,21 @@ def rename_files(
         else:
             target = str(src.with_name(f"{new_stem}{src.suffix}"))
 
-        # Avoid clobbering (and never map a file onto itself via collision)
-        target = _unique_target(target, overwrite)
+        # Avoid clobbering (and never map a file onto itself via collision).
+        # With an O_EXCL claim the unique-name pick is race-safe across
+        # processes; on claim failure the next _N variant is tried.
+        if overwrite or dry_run:
+            target = _unique_target(target, overwrite)
+        else:
+            for _attempt in range(1000):
+                target = _unique_target(target, overwrite=False)
+                if _claim(target):
+                    break
+            else:  # pathological collision storm — give up loudly
+                results.append({"input": path, "output": "",
+                                "status": "error",
+                                "error": "could not reserve a unique target"})
+                continue
 
         if progress_callback:
             progress_callback(idx + 1, total, path)
@@ -116,6 +154,13 @@ def rename_files(
             results.append({"input": path, "output": target,
                             "status": "ok", "error": ""})
         except Exception as e:
+            # release the placeholder we claimed so the name is free again
+            if not overwrite:
+                try:
+                    if os.path.exists(target):
+                        os.unlink(target)
+                except OSError:
+                    pass
             results.append({"input": path, "output": target,
                             "status": "error", "error": str(e)})
 

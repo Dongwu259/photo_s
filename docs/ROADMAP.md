@@ -40,7 +40,7 @@
 - [x] **lr-scan --sanitize**（脱敏导出数据包：剥 EXIF 相对路径，配 `--images` 可直接 lr-train；v1.7.1 之后补入）
 - [x] **TRAINING.md + tools/ 训练管线**（train_tone_torch.py CLIP+MLP 训练脚本 + llama_factory_lora.yaml + 隐私边界文档；lr-predict 自动识别 npz 格式开箱即用）
 
-### v1.9.0+（AI 智能修图 —— 主题：个人修图数据驱动的全自动调色，方向已定 2026-08-21）
+### v1.9.0（AI 智能修图 —— 主题：个人修图数据驱动的全自动调色；已发布，后续演进见本节）
 
 > **目标**："agent 使用的 Lightroom"，最终 agent 全自动修图。
 > **路线图（2026-08-21 定，三阶段）**：工具层（无模型补感知/循环/验收）→ 数据层（个人 LR 修图数据

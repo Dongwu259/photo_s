@@ -28,6 +28,29 @@ from . import __version__
 
 _CHUNK = 65536
 
+# Hard ceiling on any single weight download — a hostile/typo'd URL must not
+# stream an unbounded file into the user's cache directory.
+_MAX_DOWNLOAD_BYTES = 4 * 1024 * 1024 * 1024  # 4 GiB
+
+
+def _validate_url(url: str) -> None:
+    """Only https:// (and file:// for local tests) may serve weights.
+
+    Plain http:// is refused except for loopback hosts — local test servers
+    and self-hosted mirrors run on 127.0.0.1; remote plain-http downloads
+    would be trivially interceptable.
+    """
+    if url.startswith("https://") or url.startswith("file://"):
+        return
+    if url.startswith("http://"):
+        from urllib.parse import urlparse
+        host = (urlparse(url).hostname or "").lower()
+        if host in ("127.0.0.1", "localhost", "::1", "[::1]"):
+            return
+    raise RuntimeError(
+        "refusing to download model weights over insecure URL: {} "
+        "(only https:// is allowed)".format(url))
+
 
 @dataclass(frozen=True)
 class WeightSpec:
@@ -147,9 +170,13 @@ def _digest_hex(path: str) -> str:
 
 def _download(spec: WeightSpec, dest: str, timeout: int) -> None:
     """Stream ``spec.url`` to ``dest`` while hashing (raises on failure)."""
+    _validate_url(spec.url)
+    limit = spec.size if spec.size and spec.size > 0 else _MAX_DOWNLOAD_BYTES
+    limit = min(limit, _MAX_DOWNLOAD_BYTES)
     req = urllib.request.Request(
         spec.url, headers={"User-Agent": "photo-s/{}".format(__version__)})
     digest = hashlib.sha256()
+    received = 0
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp, \
                 open(dest, "wb") as f:
@@ -157,6 +184,11 @@ def _download(spec: WeightSpec, dest: str, timeout: int) -> None:
                 chunk = resp.read(_CHUNK)
                 if not chunk:
                     break
+                received += len(chunk)
+                if received > limit:
+                    raise RuntimeError(
+                        "download for {} exceeded size limit {} bytes "
+                        "(expected {})".format(spec.name, limit, spec.size))
                 digest.update(chunk)
                 f.write(chunk)
     except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:

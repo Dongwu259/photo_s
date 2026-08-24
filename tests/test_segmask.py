@@ -167,10 +167,12 @@ _real_weights = pytest.mark.skipif(
 
 @pytest.mark.parametrize("kind", ["subject", "person"])
 @_real_weights
-def test_real_weight_forward(kind):
+def test_real_weight_forward(kind, monkeypatch):
     import photo_s.segmask as sm
     spec = sm.WEIGHTS[kind]
-    sm._model_path = lambda k: _REAL[k]
+    # monkeypatch (not bare assignment) so the override can't leak into
+    # other tests once this one has run
+    monkeypatch.setattr(sm, "_model_path", lambda k: _REAL[k])
     m = sm.segment(_img(128, 96), kind)
     assert m.shape == (96, 128)
     assert 0.0 <= m.min() <= m.max() <= 1.0

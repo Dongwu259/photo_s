@@ -105,7 +105,9 @@ def apply_face_blur(img: Image.Image, mode: str = "blur",
     for box in faces:
         _mask_region(mat, cv2, box, mode, margin, strength)
 
-    out_bgr = Image.fromarray(np.asarray(mat), "RGB")
+    # mat is in BGR channel order (opencv convention); convert back to RGB
+    # before handing the buffer to PIL, otherwise R and B swap.
+    out_bgr = Image.fromarray(cv2.cvtColor(mat, cv2.COLOR_BGR2RGB), "RGB")
     out = Image.merge("RGBA", (*out_bgr.split(), rgba.split()[3]))
     if img.mode != "RGBA":
         out = out.convert(img.mode if img.mode in ("RGB", "L") else "RGB")

@@ -67,10 +67,25 @@ def hamming_distance(hash1: str, hash2: str) -> int:
 
 
 def _load_image_safe(path: str):
-    """Try to load an image, return None on failure."""
+    """Try to load an image (RAW included), return None on failure.
+
+    RAW files (prime dedup material — burst shooters) go through the
+    engine's rawpy/sips decoder instead of being skipped as unopenable.
+    """
     try:
-        from PIL import Image
-        return Image.open(path)
+        from .metrics import _open_decodable
+        img, temps = _open_decodable(path)
+        try:
+            dhash(img)  # force decode while the temp file still exists
+            img._photos_dedup_temps = temps
+            return img
+        except Exception:
+            for t in temps:
+                try:
+                    os.unlink(t)
+                except OSError:
+                    pass
+            raise
     except Exception:
         return None
 
@@ -115,34 +130,59 @@ def find_duplicates(
             progress_callback(i + 1, total)
         img = _load_image_safe(path)
         if img is None:
-            skipped += 1  # unopenable (RAW, corrupt) — don't skip silently
+            skipped += 1  # unopenable (corrupt) — don't skip silently
             continue
         try:
             hashes[path] = dhash(img)
         except Exception:
             skipped += 1
+        finally:
+            for t in getattr(img, "_photos_dedup_temps", ()) or ():
+                try:
+                    os.unlink(t)
+                except OSError:
+                    pass
 
     # Phase 2: group by hash (exact match first)
     hash_groups: Dict[str, List[str]] = defaultdict(list)
     for path, h in hashes.items():
         hash_groups[h].append(path)
 
-    # Phase 3: merge groups within threshold distance
+    # Phase 3: merge groups within threshold distance. Popcount bucketing
+    # first: hashes with |popcount(a)-popcount(b)| > threshold can NEVER be
+    # within threshold Hamming distance, so only same-band hashes are
+    # compared — the plain double loop was O(n²) over every unique hash.
+    def _popcount(h: str) -> int:
+        return bin(int(h, 16)).count("1")
+
     hash_list = list(hash_groups.keys())
+    bands: Dict[int, List[str]] = defaultdict(list)
+    for h in hash_list:
+        bands[_popcount(h)].append(h)
+
     merged: Dict[str, List[str]] = {}
     assigned = set()
 
-    for i, h1 in enumerate(hash_list):
+    for h1 in hash_list:
         if h1 in assigned:
             continue
+        band = _popcount(h1)
         group = list(hash_groups[h1])
         assigned.add(h1)
-        for j, h2 in enumerate(hash_list):
-            if i == j or h2 in assigned:
-                continue
-            if hamming_distance(h1, h2) <= threshold:
-                group.extend(hash_groups[h2])
-                assigned.add(h2)
+        for delta in range(0, threshold + 1):
+            for h2 in bands.get(band + delta, ()):
+                if h2 in assigned:
+                    continue
+                if hamming_distance(h1, h2) <= threshold:
+                    group.extend(hash_groups[h2])
+                    assigned.add(h2)
+            if delta:  # also the symmetric band below (delta=0 covered once)
+                for h2 in bands.get(band - delta, ()):
+                    if h2 in assigned:
+                        continue
+                    if hamming_distance(h1, h2) <= threshold:
+                        group.extend(hash_groups[h2])
+                        assigned.add(h2)
         if len(group) >= 2:
             merged[h1] = group
 
@@ -225,6 +265,12 @@ def handle_duplicates(
                 # keep-sharpest removes the non-keepers (the blurry rest of a
                 # burst), keeping only the sharpest image per group
                 if not dry_run:
-                    os.unlink(dup)
+                    try:
+                        os.unlink(dup)
+                    except OSError:
+                        # a locked/permission-denied file must not abort the
+                        # remaining deletions (mirrors the move branch)
+                        removed -= 1
+                        failed += 1
 
     return HandleResult(kept, removed, failed)

@@ -27,9 +27,12 @@ def apply_denoise(img: Image.Image, strength: float = 10.0) -> Image.Image:
     """
     cv2 = _cv2()
     alpha = None
-    if img.mode == "RGBA":
-        alpha = img.split()[-1]
-        rgb = img.convert("RGB")
+    if img.mode in ("RGBA", "LA", "P"):
+        # Any alpha-carrying mode: keep the alpha band, denoise the RGB view,
+        # then re-attach (LA previously lost its alpha band entirely).
+        rgba = img.convert("RGBA")
+        alpha = rgba.split()[-1]
+        rgb = rgba.convert("RGB")
     elif img.mode == "L":
         rgb = img
     else:

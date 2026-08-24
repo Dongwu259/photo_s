@@ -60,12 +60,22 @@ def apply_color_management(img: Image.Image, srgb: bool = False,
     profile, so the CMYK path falls back to a plain convert("RGB").
     """
     if flatten_cmyk and img.mode == "CMYK":
-        try:
-            img = ImageCms.profileToProfile(
-                img, ImageCms.createProfile("sRGB"),
-                ImageCms.createProfile("sRGB"),
-                outputMode="RGB")
-        except Exception:
+        # Trust an embedded CMYK profile when present; without one there is
+        # no honest source profile (sRGB is not CMYK), so use PIL's plain
+        # conversion instead of pretending sRGB described the source.
+        icc = img.info.get("icc_profile")
+        converted = False
+        if icc:
+            try:
+                from io import BytesIO
+                src_profile = ImageCms.ImageCmsProfile(BytesIO(icc))
+                img = ImageCms.profileToProfile(
+                    img, src_profile, ImageCms.createProfile("sRGB"),
+                    outputMode="RGB")
+                converted = True
+            except Exception:
+                converted = False
+        if not converted:
             img = img.convert("RGB")
 
     if srgb:
@@ -216,24 +226,47 @@ def _reference_gains(reference_path: str):
 
 
 def _apply_gains(img: Image.Image, gains) -> Image.Image:
-    """Multiply R/G/B channels by gains, clipped to 255. RGB/L only."""
+    """Multiply R/G/B channels by gains, clipped to 255. RGB/RGBA/LA/L kept.
+
+    Alpha-carrying modes apply the gains to the color bands and re-attach the
+    original alpha — WB/EV used to silently no-op on RGBA/LA/P inputs.
+    """
     gr, gg, gb = gains
     if img.mode == "L":
         if abs(gg - 1.0) < 1e-6:
             return img
-        return img.point(lambda v: min(255, int(v * gg)))
+        return img.point(lambda v: min(255, int(round(v * gg))))
+    if img.mode == "LA":
+        if abs(gg - 1.0) < 1e-6:
+            return img
+        lum, alpha = img.split()
+        lum = lum.point(lambda v: min(255, int(round(v * gg))))
+        out = Image.merge("LA", (lum, alpha))
+        out.info = img.info.copy()
+        return out
+    if img.mode == "P":
+        img = img.convert("RGBA")
+    if img.mode == "RGBA":
+        alpha = img.split()[-1]
+        rgb = img.convert("RGB")
+        out = _apply_gains(rgb, gains)
+        out.putalpha(alpha)
+        out.info = img.info.copy()
+        return out
     if img.mode != "RGB":
         return img
     if max(abs(gr - 1.0), abs(gg - 1.0), abs(gb - 1.0)) < 1e-6:
         return img
     r, g, b = img.split()
     if abs(gr - 1.0) >= 1e-6:
-        r = r.point(lambda v: min(255, int(v * gr)))
+        r = r.point(lambda v: min(255, int(round(v * gr))))
     if abs(gg - 1.0) >= 1e-6:
-        g = g.point(lambda v: min(255, int(v * gg)))
+        g = g.point(lambda v: min(255, int(round(v * gg))))
     if abs(gb - 1.0) >= 1e-6:
-        b = b.point(lambda v: min(255, int(v * gb)))
-    return Image.merge("RGB", (r, g, b))
+        b = b.point(lambda v: min(255, int(round(v * gb))))
+    out = Image.merge("RGB", (r, g, b))
+    out.info = img.info.copy()
+    return out
 
 
 def apply_white_balance(img: Image.Image, temp: Optional[float] = None,
@@ -335,7 +368,7 @@ def apply_auto_levels(img: Image.Image, clip_percent: float = 2.0) -> Image.Imag
     if hi <= lo:
         return img
     table = [0 if v <= lo else (255 if v >= hi
-                                else int(255 * (v - lo) / (hi - lo)))
+                                else int(round(255 * (v - lo) / (hi - lo))))
              for v in range(256)]
     if img.mode == "RGBA":
         return img.point(table * 3 + list(range(256)))  # alpha untouched
@@ -384,10 +417,10 @@ def apply_crop_ratio(img: Image.Image, ratio: Optional[str]) -> Image.Image:
     if abs(current - target) < 1e-6:
         return img
     if current > target:  # too wide → crop width
-        new_w = int(img.height * target)
+        new_w = max(1, min(img.width, int(round(img.height * target))))
         x = (img.width - new_w) // 2
         return img.crop((x, 0, x + new_w, img.height))
-    new_h = int(img.width / target)
+    new_h = max(1, min(img.height, int(round(img.width / target))))
     y = (img.height - new_h) // 2
     return img.crop((0, y, img.width, y + new_h))
 

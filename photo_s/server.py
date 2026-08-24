@@ -33,6 +33,9 @@ class _ClientGone(Exception):
     """SSE client disconnected mid-stream (BrokenPipe/Reset)."""
 
 
+_INVALID_BODY = object()  # _read_json sentinel: body was not valid JSON
+
+
 import time
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -99,7 +102,10 @@ def _options_from_dict(data: dict, base: Optional[ProcessOptions] = None) -> Pro
     """Build ProcessOptions from a JSON options dict (unknown keys ignored).
 
     Starts from ``base`` (server defaults) if given, then applies overrides.
+    Raises ValueError for invalid output formats / filenames that could
+    escape the output directory (prefix/suffix traversal).
     """
+    from .engine import _has_path_traversal
     opts = replace(base) if base is not None else ProcessOptions()
     for key in _INT_FIELDS:
         if key in data and data[key] is not None:
@@ -119,6 +125,21 @@ def _options_from_dict(data: dict, base: Optional[ProcessOptions] = None) -> Pro
     for key in _BOOL_FIELDS:
         if key in data and data[key] is not None:
             setattr(opts, key, bool(data[key]))
+    # sane numeric ranges — a quality of 0 / 100000 from a malformed request
+    # used to flow straight into every save call
+    opts.quality = max(1, min(100, int(opts.quality)))
+    if opts.scale_percent is not None:
+        opts.scale_percent = max(1, min(100, int(opts.scale_percent)))
+    opts.watermark_opacity = max(0, min(100, int(opts.watermark_opacity)))
+    opts.jobs = max(1, min(64, int(opts.jobs)))
+    # a prefix/suffix like "/../../pwned" is joined into output filenames —
+    # reject it here (400) instead of failing per-file deep in the engine
+    for field in ("prefix", "suffix"):
+        value = getattr(opts, field) or ""
+        if _has_path_traversal(value):
+            raise ValueError(
+                f"options.{field} must not contain path separators or "
+                "traversal segments")
     # case-insensitive format ("png" / "WEBP" → canonical "PNG" / "WebP")
     opts.output_format = _canonical_format(opts.output_format)
     if opts.output_format not in SUPPORTED_FORMATS:
@@ -204,12 +225,18 @@ def _prune_tasks() -> None:
         _TASKS.pop(t["state"]["task_id"], None)
 
 
+# Concurrent background batches. Unbounded task threads meant one request
+# flood could spawn unlimited workers (each holding CPU + memory).
+_MAX_RUNNING_TASKS = max(2, (os.cpu_count() or 2) * 2)
+
+
 def start_task(paths: List[str], options: ProcessOptions,
                dry_run: bool = False) -> str:
     """Start a /process batch in the background; return the task_id.
 
     The agent polls GET /tasks/<id> for progress and result, and may
-    cancel via POST /tasks/<id>/cancel.
+    cancel via POST /tasks/<id>/cancel. Raises RuntimeError when too many
+    tasks are already running (callers translate that to 503).
     """
     task_id = secrets.token_urlsafe(12)
     cancel = threading.Event()
@@ -240,12 +267,22 @@ def start_task(paths: List[str], options: ProcessOptions,
                 state["result"] = result.to_dict()
             state["status"] = "cancelled" if cancel.is_set() else "done"
         except Exception as e:  # noqa: BLE001 — report to the polling agent
-            state["result"] = {"error": str(e)}
+            state["result"] = {"error": type(e).__name__}
             state["status"] = "error"
         finally:
             state["finished_at"] = time.time()
+            # Self-prune: terminal tasks beyond the cap are dropped here too,
+            # so /tasks listing never grows without bound even without polls.
+            with _TASKS_LOCK:
+                _prune_tasks()
 
     with _TASKS_LOCK:
+        running = sum(1 for t in _TASKS.values()
+                      if t["state"]["status"] == "running")
+        if running >= _MAX_RUNNING_TASKS:
+            raise RuntimeError(
+                f"too many running tasks ({running}); retry when a batch "
+                "finishes or cancel one via POST /tasks/<id>/cancel")
         _prune_tasks()
         _TASKS[task_id] = {"state": state, "cancel": cancel}
     threading.Thread(target=run, daemon=True).start()
@@ -253,10 +290,15 @@ def start_task(paths: List[str], options: ProcessOptions,
 
 
 def get_task(task_id: str) -> Optional[dict]:
-    """Return a task's state dict (without the internal cancel event)."""
+    """Return a snapshot of a task's state (without the cancel event).
+
+    The copy is taken under the store lock — handing out the live dict let
+    the worker thread mutate it mid-serialization
+    ("dictionary changed size during iteration").
+    """
     with _TASKS_LOCK:
         task = _TASKS.get(task_id)
-        return task["state"] if task else None
+        return dict(task["state"]) if task else None
 
 
 class _PhotoSHandler(BaseHTTPRequestHandler):
@@ -264,6 +306,10 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
 
     options = ProcessOptions()
     token: Optional[str] = None
+
+    # Drop connections that stop sending mid-request (slowloris-style thread
+    # starvation against the thread-per-connection model).
+    timeout = 60
 
     def log_message(self, fmt, *args):  # silence default request logging
         pass
@@ -310,7 +356,12 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
 
     def _authed(self) -> bool:
         if self.token:
-            return self.headers.get("Authorization", "") == f"Bearer {self.token}"
+            # constant-time compare: a plain == leaks the token length/prefix
+            # through response timing
+            supplied = self.headers.get("Authorization", "")
+            expected = f"Bearer {self.token}"
+            return (len(supplied) == len(expected)
+                    and secrets.compare_digest(supplied, expected))
         # No token configured: still block browser cross-origin requests
         # (localhost CSRF drive-by) AND DNS-rebinding (Host must be loopback /
         # the actual bound address, not a rebinding hostname). A malicious
@@ -325,7 +376,10 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
             bound = getattr(self.server, "server_address", None)
             bound_host = bound[0] if bound else ""
             bound_port = bound[1] if bound else None
-            expected = f"http://{bound_host}"
+            # scheme must match the actual wire protocol — a TLS deployment
+            # would otherwise reject every legitimate browser origin
+            scheme = "https" if os.environ.get("PHOTO_S_TLS") else "http"
+            expected = f"{scheme}://{bound_host}"
             if bound_port:
                 expected += f":{bound_port}"
             return origin == expected
@@ -355,9 +409,15 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
             self._send_json(413, {"error": "payload too large"})
             return None
         try:
-            return json.loads(self.rfile.read(length).decode("utf-8"))
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
         except Exception:
-            return {}
+            # A malformed body must NOT surface later as a misleading
+            # "no supported image files found" ({} was indistinguishable
+            # from an empty payload).
+            return _INVALID_BODY
+        if not isinstance(body, dict):
+            return _INVALID_BODY
+        return body
 
     def _handle_process_stream(self, data: dict):
         """SSE endpoint: run a batch, stream one ``data:`` frame per file.
@@ -381,33 +441,76 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
 
+        gone = threading.Event()
+        frame_lock = threading.Lock()
+        stop_heartbeat = threading.Event()
+
         def _frame(payload: dict):
             try:
-                self.wfile.write(
-                    f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
-                self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
+                with frame_lock:
+                    self.wfile.write(
+                        f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                gone.set()  # cancel the batch, not just this frame
                 raise _ClientGone
+
+        def _heartbeat():
+            # Comment frames keep proxies from idling out and surface dead
+            # clients during long single-file stages (RAW decode) that emit
+            # no progress events.
+            while not stop_heartbeat.wait(15.0):
+                try:
+                    with frame_lock:
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    gone.set()
+                    return
+
+        hb = threading.Thread(target=_heartbeat, daemon=True)
+        hb.start()
 
         def progress(current, total, path, *extra):
             _frame({"current": current, "total": total, "path": path or ""})
 
         try:
-            result = batch_process(paths, opts, progress_callback=progress)
+            result = batch_process(
+                paths, opts, progress_callback=progress,
+                # a disconnected client cancels the batch: pending files are
+                # skipped instead of grinding through the whole list
+                cancel_checker=lambda: gone.is_set())
             _frame({"status": "done", "result": result.to_dict()})
         except _ClientGone:
-            return  # client disconnected mid-stream — nothing to clean up
+            return  # client disconnected mid-stream — batch already cancelled
         except Exception as e:  # noqa: BLE001 — report to the streaming agent
             try:
-                _frame({"status": "error", "error": str(e)})
+                _frame({"status": "error", "error": type(e).__name__})
             except _ClientGone:
                 pass
+        finally:
+            stop_heartbeat.set()
 
     # ── routes ───────────────────────────────────────────────────────────
     def do_GET(self):
         if not self._authed():
             self._send_json(401, {"error": "unauthorized"})
             return
+        try:
+            self._dispatch_get()
+        except (BrokenPipeError, ConnectionResetError):
+            raise
+        except Exception as e:  # noqa: BLE001 — never kill the connection
+            # no str(e): internal paths / state must not leak to clients
+            print(f"server error in GET {self.path}: "
+                  f"{type(e).__name__}: {e}", file=os.sys.stderr)
+            try:
+                self._send_json(500, {"ok": False,
+                                      "error": f"internal error ({type(e).__name__})"})
+            except OSError:
+                pass
+
+    def _dispatch_get(self):
         if self.path == "/health":
             self._send_json(200, {"status": "ok", "version": VERSION})
         elif self.path == "/info":
@@ -465,11 +568,21 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
         data = self._read_json()
         if data is None:  # payload too large — 413 already sent
             return
+        if data is _INVALID_BODY:
+            self._send_json(400, {"ok": False, "error": "invalid JSON body"})
+            return
         try:
             self._dispatch_post(data)
         except Exception as e:  # noqa: BLE001 — a bad request must not kill
             # the connection with an empty reply; report it as a JSON 500.
-            self._send_json(500, {"ok": False, "error": str(e)})
+            # no str(e) in the response — internal paths must not leak
+            print(f"server error in POST {self.path}: "
+                  f"{type(e).__name__}: {e}", file=os.sys.stderr)
+            try:
+                self._send_json(500, {"ok": False,
+                                      "error": f"internal error ({type(e).__name__})"})
+            except OSError:
+                pass
 
     def _dispatch_post(self, data: dict):
         if self.path == "/process/stream":
@@ -556,8 +669,12 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
                 return
             if data.get("async"):
                 # Long-running batch → background task; agent polls /tasks/<id>.
-                task_id = start_task(paths, opts,
-                                     dry_run=bool(data.get("dry_run")))
+                try:
+                    task_id = start_task(paths, opts,
+                                         dry_run=bool(data.get("dry_run")))
+                except RuntimeError as e:
+                    self._send_json(503, {"ok": False, "error": str(e)})
+                    return
                 self._send_json(202, {
                     "task_id": task_id,
                     "status": "running",
@@ -668,6 +785,23 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "action must be one of "
                                                 "install|uninstall|fetch"})
                 return
+            if action in ("install", "uninstall"):
+                # pip install into this interpreter + auto-import on the next
+                # discover() = remote code execution. It now requires BOTH an
+                # explicit opt-in env flag AND a token on the server. dry-run
+                # (the argv preview) stays open.
+                if not os.environ.get("PHOTO_S_ALLOW_REMOTE_PLUGINS"):
+                    self._send_json(403, {
+                        "ok": False,
+                        "error": ("remote plugin install/uninstall is disabled; "
+                                  "start the server with a token and set "
+                                  "PHOTO_S_ALLOW_REMOTE_PLUGINS=1 to enable")})
+                    return
+                if not self.token:
+                    self._send_json(403, {
+                        "ok": False,
+                        "error": "remote plugin install requires --token"})
+                    return
             official = get_official(name) if name else None
             if action in ("install", "uninstall") and official is None:
                 self._send_json(400, {"error": "unknown plugin: {}".format(name)})
@@ -725,18 +859,15 @@ def write_ready_file(path: str, port: int, token: Optional[str]) -> None:
 
     JSON payload: {"port", "token", "pid"}. The agent polls for this file
     instead of parsing stdout (robust on Windows where stdout encoding and
-    buffering are unreliable).
+    buffering are unreliable). The temp file is created 0600 from the start
+    — chmod-after-write left a short world-readable window with the bearer
+    token inside.
     """
     payload = {"port": port, "token": token, "pid": os.getpid()}
     tmp = f"{path}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(payload, f)
-    try:
-        # The file carries a bearer token — 0600 so other local users can't
-        # read it. Windows os.chmod is a weak no-op; POSIX gets strict perms.
-        os.chmod(tmp, 0o600)
-    except OSError:
-        pass
     os.replace(tmp, path)  # atomic on Windows and POSIX
 
 
@@ -760,11 +891,21 @@ def run_server(host: str = "127.0.0.1", port: int = 8787,
                     the server is listening — the automation handshake for
                     host agents (paired with --token auto).
 
+    Binding a non-loopback address without a token used to expose an
+    unauthenticated read/write API to the whole LAN — a token is now
+    auto-generated (and printed) in that case.
+
     TLS: set ``PHOTO_S_TLS=1`` plus ``PHOTO_S_CERT`` (PEM cert) and
     ``PHOTO_S_KEY`` (PEM key; defaults to the cert file if omitted) to serve
     over HTTPS. Requesting TLS without a cert is an error — the server never
     claims https unless the socket is actually wrapped.
     """
+    _loopback = host in ("127.0.0.1", "localhost", "::1", "")
+    if not _loopback and not token:
+        token = generate_token()
+        print("⚠️  绑定非回环地址且未提供 token：已自动生成 Bearer token "
+              "(non-loopback bind without --token: one was generated)")
+        print(f"    Authorization: Bearer {token}")
     tls_enabled = bool(os.environ.get("PHOTO_S_TLS"))
     tls_cert = os.environ.get("PHOTO_S_CERT") or None
     tls_key = os.environ.get("PHOTO_S_KEY") or tls_cert

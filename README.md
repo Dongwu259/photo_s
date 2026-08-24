@@ -145,7 +145,7 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 
 | Doc | Contents |
 |---|---|
-| [`docs/FEATURES.md`](docs/FEATURES.md) | Full inventory — 33 CLI commands, engine pipeline |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | Full inventory — 34 CLI commands, engine pipeline |
 | [`docs/AGENT_API.md`](docs/AGENT_API.md) | Agent contract: JSON shapes, exit codes, REST, MCP |
 | [`docs/PLUGINS.md`](docs/PLUGINS.md) | Plugin system: SCUNet denoise, LUT, write your own |
 | [`docs/GUI_CHANGES.md`](docs/GUI_CHANGES.md) | GUI behavior & interface contract |

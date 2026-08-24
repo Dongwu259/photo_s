@@ -38,8 +38,15 @@ def audit_image(path: str, *, sample_size: int = 256,
         return {"ok": False, "path": path, "error": a.get("error",
                                                           "unreadable image"),
                 "passed": False, "checks": [], "reason": "unreadable image"}
-    th = {**DEFAULT_THRESHOLDS, **{k: float(v) for k, v in thresholds.items()
-                                   if v is not None}}
+    overrides = {}
+    for k, v in thresholds.items():
+        if v is None:
+            continue
+        try:
+            overrides[k] = float(v)
+        except (TypeError, ValueError):
+            continue  # a bad override value must not crash the audit batch
+    th = {**DEFAULT_THRESHOLDS, **overrides}
     ex = a["exposure"]
     st = a["stats"]
     wb = a["white_balance"]

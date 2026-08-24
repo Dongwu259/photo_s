@@ -153,10 +153,16 @@ def load_config(path: str) -> dict:
 
 
 def save_config(path: str, text: str) -> None:
-    """Write config text to path, creating parent directories as needed."""
+    """Write config text to path atomically (temp file + rename).
+
+    A direct write truncated the existing config first — a crash mid-write
+    destroyed the user's settings. The rename is atomic on POSIX and Windows.
+    """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+    tmp = p.with_name(p.name + f".tmp.{os.getpid()}")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, p)
 
 
 def default_config_text() -> str:

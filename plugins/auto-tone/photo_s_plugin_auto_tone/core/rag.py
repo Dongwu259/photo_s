@@ -48,7 +48,7 @@ class RAGEnhancer:
         self.clip_model, self.preprocess = models.get_shared_clip(
             'ViT-L-14', 'openai', self.device)
 
-        d = np.load(npz_path, allow_pickle=True)
+        d = np.load(npz_path, allow_pickle=False)
         self.train_clip = d['feats']      # (N, 768) 已归一化
         self.train_paths = d['paths']
         # targets 与 feats 同序打包在 npz 里（旧版需外部 jsonl，已废弃）

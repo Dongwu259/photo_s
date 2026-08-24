@@ -53,7 +53,11 @@ jobs:
 
   publish-plugin:
     name: Build wheel & publish (plugin)
-    if: (github.event_name == 'workflow_dispatch' && inputs.target == 'plugin') || startsWith(github.ref, 'refs/tags/scunet-v') || startsWith(github.ref, 'refs/tags/lut-v') || startsWith(github.ref, 'refs/tags/auto-tone-v')
+    # Generic rule: any triggering tag that is NOT a core v* tag is a plugin
+    # tag (prefix → plugins/<prefix>). The prefix list lives ONLY in the
+    # `on.push.tags` filter above — adding a plugin used to mean editing
+    # this condition too, and the two lists drifted.
+    if: (github.event_name == 'workflow_dispatch' && inputs.target == 'plugin') || (startsWith(github.ref, 'refs/tags/') && !startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     environment: pypi
     steps:

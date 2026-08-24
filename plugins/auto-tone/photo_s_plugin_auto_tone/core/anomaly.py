@@ -48,14 +48,14 @@ class AnomalyDetector:
         if self.clip_train_npz is None:
             self.clip_train_npz = models.core_path("clip_train_rag.npz")
         if os.path.exists(self.clip_train_npz):
-            d = np.load(self.clip_train_npz, allow_pickle=True)
+            d = np.load(self.clip_train_npz, allow_pickle=False)
             self.train_paths = d['paths']
             self.train_clip = d['feats']
 
         if self.hand_features_npz is None:
             self.hand_features_npz = models.core_path("hand_features.npz")
         if os.path.exists(self.hand_features_npz):
-            d = np.load(self.hand_features_npz, allow_pickle=True)
+            d = np.load(self.hand_features_npz, allow_pickle=False)
             self.train_hand = d['feats']
 
     def _clip_encode(self, img: Image.Image) -> np.ndarray:

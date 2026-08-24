@@ -560,18 +560,21 @@ class TestDoPostResilience:
 
     def test_process_internal_error_500(self, server, monkeypatch):
         """Blanket guard: an unexpected engine failure → 500 JSON {"ok": False}
-        instead of a dropped connection (the old crash path)."""
+        instead of a dropped connection (the old crash path). The response
+        names the exception class but never echoes str(e) — internal paths
+        and state must not leak to clients."""
         import photo_s.server as srv
 
         def boom(paths, options, **kw):
-            raise RuntimeError("engine exploded")
+            raise RuntimeError("engine exploded at /home/user/secret.jpg")
 
         monkeypatch.setattr(srv, "batch_process", boom)
         s, img = server
         status, payload = s.request("POST", "/process", {"paths": [img]})
         assert status == 500
         assert payload["ok"] is False
-        assert "engine exploded" in payload["error"]
+        assert "RuntimeError" in payload["error"]
+        assert "secret.jpg" not in payload["error"]  # no internals leaked
 
     def test_contact_sheet_zero_cols_and_thumb_clamped(self, server):
         """cols=0 used to crash the grid math with ZeroDivisionError."""

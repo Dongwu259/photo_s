@@ -37,6 +37,17 @@ class TestFaceBlur:
         assert out.size == img.size
         assert out.mode in ("RGB", "RGBA")
 
+    def test_channel_order_preserved(self, tmp_path):
+        """Regression: the pipeline converted RGB→BGR for OpenCV but pasted
+        the buffer back with an "RGB" label — every face-blurred photo came
+        out with red and blue swapped. A pure-red input must stay red."""
+        if not _HAVE_CASCADE:
+            pytest.skip("cascade data not bundled in this opencv build")
+        img = _img(tmp_path / "red.jpg", color=(200, 30, 30))
+        out, _count = fb.apply_face_blur(img)
+        r, g, b = out.convert("RGB").getpixel((2, 2))
+        assert r > 120 and b < 90, f"red input became ({r}, {g}, {b})"
+
     def test_bad_mode_rejected(self, tmp_path):
         img = _img(tmp_path / "a.jpg")
         with pytest.raises(ValueError):

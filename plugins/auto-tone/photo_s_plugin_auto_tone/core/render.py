@@ -16,7 +16,9 @@ NEUTRAL = {
     "contrast": 1.0,
     "saturation": 1.0,
     "vibrance": 0.0,
-    "wb_temp": 5500.0,
+    # 5250 = the LR baseline lrxmp trains against (_NEUTRAL there) — the
+    # old 5500 pulled strength<1 renders systematically warm
+    "wb_temp": 5250.0,
     "wb_tint": 0.0,
     "clarity": 0.0,
     "texture": 0.0,

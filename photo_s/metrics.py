@@ -7,8 +7,9 @@ so the scores stay fast even for very large photos.
 """
 
 import math
+import os
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 
 def _flattened(img):
@@ -25,13 +26,48 @@ def _flattened(img):
     return img.getdata()
 
 
+def _open_decodable(path: str):
+    """Open any supported input, RAW included.
+
+    PIL has no RAW decoder, so exposure stats / culling used to reject every
+    .cr2/.nef/... outright (ok=False → "reject") even though RAW bursts are
+    the primary culling target. Falls back to the engine's rawpy/sips decode
+    (half-size: these calls only sample small thumbnails). Returns
+    ``(img, temp_paths)`` — callers must unlink the temp paths after use
+    (the macOS sips fallback decodes via a temp TIFF).
+    """
+    try:
+        return Image.open(path), []
+    except UnidentifiedImageError:
+        from .engine import RAW_EXTENSIONS
+        if os.path.splitext(path)[1].lower() not in RAW_EXTENSIONS:
+            raise
+        from .engine import ProcessOptions, _load_raw
+        img = _load_raw(path, ProcessOptions(raw_half_size=True))
+        temps = [p for p in (getattr(img, "_temp_png", None),
+                             getattr(img, "_temp_raw_tiff", None)) if p]
+        return img, temps
+
+
+def _cleanup_temps(temp_paths) -> None:
+    for t in temp_paths:
+        try:
+            os.unlink(t)
+        except OSError:
+            pass
+
+
 def _load_sample(path: str, sample_size: int) -> Image.Image:
     """Open an image, downscale to ≤sample_size on the longest side, convert to grayscale."""
-    with Image.open(path) as img:
-        if img.size[0] > sample_size or img.size[1] > sample_size:
-            img = img.copy()
-            img.thumbnail((sample_size, sample_size), Image.LANCZOS)
-        return img.convert("L")
+    img, temps = _open_decodable(path)
+    try:
+        with img:
+            if img.size[0] > sample_size or img.size[1] > sample_size:
+                img = img.copy()
+                img.thumbnail((sample_size, sample_size), Image.LANCZOS)
+            return img.convert("L")
+    finally:
+        _cleanup_temps(temps)
 
 
 def _window_ssim(win_a, win_b, n, c1, c2):
@@ -112,11 +148,15 @@ def compute_ssim(path_a: str, path_b: str, sample_size: int = 64,
 
 def _load_sample_rgb(path: str, sample_size: int) -> Image.Image:
     """Open an image, downscale to ≤sample_size on the longest side, convert to RGB."""
-    with Image.open(path) as img:
-        if img.size[0] > sample_size or img.size[1] > sample_size:
-            img = img.copy()
-            img.thumbnail((sample_size, sample_size), Image.LANCZOS)
-        return img.convert("RGB")
+    img, temps = _open_decodable(path)
+    try:
+        with img:
+            if img.size[0] > sample_size or img.size[1] > sample_size:
+                img = img.copy()
+                img.thumbnail((sample_size, sample_size), Image.LANCZOS)
+            return img.convert("RGB")
+    finally:
+        _cleanup_temps(temps)
 
 
 def compute_psnr(path_a: str, path_b: str, sample_size: int = 256) -> float:

@@ -24,6 +24,7 @@
 | `lr-recipes` | **编辑配方聚类**（v1.7.1）：KMeans 参数空间 → 个人风格配方库（簇中心即 PhotoS options） |
 | `lr-similar` | 相似修图检索（v1.7.1）：84 维内容特征 kNN → 最像的既往修图及其参数 |
 | `lr-eval` | 教师评测集准备（v1.7.1）：采样 → before/after 渲染对（PhotoS 自渲染）+ 打分模板 |
+| `lr-merge` | 合并多机训练数据包（v1.9.0）：同名不同机记录按包名消歧保留（不丢数据）、before 图幂等复制、原子写出合并 lr_records.jsonl |
 | `diff` | 版本数值对比（v1.7.1）：PSNR/SSIM/平均绝对差，before/after 判定 |
 | `audit` | **出片质量闸门**（v1.7.1）：过曝/欠曝/模糊/亮度/对比/色温逐项 pass/fail + 原因——agent 终止条件 |
 | `preview` | **视觉快照**（v1.7.1）：缩放 JPEG base64 + 直方图 PNG——多模态 agent 的像素输入 |
@@ -47,7 +48,7 @@
 
 **并发调优（v1.4.0 实测定案）**：真实交付集（29 张 24MP）`-j 1,2,4,8` 实测 2.62s→0.45s，8 线程 **5.83x**，线程远未饱和——重活（解码/缩放/编码/降噪推理）都在 Pillow/numpy/onnxruntime 里释放 GIL，纯 Python 段占比小，**多进程是负优化**（降噪场景内存翻倍）。调优旋钮：`-j` 提并发；SCUNet 降噪时可用 `OMP_NUM_THREADS` / onnxruntime intra-op 控制单算子线程数，避免与外层 `-j` 超额订阅。机器不同结论可能不同，用 `bench` 实测。
 
-## 2. 引擎处理能力（ProcessOptions 81 字段）
+## 2. 引擎处理能力（ProcessOptions 88 字段）
 
 **管线顺序**：open -> 插件 pre_process -> auto_rotate -> **镜头矫正（v1.7.0：畸变/消 CA/去暗角，几何先行）** -> auto_straighten -> log_curve -> 色彩管理 -> 影调 -> **LUT 调色（`--lut` .cube/预设，plugin provider 优先否则内置三线性）** -> 白平衡(temp+tint) -> 曝光 -> **LR 调色块（v1.6.0：`--levels` -> `--curves` -> `--clarity` -> `--texture` -> `--dehaze` -> `--vibrance` -> `--hsl` -> `--point-color` -> `--color-grading`）** -> **局部调整（v1.7.0：`--masks`/`--mask-adjust`，蒙版内标量调整）** -> denoise -> 自动色阶 -> **暗角/颗粒（`--vignette`/`--grain`）** -> crop/rotate/flip -> resize -> pad -> 打印尺寸 -> watermark -> save
 
@@ -104,7 +105,7 @@
 
 ## 5. MCP server（25 工具）
 
-`process` `info` `exif` `dedup` `cull` `select` `hdr` `blurfaces` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` `bench` `watch` `watch_status` `watch_stop` `analyze` — dedup 默认 dry_run 安全；`select` 双阈值分拣、`hdr` 曝光融合、`blurfaces` 人脸模糊均需对应 extra；模块级零 mcp import
+`process` `info` `exif` `dedup` `cull` `select` `hdr` `blurfaces` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` `bench` `watch` `watch_status` `watch_stop` `analyze` `batch_start` `batch_status` `batch_cancel` `diff` `audit` `preview` — dedup 默认 dry_run 安全；`select` 双阈值分拣、`hdr` 曝光融合、`blurfaces` 人脸模糊均需对应 extra；模块级零 mcp import
 
 ## 6. 插件系统
 
@@ -124,4 +125,4 @@
 ## 9. 平台 / 验证
 
 - macOS / Linux / Windows（CI 7 jobs：py3.9-3.12 全量 + Windows 真实 Tk + SCUNet 真推理 + exe 打包双版本：完整版 + lite 无 GUI 精简版）
-- 测试 899 个全绿
+- 测试 1164 个全绿

@@ -48,9 +48,11 @@ def discover_plugins() -> List[PhotoSPlugin]:
             plugin = plugin_cls()
             plugin.name = ep.name
             plugins.append(plugin)
-        except Exception:
-            # Silently skip broken plugins
-            pass
+        except Exception as e:
+            # Skip broken plugins, but say so — a plugin that fails to load
+            # used to vanish without a trace ("why is my LUT gone?")
+            print(f"⚠️  plugin {ep.name!r} failed to load: "
+                  f"{type(e).__name__}: {e}", file=sys.stderr)
 
     _PLUGINS = plugins
     return _PLUGINS
@@ -87,8 +89,11 @@ def run_pre_process(img, options, ctx: PluginContext) -> None:
             continue  # providers run only at their pipeline slot
         try:
             plugin.on_pre_process(img, options, ctx)
-        except Exception:
-            pass  # plugins must not break the pipeline
+        except Exception as e:
+            # plugins must not break the pipeline — but
+            # a failing hook must not vanish silently either
+            print(f"⚠️  plugin {plugin.name!r} on_pre_process failed: "
+                  f"{type(e).__name__}: {e}", file=sys.stderr)
 
 
 def run_post_process(result, ctx: PluginContext) -> None:
@@ -98,5 +103,8 @@ def run_post_process(result, ctx: PluginContext) -> None:
             continue  # providers run only at their pipeline slot
         try:
             plugin.on_post_process(result, ctx)
-        except Exception:
-            pass  # plugins must not break the pipeline
+        except Exception as e:
+            # plugins must not break the pipeline — but
+            # a failing hook must not vanish silently either
+            print(f"⚠️  plugin {plugin.name!r} on_post_process failed: "
+                  f"{type(e).__name__}: {e}", file=sys.stderr)

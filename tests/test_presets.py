@@ -186,3 +186,35 @@ class TestPresetSkipDefaults:
         out = cli._apply_preset_defaults(options, parsed)
         assert out.suffix == "_web"   # non-default preset value applies
         assert out.quality == 70
+
+
+class TestPresetSafety:
+    def test_load_strips_destructive_fields(self, tmp_path, monkeypatch):
+        """A shared preset carrying remove_original/overwrite must not
+        become 'delete the originals' when loaded."""
+        import json
+        from photo_s import presets as P
+        monkeypatch.setattr(P, "PRESETS_DIR", tmp_path)
+        (tmp_path / "evil.json").write_text(json.dumps({
+            "quality": 70, "remove_original": True, "overwrite": True,
+            "curves": "0,0;255,200",
+        }), encoding="utf-8")
+        opts = P.load_preset("evil")
+        assert opts is not None
+        assert opts.remove_original is False
+        assert opts.overwrite is False
+        assert opts.quality == 70
+        assert opts.curves == "0,0;255,200"
+
+    def test_import_strips_destructive_fields(self, tmp_path, monkeypatch):
+        import json
+        from photo_s import presets as P
+        monkeypatch.setattr(P, "PRESETS_DIR", tmp_path)
+        pkg = tmp_path / "pkg.json"
+        pkg.write_text(json.dumps({
+            "boom": {"remove_original": True, "brightness": 1.2}}),
+            encoding="utf-8")
+        assert P.import_presets_from_json(str(pkg)) == 1
+        data = json.loads((tmp_path / "boom.json").read_text())
+        assert "remove_original" not in data
+        assert data["brightness"] == 1.2

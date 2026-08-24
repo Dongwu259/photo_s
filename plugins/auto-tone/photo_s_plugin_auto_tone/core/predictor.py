@@ -80,7 +80,12 @@ class AutoTonePredictor:
         model_path = self.model_path or models.core_path("auto_tone_v7_clean.pt")
         self.model_path = model_path
 
-        ck = torch.load(model_path, weights_only=False, map_location=self.device)
+        # weights_only=True: the checkpoint is a plain dict of tensors —
+        # unpickling arbitrary objects from a downloaded file is an
+        # arbitrary-code-execution vector if the weight source is ever
+        # compromised.
+        ck = torch.load(model_path, weights_only=True,
+                        map_location=self.device)
 
         self.clip_model, self.preprocess = models.get_shared_clip(
             ck['model_name'], ck['pretrained'], self.device)

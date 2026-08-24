@@ -163,6 +163,20 @@ pip install photo-s-plugin-scunet
 官方插件目录（`name` → 发行版/描述/最低版本要求）在核心包 `photo_s/registry.py`；
 `photo-s plugin list` 据此显示"可用但未安装"的插件。
 
+### auto-tone（AI 自动调色）
+
+```bash
+pip install 'photo-s-plugin-auto-tone[model]'
+photo-s batch ~/burst/ --preset auto-tone     # CLIP+MLP 预测 9 项全局参数
+```
+
+- 提供 `auto_tone` operation：CLIP 视觉特征 + 轻量 MLP 回归（v7_clean，
+  ~450KB）预测曝光/对比度/饱和度/WB 等参数，RAG 检索相似照片的历史修图
+  作为先验；`--strength` 控制强度。
+- **权重许可为 CC-BY-NC 4.0（非商用）**，代码 MIT，详见插件目录
+  `LICENSE-WEIGHTS.txt`；权重经 modelstore sha256 校验后缓存，且每次
+  使用前重新校验。
+
 ## 注意
 
 - `options` 是每文件拷贝（并行模式互不共享），插件对它的修改只影响当前文件。

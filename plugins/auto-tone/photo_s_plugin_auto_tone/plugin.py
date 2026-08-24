@@ -58,8 +58,11 @@ class AutoTonePlugin(PhotoSPlugin):
             return img
 
         import tempfile
-        suffix = os.path.splitext(input_path)[1] or ".jpg"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        # Always render through JPEG: the temp file only ferries pixels back
+        # into a PIL Image (the engine re-saves in the target format). A RAW
+        # input suffix (.cr2/.nef/...) used to be kept and PIL cannot WRITE
+        # RAW — every RAW input died with "unknown file extension".
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
             tmp_path = f.name
         try:
             render_options(img, options, tmp_path, strength=1.0)

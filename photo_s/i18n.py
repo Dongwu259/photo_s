@@ -65,10 +65,18 @@ def _macos_apple_languages() -> Optional[str]:
     except Exception:
         return None
     out = proc.stdout or ""
-    if "zh" in out:      # match zh first; the plist is e.g. ["zh-Hans-CN","en"]
-        return "zh"
-    if "en" in out:
-        return "en"
+    # The plist is preference-ORDERED (e.g. ["en", "zh-Hans-CN"] means the
+    # user prefers English). Take the FIRST supported entry — the old
+    # "zh anywhere in the list" check misdetected English-first users.
+    for token in re.findall(r'"([^"]+)"', out):
+        lang = _from_locale_string(token)
+        if lang:
+            return lang
+    # tolerate unquoted bare values in odd formats
+    for token in out.replace(",", " ").replace("(", " ").replace(")", " ").split():
+        lang = _from_locale_string(token.strip('"'))
+        if lang:
+            return lang
     return None
 
 
@@ -209,6 +217,7 @@ def save_language(lang: str) -> None:
 
 STRINGS = {
     "zh": {
+    "eta_remaining": "剩余",
         "msg_full_edition": "完整版",
         "msg_verb_keep_sharpest": "保留最清晰并删除其余",
         "msg_done_delete": "已删除 {removed} 个文件, 保留 {kept} 个",
@@ -434,7 +443,7 @@ STRINGS = {
         "cmd_uninstall": "卸载插件",
         "cmd_watch": "监视文件夹自动处理",
         "desc": "PhotoS — 批量图片压缩与格式转换工具",
-        "epilog": "使用示例 Examples:\n  photo-s compress *.jpg -q 80                 批量压缩JPEG图片\n  photo-s compress *.jpg --target-size 500KB   自动调优质量至500KB以内\n  photo-s compress *.ARW -q 90                 将RAW照片转为JPEG\n  photo-s compress *.ARW --raw-half-size -q 85  RAW半尺寸快速处理\n  photo-s convert *.png -f webp -q 85          转换PNG为WebP\n  photo-s batch ~/Pictures/ -r -f JPEG -q 70   递归处理整个目录\n  photo-s batch ~/Pictures/ -r --target-size 2MB  自动调优质量至2MB以内\n  photo-s batch . --resize 1920x1080           批量缩放图片\n  photo-s batch . --scale 50                   缩小到50%%\n  photo-s batch . --no-exif                    不保留EXIF信息\n  photo-s batch . --dry-run                    预览模式（不实际处理）\n  photo-s batch . --organize date              按日期创建子文件夹\n  photo-s batch . --organize date-camera       按日期+相机创建子文件夹",
+        "epilog": "使用示例 Examples:\n  photo-s compress *.jpg -q 80                 批量压缩JPEG图片\n  photo-s compress *.jpg --target-size 500KB   自动调优质量至500KB以内\n  photo-s compress *.ARW -q 90                 将RAW照片转为JPEG\n  photo-s compress *.ARW --raw-half-size -q 85  RAW半尺寸快速处理\n  photo-s convert *.png -f webp -q 85          转换PNG为WebP\n  photo-s batch ~/Pictures/ -r -f JPEG -q 70   递归处理整个目录\n  photo-s batch ~/Pictures/ -r --target-size 2MB  自动调优质量至2MB以内\n  photo-s batch . --resize 1920x1080           批量缩放图片\n  photo-s batch . --scale 50                   缩小到50%\n  photo-s batch . --no-exif                    不保留EXIF信息\n  photo-s batch . --dry-run                    预览模式（不实际处理）\n  photo-s batch . --organize date              按日期创建子文件夹\n  photo-s batch . --organize date-camera       按日期+相机创建子文件夹",
         "help___action": "操作: report=仅报告, move=移到_duplicates文件夹, delete=删除, keep-sharpest=连拍保留最清晰（默认 report）",
         "help___aperture": "光圈 f-number，如 '2.8' 或 'f/2.8'",
         "help___artist": "作者",
@@ -589,6 +598,7 @@ STRINGS = {
         "help___yes": "跳过所有确认提示",
     },
     "en": {
+        "eta_remaining": "remaining",
         "msg_full_edition": "Full edition",
         "msg_verb_keep_sharpest": "keep the sharpest and delete the rest",
         "msg_done_delete": "Deleted {removed} file(s), kept {kept}",
@@ -814,7 +824,7 @@ STRINGS = {
         "cmd_uninstall": "Uninstall a plugin",
         "cmd_watch": "Watch folder and auto-process",
         "desc": "PhotoS — Batch Image Compression & Format Conversion",
-        "epilog": "Usage Examples:\n  photo-s compress *.jpg -q 80                 Batch-compress JPEG images\n  photo-s compress *.jpg --target-size 500KB   Auto-tune quality under 500KB\n  photo-s compress *.ARW -q 90                 Convert RAW photos to JPEG\n  photo-s compress *.ARW --raw-half-size -q 85 Fast RAW half-size processing\n  photo-s convert *.png -f webp -q 85          Convert PNG to WebP\n  photo-s batch ~/Pictures/ -r -f JPEG -q 70   Recurse a whole directory\n  photo-s batch ~/Pictures/ -r --target-size 2MB  Auto-tune under 2MB\n  photo-s batch . --resize 1920x1080           Batch-resize images\n  photo-s batch . --scale 50                   Scale down to 50%%\n  photo-s batch . --no-exif                    Strip EXIF\n  photo-s batch . --dry-run                    Preview (no processing)\n  photo-s batch . --organize date              Subfolders by date\n  photo-s batch . --organize date-camera       Subfolders by date + camera",
+        "epilog": "Usage Examples:\n  photo-s compress *.jpg -q 80                 Batch-compress JPEG images\n  photo-s compress *.jpg --target-size 500KB   Auto-tune quality under 500KB\n  photo-s compress *.ARW -q 90                 Convert RAW photos to JPEG\n  photo-s compress *.ARW --raw-half-size -q 85 Fast RAW half-size processing\n  photo-s convert *.png -f webp -q 85          Convert PNG to WebP\n  photo-s batch ~/Pictures/ -r -f JPEG -q 70   Recurse a whole directory\n  photo-s batch ~/Pictures/ -r --target-size 2MB  Auto-tune under 2MB\n  photo-s batch . --resize 1920x1080           Batch-resize images\n  photo-s batch . --scale 50                   Scale down to 50%\n  photo-s batch . --no-exif                    Strip EXIF\n  photo-s batch . --dry-run                    Preview (no processing)\n  photo-s batch . --organize date              Subfolders by date\n  photo-s batch . --organize date-camera       Subfolders by date + camera",
         "help___action": "Action: report=report only, move=move to _duplicates, delete=delete, keep-sharpest=keep sharpest (default: report)",
         "help___aperture": "Aperture f-number, e.g. '2.8' or 'f/2.8'",
         "help___artist": "Artist / Photographer",

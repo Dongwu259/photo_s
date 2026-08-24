@@ -1,3 +1,8 @@
 {
-  "maintainers": ["Dongwu259"]
+  "maintainers": ["Dongwu259"],
+  "name": "PhotoS",
+  "description": "Batch photo processing: compress, convert, grade, EXIF, RAW, dedup, cull, galleries. CLI + GUI + REST + MCP server.",
+  "repository": "https://github.com/Dongwu259/photo_s",
+  "pip_package": "photo-s-tools",
+  "license": "MIT (code); auto-tone plugin weights CC-BY-NC 4.0"
 }
