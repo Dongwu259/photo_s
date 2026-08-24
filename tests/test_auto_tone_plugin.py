@@ -8,11 +8,10 @@ import numpy as np
 import pytest
 from PIL import Image
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "plugins",
-                                "auto-tone"))
+# 追加而非插到最前：不干扰 GUI 测试的模块解析（Windows CI 实测敏感）
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "plugins",
+                            "auto-tone"))
 
-import pytest as _pytest
-_pytest.skip("BISECT: temporarily disabled", allow_module_level=True)
 
 
 @pytest.fixture()
