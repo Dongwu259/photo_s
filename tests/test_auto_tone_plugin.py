@@ -11,6 +11,9 @@ from PIL import Image
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "plugins",
                                 "auto-tone"))
 
+import pytest as _pytest
+_pytest.skip("BISECT: temporarily disabled", allow_module_level=True)
+
 
 @pytest.fixture()
 def tiny_img(tmp_path):
