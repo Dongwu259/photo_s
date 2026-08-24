@@ -96,7 +96,7 @@ photo-s batch ~/highiso/ --denoise 12       # 端到端（首次使用自动下�
 
 权重（v7_clean 主模型 + RAG/异常检测 npz ≈ 4.6MB；可选 Qwen LoRA ≈ 400MB）
 **不进 wheel**，托管在本仓库 GitHub Release `auto-tone-v0.1.0` 的 assets，
-URL/sha256 固定在 `plugins/auto_tone/photo_s_plugin_auto_tone/models.py`。
+URL/sha256 固定在 `plugins/auto-tone/photo_s_plugin_auto_tone/models.py`。
 
 ```bash
 # 1. 一次性：PyPI photo-s-plugin-auto-tone 项目添加 trusted publisher（同 scunet）
