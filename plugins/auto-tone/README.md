@@ -41,3 +41,16 @@ REST 路由通过 `api/rest.register_routes(handler_class)` 挂到
 - 推理设备自动选择：CUDA → Apple MPS → CPU
 - Windows / macOS / Linux 均可运行；纯 CPU 可跑核心推理（较慢）
 - Qwen 美学评分 / 建议建议使用 CUDA（CPU 上可用但显著变慢）
+
+
+## 许可
+
+- **代码**：MIT（与 photo_s 主仓库一致）
+- **模型权重**（GitHub Release `auto-tone-v0.1.0` 上的 7 个文件）：
+  [CC-BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) —
+  署名-非商用。允许自由使用/研究/再分发，但**禁止商业用途**，且需署名。
+  权重由 1295 张个人 Lightroom 修图记录训练（个人修图风格模型），
+  不适合以 MIT 形式无限制商用。详见本目录 `LICENSE-WEIGHTS.txt`。
+
+上游依赖：OpenAI CLIP ViT-L-14（MIT）、Qwen3-VL-2B（Apache-2.0）均允许
+再发布衍生权重。

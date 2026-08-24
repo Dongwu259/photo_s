@@ -1,5 +1,8 @@
 """模型权重注册与路径解析
 
+许可注意：本模块管理的权重文件采用 CC-BY-NC 4.0（非商用），
+代码本身为 MIT。详见插件目录 LICENSE-WEIGHTS.txt。
+
 权重不打进 wheel，首次使用时从 photo_s 仓库的 GitHub Release 下载到
 photo_s.modelstore 缓存目录（~/.cache/photo-s/models，可用
 $PHOTOS_CACHE_DIR 覆盖），并做 sha256 校验。

@@ -162,9 +162,11 @@ PhotoS is a **batch / delivery pipeline**, not an interactive editor — no RAW-
 
 - **On-device inference, no cloud.** Denoise model weights (SCUNet) download to
   your machine on first use; nothing is uploaded.
-- **Licensing.** Official code and official model weights (incl. the SCUNet
-  checkpoint) are **MIT** — free for commercial use. Third-party plugins and
-  models carry their own licenses; verify before commercial redistribution.
+- **Licensing.** Official code and most official model weights (incl. the SCUNet
+  checkpoint) are **MIT** — free for commercial use. Exception: the auto-tone
+  plugin's weights are **CC-BY-NC 4.0** (non-commercial, trained on personal
+  Lightroom edits; see `plugins/auto-tone/LICENSE-WEIGHTS.txt`). Third-party
+  plugins and models carry their own licenses; verify before redistribution.
 
 ## 📄 License
 

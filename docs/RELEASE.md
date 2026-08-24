@@ -98,6 +98,9 @@ photo-s batch ~/highiso/ --denoise 12       # 端到端（首次使用自动下�
 **不进 wheel**，托管在本仓库 GitHub Release `auto-tone-v0.1.0` 的 assets，
 URL/sha256 固定在 `plugins/auto-tone/photo_s_plugin_auto_tone/models.py`。
 
+> 权重协议为 **CC-BY-NC 4.0**（非商用；代码 MIT），见
+> `plugins/auto-tone/LICENSE-WEIGHTS.txt`——release notes 里必须注明。
+
 ```bash
 # 1. 一次性：PyPI photo-s-plugin-auto-tone 项目添加 trusted publisher（同 scunet）
 
