@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photo-s-plugin-auto-tone"
+version = "0.1.0"
+description = "PhotoS official AI auto-tone plugin (CLIP+MLP → 9-field Lightroom params, optional RAG / Qwen3-VL advisor)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"  # SPDX expression (setuptools>=77)
+dependencies = [
+    "photo-s-tools>=1.7.0",
+    "numpy",
+    "pillow",
+]
+
+[project.optional-dependencies]
+# 核心推理（CLIP+MLP / RAG / anomaly）
+model = ["torch>=2.1", "open_clip_torch>=2.20"]
+# 可选：Qwen3-VL 美学评分 + 修图建议（基座约 4.3GB，需另配 PHOTOS_AUTO_TONE_QWEN_BASE）
+qwen = ["transformers>=4.51", "peft>=0.11", "accelerate"]
+langchain = ["langchain"]
+
+[project.entry-points."photo_s.plugins"]
+auto_tone = "photo_s_plugin_auto_tone:AutoTonePlugin"
+
+[tool.setuptools.packages.find]
+include = ["photo_s_plugin_auto_tone*"]

@@ -64,6 +64,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | Highlight recovery | ✅ | ✅ | LR-style: compress flat clipped highlights back to visible gradient |
 | LOG recovery | ✅ | ✅ | SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG (1D LUT, no deps) |
 | LUT grading | ✅ | ✅ | .cube trilinear (plugin adds tetrahedral + 5 film presets) |
+| AI auto-tone | — | ✅¹ | Plugin: CLIP+MLP predicts 9-field LR params + confidence, RAG boost, optional Qwen3-VL aesthetic score & advisor (`photo-s-plugin-auto-tone[model]`) |
 | Denoise | ✅ | ✅¹ | NLM (`[enhance]` extra) |
 | Auto-straighten | ✅ | ✅¹ | Level the horizon, confidence-gated (`[enhance]` extra) |
 | HDR merge | ✅ | ✅¹ | Exposure fusion, handheld alignment (`[enhance]` extra) |

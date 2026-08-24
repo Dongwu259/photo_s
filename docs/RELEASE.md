@@ -82,7 +82,8 @@ photo-s batch ~/highiso/ --denoise 12       # 端到端（首次使用自动下�
 > `min_photo_s_version` 约束核心最低版本；核心发版无需重新发布插件。
 >
 > **新插件发布（v1.3.0 起）**：publish.yml 的 publish-plugin job 已参数化——插件
-> 目录从 tag 前缀自动推导（`scunet-v*` → plugins/scunet，`lut-v*` → plugins/lut）。
+> 目录从 tag 前缀自动推导（`scunet-v*` → plugins/scunet，`lut-v*` → plugins/lut，
+> `auto-tone-v*` → plugins/auto_tone）。
 > 发布 `photo-s-plugin-lut`（纯 numpy，无权重）：
 > ```bash
 > git tag lut-v0.1.0 && git push origin lut-v0.1.0
@@ -90,6 +91,38 @@ photo-s batch ~/highiso/ --denoise 12       # 端到端（首次使用自动下�
 > photo-s plugin list --json                  # installed: lut, provides: [lut]
 > photo-s batch ~/shoot/ --lut filmic-v1      # 预设名即用（无插件时用内置三线性读 .cube）
 > ```
+
+## 发布官方插件 `photo-s-plugin-auto-tone`（AI 自动调色）
+
+权重（v7_clean 主模型 + RAG/异常检测 npz ≈ 4.6MB；可选 Qwen LoRA ≈ 400MB）
+**不进 wheel**，托管在本仓库 GitHub Release `auto-tone-v0.1.0` 的 assets，
+URL/sha256 固定在 `plugins/auto_tone/photo_s_plugin_auto_tone/models.py`。
+
+```bash
+# 1. 一次性：PyPI photo-s-plugin-auto-tone 项目添加 trusted publisher（同 scunet）
+
+# 2. 创建 release 并上传 7 个权重文件（资产名必须与 models.py 的 WEIGHTS 一致）：
+gh release create auto-tone-v0.1.0 --target main \
+  -t "auto-tone plugin v0.1.0" -n "AI auto-tone: CLIP+MLP v7_clean + RAG" \
+  weights/core/auto_tone_v7_clean.pt \
+  weights/core/clip_train_rag.npz \
+  weights/core/hand_features.npz \
+  weights/aesthetic/adapter_model.safetensors#lora_aesthetic.safetensors \
+  weights/aesthetic/adapter_config.json#lora_aesthetic_config.json \
+  weights/advisor/adapter_model.safetensors#lora_advisor.safetensors \
+  weights/advisor/adapter_config.json#lora_advisor_config.json
+
+# 3. 打 tag 触发 PyPI 发布（assets 必须已就位，否则用户首次下载 404）：
+git tag auto-tone-v0.1.0 && git push origin auto-tone-v0.1.0
+
+# 4. 验证：
+pip install photo-s-tools 'photo-s-plugin-auto-tone[model]'
+python -c "from photo_s_plugin_auto_tone import auto_tone; print(auto_tone('x.jpg'))"
+```
+
+> 注意：CLIP ViT-L-14 基座（约 1.7GB）由 open_clip 首次运行时从 HuggingFace
+> 拉取，不在 Release assets 中；Qwen3-VL-2B 基座（约 4.3GB）需用户自备
+> （`PHOTOS_AUTO_TONE_QWEN_BASE`）。
 
 ## 常见问题
 

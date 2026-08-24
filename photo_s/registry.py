@@ -43,6 +43,14 @@ OFFICIAL_PLUGINS: Dict[str, OfficialPlugin] = {
                     "grading + film presets (pure numpy)",
         min_photo_s_version="1.3.0",
     ),
+    "auto-tone": OfficialPlugin(
+        name="auto-tone",
+        pypi_distribution="photo-s-plugin-auto-tone",
+        description="AI 自动调色: CLIP+MLP 预测 9 字段 Lightroom 参数，"
+                    "RAG 增强 + 可选 Qwen3-VL 美学评分/修图建议",
+        min_photo_s_version="1.7.0",
+        requires=("numpy", "pillow", "torch>=2.1", "open_clip_torch>=2.20"),
+    ),
 }
 
 
