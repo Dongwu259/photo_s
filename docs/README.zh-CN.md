@@ -6,7 +6,7 @@
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **CLI 给 AI agent 用，GUI 给人用。** PhotoS 是一个跨平台批量照片处理工具箱：
-给摄影师一套完整的 Tkinter GUI（视觉预览、审查打分灯箱、去重查看器、画廊导出），
+给摄影师一套完整的 Tkinter GUI（v2.0 工作区：图库 / 修图（真实管线实时预览 + 直方图 + 旁侧调整工具）/ 导出（照片队列 + 输出设置）/ 工具四大模块，含审查打分灯箱、去重查看器），
 给 AI agent 一套带统一版本化 JSON 契约的 CLI / REST / MCP 接口。
 
 > 🖥 GUI 给人用 — ⌨️ CLI 给 AI agent 用 — `pip install photo-s-tools`

@@ -44,7 +44,13 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     # The whole point of the lite build: no GUI code, no Tk runtime libs.
+    # photo_s.gui is a package since v2.0 — the parent exclude covers it
+    # (nothing else imports the submodules); they are listed explicitly
+    # so a future direct import can't smuggle GUI code into lite.
     excludes=["pytest", "tests", "photo_s.gui",
+              "photo_s.gui.app", "photo_s.gui.strings", "photo_s.gui.theme",
+              "photo_s.gui.state", "photo_s.gui.workflows",
+              "photo_s.gui.widgets",
               "tkinter", "_tkinter", "tkinterdnd2"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

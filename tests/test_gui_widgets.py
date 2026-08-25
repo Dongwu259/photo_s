@@ -8,6 +8,18 @@ import tkinter as tk
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _isolate_home(tmp_path, monkeypatch):
+    """Hermetic gui_state: the app restores geometry/thumb-size/active
+    module from ~/.photos/gui_state.json — a polluted real file once
+    flipped the startup module, made the Develop panel auto-render in
+    unrelated tests (its lazy tempdir then tripped other files'
+    mkdtemp-tracking assertions) and leaked live Tk roots that cascaded
+    into focus-event storms on later tests."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
 pytest.importorskip("tkinter")
 
 from photo_s.gui_widgets import (

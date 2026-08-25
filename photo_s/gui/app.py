@@ -1,8 +1,12 @@
 """
-PhotoS - Graphical User Interface
+PhotoS GUI — main application (photo_s/gui/app.py, v2.0 package layout).
 
-A macOS-native Tkinter application for batch image compression,
-format conversion, and resizing.
+PhotoSApp: the Tk application object (window, file panel, settings
+panel, workflow dialogs, batch processing loop) plus the run_gui entry
+point. The v2.0 split moved design tokens to gui/theme.py, UI strings
+to gui/strings.py, widgets to gui/widgets/, Tk-free workflow logic to
+gui/workflows.py and state persistence/caches to gui/state.py — this
+module holds everything that must own a Tk context.
 
 Features:
   - Chinese / English UI language switching
@@ -28,9 +32,9 @@ from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 from typing import List
 
-from . import watermark  # for POSITIONS on the watermark section
+from .. import watermark  # for POSITIONS on the watermark section
 
-from .engine import (
+from ..engine import (
     ProcessOptions,
     BatchResult,
     batch_process,
@@ -43,6 +47,33 @@ from .engine import (
     ALL_INPUT_EXTENSIONS,
     RAW_EXTENSIONS,
 )
+from . import workflows
+from .bus import UiBus
+from .state import ThumbCache, load_state, save_state, state_file
+from .strings import DEFAULT_LANG, STRINGS
+from .theme import (
+    APP_NAME, APP_VERSION, MIN_HEIGHT, MIN_WIDTH, SETTINGS_WIDTH,
+    WINDOW_HEIGHT, WINDOW_WIDTH,
+    COLORS, PLATFORM_FONTS,
+    FONT_BODY, FONT_BUTTON, FONT_BUTTON_LG, FONT_SECTION, FONT_SMALL,
+    FONT_TINY, FONT_TITLE,
+    _apply_palette, _system_dark_mode, apply_dpi_awareness,
+)
+from .widgets import (
+    FlatButton,
+    _ZoomPanState,
+    _exif_datetime_str,
+    _mask_spec_string,
+    _open_image_safe,
+    canvas_unbind_safe,
+)
+
+
+# ── Workspace modules (v2.0) ────────────────────────────────────────────────
+# Library: file grid/list · Develop: preview + histogram · Export: settings
+# · Tools: workflow launchers. The frames are all built once; switching
+# just (un)packs them, so widgets and state survive module changes.
+MODULES = ("library", "develop", "export", "tools")
 
 
 # ── Optional drag-and-drop support ─────────────────────────────────────────
@@ -57,13 +88,6 @@ except ImportError:
 
 # ── Constants ───────────────────────────────────────────────────────────────
 
-APP_NAME = "PhotoS"
-APP_VERSION = "1.9.0"
-WINDOW_WIDTH = 1120
-WINDOW_HEIGHT = 720
-MIN_WIDTH = 980
-MIN_HEIGHT = 640
-SETTINGS_WIDTH = 400
 
 # Color scheme — picked at import time from the system appearance.
 # ttk controls on macOS use the native aqua theme and follow the system
@@ -71,1604 +95,37 @@ SETTINGS_WIDTH = 400
 # dark native controls on a light background (the "black boxes" report).
 # So the layout palette must match the system: light or dark.
 
-_LIGHT_COLORS = {
-    "bg": "#f5f5f7",
-    "card": "#ffffff",
-    "border": "#d2d2d7",
-    "divider": "#e8e8ed",  # hairline separators / scroll troughs
-    "text": "#1d1d1f",
-    "text_secondary": "#6e6e73",
-    "accent": "#007aff",
-    "accent_hover": "#0062cc",
-    "danger": "#d70015",
-    "danger_hover": "#a80010",
-    "success": "#248a3d",
-    "warning": "#b25000",
-    "row_alt": "#f7f7fa",
-    "progress_bg": "#e5e5ea",
-}
-
-_DARK_COLORS = {
-    "bg": "#1e1e1e",
-    "card": "#2c2c2e",
-    "border": "#48484a",
-    "divider": "#3a3a3c",  # hairline separators / scroll troughs
-    "text": "#f5f5f7",
-    "text_secondary": "#a1a1a6",
-    "accent": "#0a84ff",
-    "accent_hover": "#409cff",
-    "danger": "#ff453a",
-    "danger_hover": "#ff6b61",
-    "success": "#30d158",
-    "warning": "#ff9f0a",
-    "row_alt": "#262628",
-    "progress_bg": "#3a3a3c",
-}
 
 
-def _system_dark_mode() -> bool:
-    """Detect the OS appearance: True for dark mode.
-
-    macOS: `defaults read -g AppleInterfaceStyle` → "Dark".
-    Windows: AppsUseLightTheme registry value == 0.
-    Linux/unknown: falls back to light, override with $PHOTOS_DARK=1.
-    """
-    env = os.environ.get("PHOTOS_DARK")
-    if env is not None:
-        return env.lower() in ("1", "true", "yes", "on")
-    if sys.platform == "darwin":
-        try:
-            out = subprocess.run(
-                ["defaults", "read", "-g", "AppleInterfaceStyle"],
-                capture_output=True, text=True, timeout=5).stdout.strip()
-            return out == "Dark"
-        except Exception:
-            return False
-    if sys.platform == "win32":
-        try:
-            import winreg
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
-            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-            return val == 0
-        except Exception:
-            return False
-    return False
 
 
-# Runtime-mutable palette: widgets read COLORS[key] at build time, so an
-# in-place update followed by a UI rebuild switches the theme instantly.
-COLORS = dict(_DARK_COLORS if _system_dark_mode() else _LIGHT_COLORS)
 
 
-def _apply_palette(dark: bool) -> None:
-    """Switch the active color palette (in-place; existing widgets unaffected
-    until the UI is rebuilt)."""
-    COLORS.clear()
-    COLORS.update(_DARK_COLORS if dark else _LIGHT_COLORS)
+
 
 
 # ── Cross-platform font detection ─────────────────────────────────────────────
 
-def _detect_fonts():
-    """Return the best UI fonts for the current platform.
 
-    Uses well-known system fonts that are guaranteed to exist on each platform.
-    Tk will silently fall back to its default if a font is missing.
-    """
-    if sys.platform == "darwin":
-        return {"title": "Helvetica Neue", "body": "Helvetica Neue"}
-    elif sys.platform == "win32":
-        return {"title": "Segoe UI", "body": "Segoe UI"}
-    else:  # Linux and others
-        return {"title": "Noto Sans", "body": "Noto Sans"}
-
-PLATFORM_FONTS = _detect_fonts()
-FONT_TITLE = (PLATFORM_FONTS["title"], 22, "bold")
-FONT_SECTION = (PLATFORM_FONTS["body"], 11, "bold")
-FONT_BODY = (PLATFORM_FONTS["body"], 11)
-FONT_SMALL = (PLATFORM_FONTS["body"], 10)
-FONT_TINY = (PLATFORM_FONTS["body"], 9)
-FONT_BUTTON = (PLATFORM_FONTS["body"], 11)
-FONT_BUTTON_LG = (PLATFORM_FONTS["body"], 12, "bold")
 
 
 # ── UI strings (zh / en) ─────────────────────────────────────────────────────
 
-# Fallback for _t missing-key lookups — NOT the startup default anymore.
-# Startup language comes from i18n.resolve_language() (persisted > env > system).
-DEFAULT_LANG = "zh"
 
-STRINGS = {
-    "zh": {
-        "window_title": "PhotoS — 图片批量压缩与格式转换",
-        "subtitle": "批量图片压缩与格式转换工具",
-        "about": "关于",
-        "theme_toggle": "切换深色/浅色模式",
-        # Toolbar / file list
-        "add_images": "添加图片",
-        "add_folder": "添加文件夹",
-        "remove": "移除",
-        "clear": "清除全部",
-        "files_count": "{n} 个文件",
-        "files_count_checked": "{n} 个文件 · 已勾选 {m} 个",
-        "check_none": "请先勾选要处理的图片（勾选框切换，用「全选/全不选」按钮批量切换）",
-        "check_toggle_all": "全选/全不选",
-        "undo": "撤销",
-        "undo_none": "没有可撤销的操作",
-        "undo_failed": "撤销失败: {err}",
-        "redo": "重做",
-        "redo_none": "没有可重做的操作",
-        "undo_removed": "撤销移除 {n} 张",
-        "undo_dedup": "撤销去重移动 {n} 张",
-        "undo_tag": "撤销打标: {name}",
-        "undo_done": "已撤销",
-        "about_shortcuts": "快捷键 Shortcuts",
-        "shortcuts_text": "⌘O / Ctrl+O 添加图片\n⌘⇧O / Ctrl+Shift+O 添加文件夹\n⌘R / Ctrl+R 开始处理（Esc 取消）\n⌘P / Ctrl+P 预览参数\n⌘E / Ctrl+E 审查打分\n⌘D / Ctrl+D 去重查看\n⌘G / Ctrl+G 导出画廊\n⌘Z / Ctrl+Z 撤销\n（审查窗口内：←/→ 翻页，0-5 评分，⌘Z 撤销，Esc 关闭）",
-        "dlg_skipped": "已导入 {n} 张图片，跳过 {m} 个不支持的文件",
-        "dlg_no_supported": "未找到支持的图片（跳过 {m} 个不支持的文件）",
-        "hint_dnd": "将图片或文件夹拖入列表，或使用上方按钮添加",
-        "hint_no_dnd": "使用上方按钮添加图片文件（安装 tkinterdnd2 可启用拖放）",
-        "col_name": "文件名",
-        "col_size": "大小",
-        "col_format": "格式",
-        "col_dims": "尺寸",
-        # Settings sections
-        "sec_format": "输出格式",
-        "sec_mode": "压缩模式",
-        "manual_quality": "手动质量",
-        "target_size_mode": "目标大小",
-        "quality": "质量",
-        "max_quality": "最高质量上限",
-        "target_size": "目标大小",
-        "autotune_hint": "自动调整质量",
-        "sec_resize": "缩放",
-        "width": "宽",
-        "height": "高",
-        "pixels_hint": "像素，留空 = 不缩放",
-        "scale": "缩放比例 %",
-        "sec_output": "输出位置",
-        "browse": "浏览…",
-        "sec_naming": "文件命名",
-        "prefix": "前缀",
-        "suffix": "后缀",
-        "smart_rename": "智能重命名",
-        "rename_vars": "变量: {date} {camera} {original} {seq} {iso} {focal}",
-        "sec_subfolder": "子文件夹",
-        "template": "模板",
-        "preset_flat": "不分类",
-        "preset_date": "按日期",
-        "preset_camera": "按相机",
-        "preset_date_camera": "按日期+相机",
-        "preset_custom": "自定义…",
-        "custom": "自定义",
-        "folder_vars": "留空 = 不分类。变量: {year} {month} {day} {date} {camera} {make}",
-        "sec_options": "选项",
-        "preserve_exif": "保留 EXIF 信息",
-        "optimize": "优化压缩",
-        "progressive": "渐进式 JPEG",
-        "jpeg_subsampling": "JPEG 色度子采样（444 全色彩）",
-        "overwrite": "覆盖已存在文件",
-        "auto_rotate": "按 EXIF 方向自动旋转",
-        "raw_half_size": "RAW 半尺寸解码（更快）",
-        "raw_auto_bright": "RAW 自动亮度",
-        "raw_demosaic": "RAW 去马赛克算法",
-        "raw_color_space": "RAW 色彩空间",
-        "raw_16bit": "RAW 16-bit 解码（TIFF 输出）",
-        "delete_original": "处理后删除原文件",
-        "strip_gps": "移除 GPS 位置信息",
-        "keep_mtime": "保留修改时间",
-        "max_pixels": "最长边像素上限",
-        "max_pixels_hint": "像素，留空 = 不限制，仅缩小",
-        "jobs": "并行线程",
-        # Bottom bar
-        "ready": "就绪 — 添加图片文件开始处理",
-        "preview": "预览",
-        "start": "开始处理",
-        "cancel": "取消",
-        "cancelling": "正在取消…",
-        "processing": "正在处理…",
-        "processing_item": "正在处理 [{cur}/{total}] {name}",
-        "tuning": "调整质量中…",
-        "cancelled_status": "已取消 — {ok} 个完成，{fail} 个失败/未处理",
-        "done_status": "完成 — {ok}/{total} 成功，节省 {savings} ({pct}%)",
-        "failed_status": "处理失败",
-        "stats_result": "原始: {sin} → 压缩后: {sout}  |  节省 {pct}%",
-        "stats_files": "已选择 {n} 个文件  |  总大小: {size}",
-        "stats_files_only": "已选择 {n} 个文件",
-        # Dialogs
-        "dlg_no_files_title": "无文件",
-        "dlg_no_files": "请先添加图片文件。",
-        "dlg_confirm_clear_title": "确认清除",
-        "dlg_confirm_clear": "确定要清除所有 {n} 个文件吗？",
-        "dlg_added_title": "已添加",
-        "dlg_added": "文件夹中的 {n} 个图片已在列表中。",
-        "dlg_no_images_title": "未找到图片",
-        "dlg_no_images": "该文件夹中没有支持的图片文件。",
-        "dlg_drop_none": "拖入的内容中没有可添加的图片文件。",
-        "dlg_confirm_delete_title": "确认删除",
-        "dlg_confirm_delete": "处理完成后将删除 {n} 个原始文件！\n\n确定继续？",
-        "dlg_error_title": "处理错误",
-        "dlg_error": "批处理过程中发生错误:\n\n{err}",
-        # Preview
-        "preview_title": "预览",
-        "preview_header": "预览 — 不会实际处理文件",
-        "pv_files": "文件数量: {n}",
-        "pv_format": "目标格式: {fmt}",
-        "pv_target": "目标大小: {size}（自动调优）",
-        "pv_qmax": "质量上限: {q}",
-        "pv_quality": "质量: {q}",
-        "pv_maxsize": "最大尺寸: {w}×{h}",
-        "pv_scale": "缩放比例: {s}%",
-        "pv_exif": "保留 EXIF: {yn}",
-        "pv_optimize": "优化: {yn}",
-        "pv_progressive": "渐进式: {yn}",
-        "pv_overwrite": "覆盖: {yn}",
-        "pv_outdir": "输出目录: {d}",
-        "pv_outdir_same": "（与源文件相同）",
-        "pv_subfolder": "子文件夹: {p}",
-        "pv_prefix": "前缀: '{p}'",
-        "pv_suffix": "后缀: '{s}'",
-        "pv_total": "源文件总大小: {size}",
-        "yes": "是",
-        "no": "否",
-        "auto": "自动",
-        # Summary / comparison
-        "summary_title": "处理完成",
-        "sum_header": "处理完成",
-        "sum_success": "成功",
-        "sum_failed": "失败",
-        "sum_original": "原始大小",
-        "sum_compressed": "压缩后",
-        "sum_saved": "节省",
-        "sum_ask_compare": "显示压缩对比？",
-        "sum_view_compare": "查看前后对比",
-        "compare_title": "压缩对比",
-        "compare_header": "压缩前后对比",
-        "before": "原始",
-        "after": "压缩后",
-        "saved": "节省",
-        "quality_lbl": "质量",
-        "cannot_load": "无法加载",
-        "close": "关闭",
-        # Plugins
-        "plugins": "插件",
-        "plugins_title": "插件管理",
-        "plugins_installed": "已安装插件",
-        "plugins_available": "官方可用插件",
-        "plugins_none": "（无）",
-        "plugins_install": "安装",
-        "plugins_uninstall": "卸载",
-        "plugins_fetch": "预下载权重",
-        "plugins_refresh": "刷新",
-        "plugins_ok": "✅ {what}",
-        "plugins_err": "❌ {detail}",
-        # Exposure analysis
-        "analyze": "曝光分析",
-        "review_btn": "审查打分",
-        "dedup_btn": "去重",
-        "gallery_btn": "画廊",
-        "gallery_title": "导出画廊",
-        "gallery_name": "画廊标题",
-        "gallery_thumb": "缩略图尺寸",
-        "gallery_out": "输出目录",
-        "gallery_generate": "生成画廊",
-        "gallery_generating": "生成中…",
-        "gallery_done": "已生成 {count} 张 → {path}",
-        "gallery_open": "在浏览器打开",
-        "gallery_need_files": "请先添加图片",
-        "gallery_need_dir": "请选择输出目录",
-        "gallery_error": "生成失败: {err}",
-        "op_failed": "操作失败: {err}",
-        "dedup_title": "去重查看",
-        "dedup_scanning": "扫描中… {n}/{total}",
-        "dedup_none": "未发现重复图片",
-        "dedup_group": "第 {i} 组",
-        "dedup_keep": "保留",
-        "dedup_sharpest": "★最锐",
-        "dedup_blur": "锐度",
-        "dedup_execute": "移入回收子文件夹",
-        "dedup_moving": "移动中…",
-        "dedup_moved": "已移动 {n} 张到 {dir}",
-        "dedup_rescan": "重新扫描",
-        "dedup_confirm": "将 {n} 张图片移动到回收子文件夹（不会删除），继续？",
-        "dedup_none_selected": "没有要清理的图片（每组至少保留一张）",
-        "review_title": "审查打分",
-        "review_pos": "{i} / {n}",
-        "review_loading": "读取元数据… {n}/{total}",
-        "review_rating": "评分",
-        "review_keywords": "关键词",
-        "review_title_lbl": "标题",
-        "review_save": "保存",
-        "review_saved": "已保存",
-        "review_save_failed": "写入失败: {err}",
-        "review_filter": "过滤",
-        "review_min_rating": "最低评分",
-        "review_filter_kw": "关键词包含",
-        "review_apply_filter": "应用过滤",
-        "review_clear_filter": "清除过滤",
-        "review_empty": "没有匹配的图片",
-        "review_no_piexif": "⚠️ 未安装 piexif：只能查看，无法写入（pip install photo-s-tools[exif]）",
-        "review_prev": "◀ 上一张",
-        "review_next": "下一张 ▶",
-        "review_none": "请先添加图片",
-        "review_shooting": "拍摄信息",
-        "review_make": "品牌",
-        "review_model": "型号",
-        "review_lens": "镜头",
-        "review_iso": "ISO",
-        "review_shutter": "快门(如 1/250)",
-        "review_aperture": "光圈(如 2.8)",
-        "review_date": "日期(YYYY:MM:DD HH:MM:SS)",
-        "review_select_lbl": "精选",
-        "review_rejects_lbl": "淘汰",
-        "review_select_go": "移动精选/淘汰",
-        "review_select_browse": "选择目标文件夹",
-        "review_select_need_dir": "请至少指定一个目标文件夹（精选或淘汰）",
-        "review_select_done": "已移动 {n} 个文件",
-        "review_select_done_warn": "移动 {ok} 个，{err} 个失败",
-        "analyze_title": "曝光统计",
-        "analyze_none": "请先在文件列表中选择一张图片",
-        "analyze_err": "无法读取该图片",
-        "analyze_luminance": "平均亮度",
-        "analyze_over": "过曝 (≥250)",
-        "analyze_under": "欠曝 (≤5)",
-        "analyze_blur": "模糊分",
-        "analyze_histogram": "亮度直方图",
-        # Settings dialog (MCP + optional deps)
-        "settings": "设置",
-        "settings_title": "设置",
-        "set_mcp": "MCP 服务器",
-        "set_mcp_desc": "让 Claude Desktop 等 MCP 客户端直接调用 PhotoS 工具",
-        "mcp_installed": "已安装",
-        "mcp_missing": "未安装",
-        "mcp_install_hint": "安装 Install: pip install 'photo-s-tools[mcp]'",
-        "mcp_launch": "启动命令 Launch command",
-        "mcp_claude_config": "Claude Desktop 配置 Claude Desktop config",
-        "mcp_claude_snippet": (
-            "{\n  \"mcpServers\": {\n    \"photo-s\": {\n"
-            "      \"command\": \"photo-s\",\n      \"args\": [\"mcp\"]\n"
-            "    }\n  }\n}"
-        ),
-        "copy": "复制",
-        "copied": "已复制",
-        "set_deps": "可选依赖 Optional dependencies",
-        "dep_install": "安装",
-        "dep_installing": "安装中…",
-        "set_plugins_link": "打开插件管理器 Open Plugin Manager",
-        # Watermark
-        "sec_watermark": "水印",
-        "wm_text": "文字",
-        "wm_image": "图片",
-        "wm_position": "位置",
-        "wm_opacity": "透明度",
-        # Multi-size
-        "sec_sizes": "多尺寸输出",
-        "sizes_hint": "格式 format: 标签:宽x高, e.g. thumb:480x,screen:1920x1080",
-        # Adjust
-        "sec_adjust": "影调调整",
-        "brightness": "亮度",
-        "contrast": "对比度",
-        "saturation": "饱和度",
-        "gamma": "伽马",
-        "sharpen": "锐化",
-        "export_sharpen": "导出锐化（0 关闭）",
-        "highlight_recovery": "高光恢复（0 关闭）",
-        "grayscale": "黑白",
-        "sepia": "复古",
-        # Composition
-        "sec_composition": "构图",
-        "crop": "裁剪",
-        "crop_hint": "格式 format: 宽x高+偏移 800x600+100+50",
-        "crop_ratio": "比例裁剪",
-        "rotate": "旋转°",
-        "rotate_bg": "旋转底色",
-        "flip": "翻转",
-        "flip_hint": "h = 水平, v = 垂直",
-        "pad": "留白比例",
-        "pad_bg": "留白底色",
-        "pad_hint": "e.g. 16:9, 1:1（空 = 不补边）",
-        # Correction (exposure / LOG / denoise / straighten)
-        "sec_correction": "校正",
-        "ev": "曝光补偿 (EV)",
-        "ev_hint": "EV 档位，2^EV 增益（0 = 不变）",
-        "auto_exposure": "自动曝光目标 (0-1)",
-        "auto_exposure_hint": "均值亮度归一化（空 = 关闭）",
-        "log_curve": "LOG 还原",
-        "log_curve_hint": "SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG（空 = 关闭）",
-        "denoise": "降噪强度 (0-20)",
-        "denoise_hint": "NLM 降噪（空 = 关闭；需 photo-s-tools[enhance] 或 SCUNet 插件）",
-        "lut": "LUT 调色 (.cube)",
-        "lut_hint": ".cube 文件或预设名（装 photo-s-plugin-lut 后可用 "
-                    "filmic-v1 等；空 = 关闭）",
-        "auto_straighten": "自动扶正地平线",
-        "max_straighten_angle": "最大扶正角°",
-        # White balance / color / evaluation
-        "wb_temp": "白平衡色温 (K)",
-        "wb_temp_hint": "如 5600；空 = 不调整",
-        "wb_reference": "白平衡参考图",
-        "wb_reference_hint": "灰卡图路径；空 = 不采样",
-        "browse_ref": "浏览…",
-        # Lightroom-direction grading (v1.6.0)
-        "sec_grading": "调色（LR 方向）",
-        "wb_tint": "白平衡 tint (绿-/品红+)",
-        "wb_tint_hint": "-100~100；空 = 关闭",
-        "levels": "手动色阶",
-        "levels_hint": "黑,白[,伽马] 如 80,200,1.1；空 = 关闭",
-        "curves": "点曲线",
-        "curves_hint": "每通道控制点 ch:x,y;x,y 如 0,0;128,140;255,255；空 = 关闭",
-        "vibrance": "自然饱和度",
-        "vibrance_hint": "-1~1；空 = 关闭",
-        "color_grading": "三向颜色分级",
-        "color_grading_hint": "zone:hue,sat 如 shadows:120,0.3；空 = 关闭",
-        "hsl": "HSL 分色",
-        "hsl_hint": "color:h,s,l 如 green:10,0.2,0.1；空 = 关闭",
-        "clarity": "清晰度",
-        "clarity_hint": "-1~1；空 = 关闭",
-        "texture": "纹理",
-        "texture_hint": "-1~1；空 = 关闭",
-        "dehaze": "去雾",
-        "dehaze_hint": "-1~1（负 = 加雾）；空 = 关闭",
-        "vignette": "暗角",
-        "vignette_hint": "amount[,mid[,feather]]；空 = 关闭",
-        "grain": "颗粒",
-        "grain_hint": "amount[,size]；空 = 关闭",
-        # Local adjustments + lens correction (v1.7.0)
-        "point_color": "点颜色",
-        "point_color_hint": "取样色定向调整 r,g,b:h,s,l[,range]；空 = 关闭",
-        "edit_point_color": "点颜色…",
-        "masks": "局部蒙版",
-        "masks_hint": "线性/径向/颜色范围蒙版 + 蒙版内局部调整；空 = 关闭",
-        "edit_masks": "蒙版…",
-        "sec_lens": "镜头矫正",
-        "lens_distort": "畸变 k1",
-        "lens_distort_hint": "正 = 矫正桶形，负 = 枕形；空 = 关闭",
-        "lens_vignette": "去暗角",
-        "lens_vignette_hint": "amount[,midpoint]；空 = 关闭",
-        "lens_ca": "消色差",
-        "lens_ca_hint": "r_scale,b_scale 如 0.999,1.001；空 = 关闭",
-        "lens_profile": "镜头档案（lens-profile save 维护）",
-        "dlt_point_color": "点颜色（取样色 + 范围）",
-        "dlt_masks": "局部蒙版编辑器",
-        "pc_add": "添加",
-        "pc_update": "更新",
-        "pc_delete": "删除",
-        "pc_sample": "取样色 (R,G,B)",
-        "pc_hue": "色相偏移",
-        "pc_sat": "饱和度",
-        "pc_lum": "明度",
-        "pc_range": "范围容差",
-        "mask_name": "名称",
-        "mask_type": "类型",
-        "mask_linear": "线性渐变",
-        "mask_radial": "径向椭圆",
-        "mask_color": "颜色范围",
-        "mask_brush": "笔刷",
-        "mask_brush_size": "笔刷半径（相对短边）",
-        "mask_brush_clear": "清空笔迹",
-        "mask_workflow": "画布蒙版（LR 式）",
-        "mask_prev": "◀ 上一张",
-        "mask_next": "下一张 ▶",
-        "mask_page": "第 {cur}/{total} 张",
-        "mask_add": "新建蒙版",
-        "mask_list": "蒙版列表",
-        "mask_show": "显示",
-        "mask_hide": "隐藏",
-        "mask_del": "删除蒙版",
-        "mask_undo": "撤销 (⌘Z)",
-        "mask_mode_add": "A 添加",
-        "mask_mode_subtract": "B 减去",
-        "mask_mode_off": "◦ 新建",
-        "mask_up": "▲ 上移",
-        "mask_down": "▼ 下移",
-        "mask_drag_hint": "空白处拖动 = 绘制；拖拽蒙版内部 = 移动位置",
-        "mask_ai_empty": "AI 未识别到该内容（蒙版为空）",
-        "mask_ai_overlay_warn":
-            "AI 蒙版无法渲染（缺 opencv 或权重未下载）：列表中的 AI "
-            "蒙版不会显示在画布上，批量处理时该照片会失败。"
-            "可先安装 photo-s-tools[enhance] 或运行 photo-s info 检查。",
-        "mask_bad_segment_warn":
-            "蒙版字符串含无法解析的段，已跳过损坏段、保留其余蒙版。"
-            "（原先会把整串蒙版全部清空）",
-        "preview_per_photo_hint":
-            "注：预览不含逐照片蒙版（批量处理时才注入）",
-        "mask_tool": "工具",
-        "mask_tool_linear": "线性渐变",
-        "mask_tool_radial": "径向椭圆",
-        "mask_tool_brush": "笔刷",
-        "mask_tool_color": "颜色取样",
-        "mask_tool_subject": "AI 主体",
-        "mask_tool_person": "AI 人物",
-        "mask_tool_object": "AI 对象",
-        "mask_ai_label": "对象类别（COCO）",
-        "mask_overlay_hint": "画布上拖动绘制蒙版；红色/彩色半透明区域 = 蒙版生效区（叠加显示所有可见蒙版）",
-        "mask_apply_all": "应用到全部勾选照片",
-        "mask_empty_hint": "勾选文件后在画布上绘制蒙版",
-        "mask_no_check": "请先勾选要编辑的照片",
-        "mask_feather": "羽化",
-        "mask_invert": "反相",
-        "mask_params": "参数",
-        "mask_adjust_sec": "蒙版内调整（滑杆，0 = 不动）",
-        "adj_exposure": "曝光 EV",
-        "adj_brightness": "亮度",
-        "adj_contrast": "对比度",
-        "adj_saturation": "饱和度",
-        "adj_vibrance": "自然饱和度",
-        "adj_clarity": "清晰度",
-        "adj_texture": "纹理",
-        "adj_sharpen": "锐化",
-        "adj_temp": "色温 K",
-        "adj_tint": "tint 绿-/品红+",
-        "adj_blur": "模糊半径 px",
-        "mask_preview": "蒙版预览",
-        "mask_refresh": "刷新预览",
-        "mask_no_preview": "勾选文件后可预览",
-        # settings category tabs (v1.6.1)
-        "tab_output": "输出",
-        "tab_adjust": "调整",
-        "tab_fx": "效果",
-        "tab_metadata": "元数据",
-        "tab_options": "选项",
-        # interactive editors (v1.6.x)
-        "edit_curves": "编辑曲线…",
-        "edit_wheels": "色轮…",
-        "edit_hsl": "HSL…",
-        "dlt_curves": "曲线编辑器（拖拽控制点，双击加点，右键删点）",
-        "dlt_wheels": "颜色分级（点击/拖拽选色）",
-        "dlt_hsl": "HSL 分色（点色块，再拖滑块）",
-        "ok": "确定",
-        "grade_none": "未设置",
-        "grade_lum": "亮度",
-        "reset": "复位",
-        "zone_shadows": "阴影",
-        "zone_midtones": "中间调",
-        "zone_highlights": "高光",
-        "hsl_red": "红色",
-        "hsl_orange": "橙色",
-        "hsl_yellow": "黄色",
-        "hsl_green": "绿色",
-        "hsl_aqua": "青色",
-        "hsl_blue": "蓝色",
-        "hsl_purple": "紫色",
-        "hsl_magenta": "品红",
-        "hsl_hue": "色相",
-        "hsl_sat": "饱和",
-        "hsl_lum": "明度",
-        "thumb_size_lbl": "缩略图",
-        "thumb_small": "小",
-        "thumb_medium": "中",
-        "thumb_large": "大",
-        "filter_lbl": "筛选",
-        "auto_levels": "自动色阶（直方图拉伸）",
-        "srgb": "转 sRGB 色彩空间",
-        "flatten_cmyk": "CMYK 转 RGB",
-        "evaluate": "计算 SSIM 质量评分",
-        "blur_score": "计算模糊评分",
-        "resume": "断点续传（跳过已处理文件）",
-        "print_size": "打印尺寸",
-        "print_size_hint": "如 8x10@300dpi；空 = 不裁剪",
-        # Metadata
-        "sec_metadata": "元数据",
-        "date_shift": "EXIF 日期偏移",
-        "date_shift_hint": "如 -5h30m；空 = 不改",
-        "sync_date": "输出时间 ← EXIF 拍摄时间",
-        "scrub": "清除全部元数据 (EXIF+ICC+GPS)",
-        "gpx_trace": "GPX 轨迹文件",
-        "gpx_trace_hint": "按拍摄时间插值写入 GPS；空 = 不写入",
-        "browse_gpx": "浏览…",
-        "blur_faces": "人脸模糊",
-        "blur_faces_off": "关闭",
-        "blur_faces_blur": "模糊",
-        "blur_faces_pixelate": "马赛克",
-        "blur_faces_margin_lbl": "外扩 %",
-        "blur_faces_hint": "检测并模糊人脸（需 pip install photo-s-tools[enhance]）",
-        "cmp_no_result": "无对比结果",
-        "cmp_no_result_body": "该文件尚未处理或处理失败。\nProcess this file first to compare before/after.",
-        # About
-        "about_title": "关于 PhotoS",
-        "about_desc": "批量图片压缩与格式转换工具（命令行 + 图形界面）",
-        "about_features": "功能特性",
-        "about_feature_list": (
-            "· 批量压缩 JPEG / PNG / WebP / TIFF / BMP / HEIC / AVIF\n"
-            "· 支持相机 RAW 格式（需安装 rawpy）\n"
-            "· 目标大小自动调优、缩放、智能重命名\n"
-            "· 并行处理、EXIF 保留、子文件夹整理"
-        ),
-        "about_env": "运行环境",
-        "about_deps": "可选组件",
-        "dep_installed": "已安装",
-        "dep_missing": "未安装",
-        "about_license": "开源协议: MIT License",
-        # ── More tools menu ──
-        "more_btn": "更多工具",
-        "more_watch": "目录监视",
-        "more_contact": "联系表",
-        "more_cull": "曝光筛选",
-        "more_hash": "校验和",
-        "more_hdr": "HDR 合并",
-        "more_presets": "预设",
-        # ── Visual preview ──
-        "preview_render": "正在渲染预览…",
-        "preview_error": "预览失败: {err}",
-        "preview_rendered": "原始 {in_size} → 处理 {out_size} · 质量 {q}",
-        # ── Folder watcher ──
-        "watch_title": "目录监视",
-        "watch_dir": "监视目录",
-        "watch_recursive": "包含子文件夹",
-        "watch_outdir": "输出目录（留空 = 原目录）",
-        "watch_format": "输出格式",
-        "watch_quality": "质量",
-        "watch_remove_original": "处理后删除原文件",
-        "watch_start": "开始监视",
-        "watch_stop": "停止",
-        "watch_running": "监视中…",
-        "watch_stopped": "已停止",
-        "watch_processed": "已处理 {n} 个文件",
-        "watch_no_dir": "请选择要监视的目录",
-        "watch_no_watchdog": "未安装 watchdog，请运行 pip install photo-s-tools[watch]",
-        # ── Contact sheet ──
-        "contact_title": "联系表",
-        "contact_output": "输出文件",
-        "contact_cols": "列数",
-        "contact_thumb": "缩略图尺寸 WxH",
-        "contact_caption": "显示文件名",
-        "contact_bg": "背景色 (#RRGGBB)",
-        "contact_generate": "生成",
-        "contact_done": "已生成: {path}",
-        "contact_failed": "生成失败: {err}",
-        "contact_open": "打开",
-        "contact_need_files": "请先添加并勾选图片",
-        "contact_bad_bg": "背景色无效，已用黑色",
-        # ── HDR merge ──
-        "hdr_title": "HDR 合并",
-        "hdr_need_files": "请勾选至少 2 张包围曝光图片",
-        "hdr_count": "将合并 {n} 张曝光",
-        "hdr_output": "输出文件",
-        "hdr_align": "手持对齐（AlignMTB，消除鬼影）",
-        "hdr_merge": "合并 HDR",
-        "hdr_done": "已生成: {out}",
-        "hdr_failed": "合并失败: {err}（需 pip install photo-s-tools[enhance]）",
-        # ── Cull ──
-        "cull_title": "曝光筛选",
-        "cull_overexposed": "过曝上限 %",
-        "cull_underexposed": "欠曝上限 %",
-        "cull_lum_min": "亮度下限 (0-1)",
-        "cull_lum_max": "亮度上限 (0-1)",
-        "cull_sharp": "清晰度下限",
-        "cull_scan": "扫描",
-        "cull_apply": "仅保留符合的",
-        "cull_kept": "符合 {kept}/{total}",
-        "cull_failed": "扫描失败: {err}",
-        "cull_no_files": "文件列表为空",
-        "cull_processing": "处理中，无法应用筛选",
-        "undo_cull": "撤销筛选（恢复 {n} 张）",
-        # ── Checksums ──
-        "hash_title": "校验和",
-        "hash_tab_gen": "生成清单",
-        "hash_tab_verify": "校验",
-        "hash_output": "输出文件",
-        "hash_generate": "生成",
-        "hash_done": "已写入 {path}（{n} 项）",
-        "hash_failed": "失败: {err}",
-        "hash_choose": "选择清单",
-        "hash_verify": "校验",
-        "hash_total": "共 {n} 项",
-        "hash_ok": "一致 {n}",
-        "hash_missing": "缺失 {n}",
-        "hash_mismatched": "不匹配 {n}",
-        "hash_all_ok": "全部一致",
-        "hash_open": "打开",
-        "hash_no_files": "没有要哈希的文件",
-        # ── Batch rename ──
-        "rename_btn": "重命名",
-        "rename_title": "批量重命名",
-        "rename_pattern_lbl": "命名模板",
-        "rename_mode_inplace": "就地重命名",
-        "rename_mode_copy": "复制到目录",
-        "rename_overwrite": "覆盖同名文件",
-        "rename_col_old": "原文件名",
-        "rename_col_new": "新文件名",
-        "rename_col_status": "状态",
-        "rename_status_conflict": "冲突·自动加后缀",
-        "rename_conflict_note": "批内重名，实际将保存为 {name}",
-        "rename_counts": "{n} 个文件 · {c} 个冲突 · {e} 个错误",
-        "rename_preview_updating": "预览更新中…",
-        "rename_need_dir": "请先选择输出目录",
-        "rename_execute": "执行重命名",
-        "rename_confirm": "将按预览重命名 {n} 个文件，此操作不可撤销。继续？",
-        "rename_done": "完成：{ok} 个成功（{c} 个自动加后缀）· {e} 个失败",
-        # ── Presets ──
-        "presets_title": "预设",
-        "presets_list": "预设列表",
-        "presets_name": "名称",
-        "presets_desc": "描述",
-        "presets_save": "保存当前设置",
-        "presets_load": "加载",
-        "presets_delete": "删除",
-        "presets_saved": "已保存",
-        "presets_loaded": "已加载: {name}",
-        "presets_deleted": "已删除: {name}",
-        "presets_name_required": "请输入预设名称",
-        "presets_load_failed": "加载失败: {name}",
-        "presets_empty": "（空）",
-        "presets_confirm_delete": "删除预设 {name}？",
-        # ── Multi-image compare ──
-        "compare_btn": "对比",
-        "compare_view_title": "多图对比",
-        "compare_need_two": "请勾选至少 2 张图片进行对比（最多显示前 4 张）",
-        "compare_hint": "滚轮缩放 · 左键拖拽平移（均仅当前图）· 双击全部复位",
-        "compare_sync_zoom": "同步缩放",
-        "compare_loading": "加载中…",
-    },
-    "en": {
-        "window_title": "PhotoS — Batch Image Compression & Conversion",
-        "subtitle": "Batch Image Compression & Conversion",
-        "about": "About",
-        "theme_toggle": "Toggle dark/light mode",
-        # Toolbar / file list
-        "add_images": "Add Images",
-        "add_folder": "Add Folder",
-        "remove": "Remove",
-        "clear": "Clear All",
-        "files_count": "{n} files",
-        "files_count_checked": "{n} files · {m} checked",
-        "check_none": "Check the images to process first (use the checkboxes, or the check-all button)",
-        "check_toggle_all": "Check all / none",
-        "undo": "Undo",
-        "undo_none": "Nothing to undo",
-        "undo_failed": "Undo failed: {err}",
-        "redo": "Redo",
-        "redo_none": "Nothing to redo",
-        "undo_removed": "Undo removal of {n}",
-        "undo_dedup": "Undo dedup move of {n}",
-        "undo_tag": "Undo tagging: {name}",
-        "undo_done": "Undone",
-        "about_shortcuts": "Shortcuts 快捷键",
-        "shortcuts_text": "⌘O / Ctrl+O Add images\n⌘⇧O / Ctrl+Shift+O Add folder\n⌘R / Ctrl+R Start processing (Esc cancels)\n⌘P / Ctrl+P Preview options\n⌘E / Ctrl+E Review & rate\n⌘D / Ctrl+D Duplicates\n⌘G / Ctrl+G Export gallery\n⌘Z / Ctrl+Z Undo\n(In review: ←/→ navigate, 0-5 rate, ⌘Z undo, Esc close)",
-        "dlg_skipped": "Imported {n} images, skipped {m} unsupported files",
-        "dlg_no_supported": "No supported images found (skipped {m} unsupported files)",
-        "hint_dnd": "Drag & drop images/folders into the list, or use the buttons above",
-        "hint_no_dnd": "Use the buttons above to add images (install tkinterdnd2 for drag & drop)",
-        "col_name": "Name",
-        "col_size": "Size",
-        "col_format": "Format",
-        "col_dims": "Dimensions",
-        # Settings sections
-        "sec_format": "Output Format",
-        "sec_mode": "Compression Mode",
-        "manual_quality": "Manual Quality",
-        "target_size_mode": "Target Size",
-        "quality": "Quality",
-        "max_quality": "Max Quality",
-        "target_size": "Target Size",
-        "autotune_hint": "auto-tune quality",
-        "sec_resize": "Resize",
-        "width": "W",
-        "height": "H",
-        "pixels_hint": "pixels, blank = no resize",
-        "scale": "Scale %",
-        "sec_output": "Output Location",
-        "browse": "Browse…",
-        "sec_naming": "Naming",
-        "prefix": "Prefix",
-        "suffix": "Suffix",
-        "smart_rename": "Smart Rename",
-        "rename_vars": "vars: {date} {camera} {original} {seq} {iso} {focal}",
-        "sec_subfolder": "Subfolder",
-        "template": "Template",
-        "preset_flat": "Flat (no grouping)",
-        "preset_date": "By date",
-        "preset_camera": "By camera",
-        "preset_date_camera": "By date+camera",
-        "preset_custom": "Custom…",
-        "custom": "Custom",
-        "folder_vars": "blank = flat. vars: {year} {month} {day} {date} {camera} {make}",
-        "sec_options": "Options",
-        "preserve_exif": "Preserve EXIF",
-        "optimize": "Optimize",
-        "progressive": "Progressive JPEG",
-        "jpeg_subsampling": "JPEG chroma subsampling (444 = full color)",
-        "overwrite": "Overwrite existing files",
-        "auto_rotate": "Auto-rotate (EXIF Orientation)",
-        "raw_half_size": "RAW half-size decode (faster)",
-        "raw_demosaic": "RAW demosaic algorithm",
-        "raw_color_space": "RAW color space",
-        "raw_16bit": "16-bit RAW decode (TIFF output)",
-        "raw_auto_bright": "RAW auto brightness",
-        "delete_original": "Delete original after processing",
-        "strip_gps": "Strip GPS data",
-        "keep_mtime": "Keep file mtime",
-        "max_pixels": "Max pixels (longest side)",
-        "max_pixels_hint": "pixels, blank = no limit, downscale only",
-        "jobs": "Parallel jobs",
-        # Bottom bar
-        "ready": "Ready — add images to begin",
-        "preview": "Preview",
-        "start": "Start",
-        "cancel": "Cancel",
-        "cancelling": "Cancelling…",
-        "processing": "Processing…",
-        "processing_item": "Processing [{cur}/{total}] {name}",
-        "tuning": "Tuning quality…",
-        "cancelled_status": "Cancelled — {ok} done, {fail} failed/skipped",
-        "done_status": "Done — {ok}/{total} succeeded, saved {savings} ({pct}%)",
-        "failed_status": "Processing failed",
-        "stats_result": "Original: {sin} → Compressed: {sout}  |  Saved {pct}%",
-        "stats_files": "{n} files selected  |  Total: {size}",
-        "stats_files_only": "{n} files selected",
-        # Dialogs
-        "dlg_no_files_title": "No Files",
-        "dlg_no_files": "Please add images first.",
-        "dlg_confirm_clear_title": "Confirm Clear",
-        "dlg_confirm_clear": "Clear all {n} files from the list?",
-        "dlg_added_title": "Already Added",
-        "dlg_added": "All {n} images from the folder are already in the list.",
-        "dlg_no_images_title": "No Images",
-        "dlg_no_images": "No supported image files found in this folder.",
-        "dlg_drop_none": "No addable image files found in the dropped content.",
-        "dlg_confirm_delete_title": "Confirm Delete",
-        "dlg_confirm_delete": "{n} original file(s) will be deleted after processing!\n\nAre you sure?",
-        "dlg_error_title": "Processing Error",
-        "dlg_error": "An error occurred during batch processing:\n\n{err}",
-        # Preview
-        "preview_title": "Preview",
-        "preview_header": "Preview — no files will be modified",
-        "pv_files": "Files: {n}",
-        "pv_format": "Format: {fmt}",
-        "pv_target": "Target size: {size} (auto-tune)",
-        "pv_qmax": "Quality max: {q}",
-        "pv_quality": "Quality: {q}",
-        "pv_maxsize": "Max size: {w}×{h}",
-        "pv_scale": "Scale: {s}%",
-        "pv_exif": "Preserve EXIF: {yn}",
-        "pv_optimize": "Optimize: {yn}",
-        "pv_progressive": "Progressive: {yn}",
-        "pv_overwrite": "Overwrite: {yn}",
-        "pv_outdir": "Output dir: {d}",
-        "pv_outdir_same": "(same as source)",
-        "pv_subfolder": "Subfolder: {p}",
-        "pv_prefix": "Prefix: '{p}'",
-        "pv_suffix": "Suffix: '{s}'",
-        "pv_total": "Total source size: {size}",
-        "yes": "Yes",
-        "no": "No",
-        "auto": "auto",
-        # Summary / comparison
-        "summary_title": "Complete",
-        "sum_header": "Processing Complete",
-        "sum_success": "Successful",
-        "sum_failed": "Failed",
-        "sum_original": "Original",
-        "sum_compressed": "Compressed",
-        "sum_saved": "Saved",
-        "sum_ask_compare": "Show before/after comparison?",
-        "sum_view_compare": "View comparison",
-        "compare_title": "Comparison",
-        "compare_header": "Before & After",
-        "before": "Original",
-        "after": "Compressed",
-        "saved": "Saved",
-        "quality_lbl": "Quality",
-        "cannot_load": "Cannot load",
-        "close": "Close",
-        # Plugins
-        "plugins": "Plugins",
-        "plugins_title": "Plugin Manager",
-        "plugins_installed": "Installed plugins",
-        "plugins_available": "Available official plugins",
-        "plugins_none": "(none)",
-        "plugins_install": "Install",
-        "plugins_uninstall": "Uninstall",
-        "plugins_fetch": "Fetch weights",
-        "plugins_refresh": "Refresh",
-        "plugins_ok": "✅ {what}",
-        "plugins_err": "❌ {detail}",
-        # Exposure analysis
-        "analyze": "Exposure analysis",
-        "review_btn": "Review & Rate",
-        "dedup_btn": "Duplicates",
-        "gallery_btn": "Gallery",
-        "gallery_title": "Export Gallery",
-        "gallery_name": "Gallery title",
-        "gallery_thumb": "Thumbnail size",
-        "gallery_out": "Output directory",
-        "gallery_generate": "Generate",
-        "gallery_generating": "Generating…",
-        "gallery_done": "Generated {count} images → {path}",
-        "gallery_open": "Open in browser",
-        "gallery_need_files": "Add images first",
-        "gallery_need_dir": "Choose an output directory",
-        "gallery_error": "Failed: {err}",
-        "op_failed": "Operation failed: {err}",
-        "dedup_title": "Duplicate Viewer",
-        "dedup_scanning": "Scanning… {n}/{total}",
-        "dedup_none": "No duplicates found",
-        "dedup_group": "Group {i}",
-        "dedup_keep": "Keep",
-        "dedup_sharpest": "★sharpest",
-        "dedup_blur": "blur",
-        "dedup_execute": "Move unchecked to trash",
-        "dedup_moving": "Moving…",
-        "dedup_moved": "Moved {n} images to {dir}",
-        "dedup_rescan": "Rescan",
-        "dedup_confirm": "Move {n} images to a trash subfolder (nothing is deleted). Continue?",
-        "dedup_none_selected": "Nothing to clean up (every group must keep at least one image)",
-        "review_title": "Review & Rate",
-        "review_pos": "{i} / {n}",
-        "review_loading": "Reading metadata… {n}/{total}",
-        "review_rating": "Rating",
-        "review_keywords": "Keywords",
-        "review_title_lbl": "Title",
-        "review_save": "Save",
-        "review_saved": "Saved",
-        "review_save_failed": "Write failed: {err}",
-        "review_filter": "Filter",
-        "review_min_rating": "Min rating",
-        "review_filter_kw": "Keyword contains",
-        "review_apply_filter": "Apply",
-        "review_clear_filter": "Clear",
-        "review_empty": "No matching images",
-        "review_no_piexif": "⚠️ piexif not installed: view only (pip install photo-s-tools[exif])",
-        "review_prev": "◀ Prev",
-        "review_next": "Next ▶",
-        "review_none": "Add images first",
-        "review_shooting": "Shooting info",
-        "review_make": "Make",
-        "review_model": "Model",
-        "review_lens": "Lens",
-        "review_iso": "ISO",
-        "review_shutter": "Shutter (e.g. 1/250)",
-        "review_aperture": "Aperture (e.g. 2.8)",
-        "review_date": "Date (YYYY:MM:DD HH:MM:SS)",
-        "review_select_lbl": "Selects",
-        "review_rejects_lbl": "Rejects",
-        "review_select_go": "Move keepers/rejects",
-        "review_select_browse": "Choose a target folder",
-        "review_select_need_dir": "Set at least one target folder (selects or rejects)",
-        "review_select_done": "Moved {n} files",
-        "review_select_done_warn": "Moved {ok}, {err} failed",
-        "analyze_title": "Exposure Stats",
-        "analyze_none": "Select an image in the file list first",
-        "analyze_err": "Cannot read that image",
-        "analyze_luminance": "Mean luminance",
-        "analyze_over": "Overexposed (≥250)",
-        "analyze_under": "Underexposed (≤5)",
-        "analyze_blur": "Blur score",
-        "analyze_histogram": "Luminance histogram",
-        # Settings dialog (MCP + optional deps)
-        "settings": "Settings",
-        "settings_title": "Settings",
-        "set_mcp": "MCP Server",
-        "set_mcp_desc": "Let MCP clients (Claude Desktop, agents) call PhotoS tools",
-        "mcp_installed": "Installed",
-        "mcp_missing": "Not installed",
-        "mcp_install_hint": "Install: pip install 'photo-s-tools[mcp]'",
-        "mcp_launch": "Launch command",
-        "mcp_claude_config": "Claude Desktop config",
-        "mcp_claude_snippet": (
-            "{\n  \"mcpServers\": {\n    \"photo-s\": {\n"
-            "      \"command\": \"photo-s\",\n      \"args\": [\"mcp\"]\n"
-            "    }\n  }\n}"
-        ),
-        "copy": "Copy",
-        "copied": "Copied",
-        "set_deps": "Optional dependencies",
-        "dep_install": "Install",
-        "dep_installing": "Installing…",
-        "set_plugins_link": "Open Plugin Manager",
-        # Watermark
-        "sec_watermark": "Watermark",
-        "wm_text": "Text",
-        "wm_image": "Image",
-        "wm_position": "Position",
-        "wm_opacity": "Opacity",
-        # Multi-size
-        "sec_sizes": "Multi-size",
-        "sizes_hint": "format: label:WxH, e.g. thumb:480x,screen:1920x1080",
-        # Adjust
-        "sec_adjust": "Adjust",
-        "brightness": "Brightness",
-        "contrast": "Contrast",
-        "saturation": "Saturation",
-        "gamma": "Gamma",
-        "sharpen": "Sharpen",
-        "export_sharpen": "Export sharpen (0 off)",
-        "highlight_recovery": "Highlight recovery (0 off)",
-        "grayscale": "Grayscale",
-        "sepia": "Sepia",
-        # Composition
-        "sec_composition": "Composition",
-        "crop": "Crop",
-        "crop_hint": "format: WxH+X+Y, e.g. 800x600+100+50",
-        "crop_ratio": "Crop ratio",
-        "rotate": "Rotate°",
-        "rotate_bg": "Rotate fill",
-        "flip": "Flip",
-        "flip_hint": "h = horizontal, v = vertical",
-        "pad": "Pad ratio",
-        "pad_bg": "Pad bg",
-        "pad_hint": "e.g. 16:9, 1:1 (blank = no padding)",
-        # Correction (exposure / LOG / denoise / straighten)
-        "sec_correction": "Correction",
-        "ev": "Exposure (EV)",
-        "ev_hint": "EV stops, 2^EV gain (0 = unchanged)",
-        "auto_exposure": "Auto-exposure target (0-1)",
-        "auto_exposure_hint": "Normalize mean luminance (blank = off)",
-        "log_curve": "LOG recovery",
-        "log_curve_hint": "SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG (blank = off)",
-        "denoise": "Denoise strength (0-20)",
-        "denoise_hint": "NLM denoise (blank = off; needs photo-s-tools[enhance] or SCUNet plugin)",
-        "lut": "LUT grading (.cube)",
-        "lut_hint": ".cube file or preset name (filmic-v1 etc. with "
-                    "photo-s-plugin-lut; blank = off)",
-        "auto_straighten": "Auto-straighten horizon",
-        "max_straighten_angle": "Max straighten angle°",
-        # White balance / color / evaluation
-        "wb_temp": "White balance temp (K)",
-        "wb_temp_hint": "e.g. 5600; blank = off",
-        "wb_reference": "WB reference image",
-        "wb_reference_hint": "gray-card path; blank = no sampling",
-        "browse_ref": "Browse…",
-        # Lightroom-direction grading (v1.6.0)
-        "sec_grading": "Grading (LR-direction)",
-        "wb_tint": "WB tint (green-/magenta+)",
-        "wb_tint_hint": "-100~100; blank = off",
-        "levels": "Manual levels",
-        "levels_hint": "black,white[,gamma] e.g. 80,200,1.1; blank = off",
-        "curves": "Point curves",
-        "curves_hint": "per-channel points ch:x,y;x,y e.g. 0,0;128,140;255,255; blank = off",
-        "vibrance": "Vibrance",
-        "vibrance_hint": "-1~1; blank = off",
-        "color_grading": "3-way color grading",
-        "color_grading_hint": "zone:hue,sat e.g. shadows:120,0.3; blank = off",
-        "hsl": "HSL split",
-        "hsl_hint": "color:h,s,l e.g. green:10,0.2,0.1; blank = off",
-        "clarity": "Clarity",
-        "clarity_hint": "-1~1; blank = off",
-        "texture": "Texture",
-        "texture_hint": "-1~1; blank = off",
-        "dehaze": "Dehaze",
-        "dehaze_hint": "-1~1 (negative adds haze); blank = off",
-        "vignette": "Vignette",
-        "vignette_hint": "amount[,mid[,feather]]; blank = off",
-        "grain": "Grain",
-        "grain_hint": "amount[,size]; blank = off",
-        # Local adjustments + lens correction (v1.7.0)
-        "point_color": "Point color",
-        "point_color_hint": "Sampled-color targeting r,g,b:h,s,l[,range]; blank = off",
-        "edit_point_color": "Point color…",
-        "masks": "Local masks",
-        "masks_hint": "Linear/radial/color-range masks + local adjustments; blank = off",
-        "edit_masks": "Masks…",
-        "sec_lens": "Lens correction",
-        "lens_distort": "Distortion k1",
-        "lens_distort_hint": "+ fixes barrel, - pincushion; blank = off",
-        "lens_vignette": "Vignette fix",
-        "lens_vignette_hint": "amount[,midpoint]; blank = off",
-        "lens_ca": "CA fix",
-        "lens_ca_hint": "r_scale,b_scale e.g. 0.999,1.001; blank = off",
-        "lens_profile": "Lens profile (maintained via lens-profile save)",
-        "dlt_point_color": "Point color (sample + range)",
-        "dlt_masks": "Local mask editor",
-        "pc_add": "Add",
-        "pc_update": "Update",
-        "pc_delete": "Delete",
-        "pc_sample": "Sample color (R,G,B)",
-        "pc_hue": "Hue shift",
-        "pc_sat": "Saturation",
-        "pc_lum": "Luminance",
-        "pc_range": "Range tolerance",
-        "mask_name": "Name",
-        "mask_type": "Type",
-        "mask_linear": "Linear gradient",
-        "mask_radial": "Radial ellipse",
-        "mask_color": "Color range",
-        "mask_brush": "Brush",
-        "mask_brush_size": "Brush radius (rel. short side)",
-        "mask_brush_clear": "Clear strokes",
-        "mask_workflow": "Canvas masks (LR-style)",
-        "mask_prev": "◀ Prev",
-        "mask_next": "Next ▶",
-        "mask_page": "{cur}/{total}",
-        "mask_add": "New mask",
-        "mask_list": "Masks",
-        "mask_show": "Show",
-        "mask_hide": "Hide",
-        "mask_del": "Delete mask",
-        "mask_undo": "Undo (⌘Z)",
-        "mask_mode_add": "A Add",
-        "mask_mode_subtract": "B Subtract",
-        "mask_mode_off": "◦ New",
-        "mask_up": "▲ Up",
-        "mask_down": "▼ Down",
-        "mask_drag_hint": "Drag empty area = paint; drag inside a mask = move it",
-        "mask_ai_empty": "AI found nothing (empty mask)",
-        "mask_ai_overlay_warn":
-            "AI mask cannot render (opencv missing or weights not "
-            "downloaded): AI masks won't show on the canvas and that "
-            "photo will fail in batch. Install photo-s-tools[enhance] "
-            "or check with photo-s info.",
-        "mask_bad_segment_warn":
-            "Some mask segments could not be parsed: the broken ones were "
-            "dropped and the rest kept (previously the whole list was "
-            "silently cleared).",
-        "preview_per_photo_hint":
-            "Note: preview excludes per-photo masks (injected at batch)",
-        "mask_tool": "Tool",
-        "mask_tool_linear": "Linear gradient",
-        "mask_tool_radial": "Radial ellipse",
-        "mask_tool_brush": "Brush",
-        "mask_tool_color": "Color pick",
-        "mask_tool_subject": "AI subject",
-        "mask_tool_person": "AI person",
-        "mask_tool_object": "AI object",
-        "mask_ai_label": "Object class (COCO)",
-        "mask_overlay_hint": "Drag on the canvas to paint; colored translucent areas = mask active (all visible masks overlaid)",
-        "mask_apply_all": "Apply to all checked photos",
-        "mask_empty_hint": "Check photos, then paint masks on the canvas",
-        "mask_no_check": "Check the photos you want to edit first",
-        "mask_feather": "Feather",
-        "mask_invert": "Invert",
-        "mask_params": "Params",
-        "mask_adjust_sec": "Adjustments inside mask (sliders, 0 = untouched)",
-        "adj_exposure": "Exposure EV",
-        "adj_brightness": "Brightness",
-        "adj_contrast": "Contrast",
-        "adj_saturation": "Saturation",
-        "adj_vibrance": "Vibrance",
-        "adj_clarity": "Clarity",
-        "adj_texture": "Texture",
-        "adj_sharpen": "Sharpen",
-        "adj_temp": "Temp K",
-        "adj_tint": "Tint G-/M+",
-        "adj_blur": "Blur radius px",
-        "mask_preview": "Mask preview",
-        "mask_refresh": "Refresh preview",
-        "mask_no_preview": "Check a file to preview",
-        # settings category tabs (v1.6.1)
-        "tab_output": "Output",
-        "tab_adjust": "Adjust",
-        "tab_fx": "Effects",
-        "tab_metadata": "Metadata",
-        "tab_options": "Options",
-        # interactive editors (v1.6.x)
-        "edit_curves": "Edit curves…",
-        "edit_wheels": "Color wheels…",
-        "edit_hsl": "HSL…",
-        "dlt_curves": "Curve editor (drag points, double-click to add, right-click to remove)",
-        "dlt_wheels": "Color grading (click / drag to pick)",
-        "dlt_hsl": "HSL split (pick a chip, then drag the sliders)",
-        "ok": "OK",
-        "grade_none": "not set",
-        "grade_lum": "Lum",
-        "reset": "Reset",
-        "zone_shadows": "Shadows",
-        "zone_midtones": "Midtones",
-        "zone_highlights": "Highlights",
-        "hsl_red": "Red",
-        "hsl_orange": "Orange",
-        "hsl_yellow": "Yellow",
-        "hsl_green": "Green",
-        "hsl_aqua": "Aqua",
-        "hsl_blue": "Blue",
-        "hsl_purple": "Purple",
-        "hsl_magenta": "Magenta",
-        "hsl_hue": "Hue",
-        "hsl_sat": "Sat",
-        "hsl_lum": "Lum",
-        "thumb_size_lbl": "Thumb",
-        "thumb_small": "S",
-        "thumb_medium": "M",
-        "thumb_large": "L",
-        "filter_lbl": "Filter",
-        "auto_levels": "Auto levels (histogram stretch)",
-        "srgb": "Convert to sRGB",
-        "flatten_cmyk": "Flatten CMYK → RGB",
-        "evaluate": "Compute SSIM score",
-        "blur_score": "Compute blur score",
-        "resume": "Resume (skip already-processed files)",
-        "print_size": "Print size",
-        "print_size_hint": "e.g. 8x10@300dpi; blank = no crop",
-        # Metadata
-        "sec_metadata": "Metadata",
-        "date_shift": "EXIF date shift",
-        "date_shift_hint": "e.g. -5h30m; blank = off",
-        "sync_date": "Output mtime ← EXIF datetime",
-        "scrub": "Strip ALL metadata (EXIF+ICC+GPS)",
-        "gpx_trace": "GPX track file",
-        "gpx_trace_hint": "interpolate GPS from timestamps; blank = off",
-        "browse_gpx": "Browse…",
-        "blur_faces": "Face blur",
-        "blur_faces_off": "Off",
-        "blur_faces_blur": "Blur",
-        "blur_faces_pixelate": "Mosaic",
-        "blur_faces_margin_lbl": "margin %",
-        "blur_faces_hint": "Detect & blur faces (needs pip install photo-s-tools[enhance])",
-        "cmp_no_result": "No comparison",
-        "cmp_no_result_body": "This file was not processed yet (or failed).\nProcess it first to compare before/after.",
-        # About
-        "about_title": "About PhotoS",
-        "about_desc": "Batch image compression & format conversion tool (CLI + GUI)",
-        "about_features": "Features",
-        "about_feature_list": (
-            "· Batch compress JPEG / PNG / WebP / TIFF / BMP / HEIC / AVIF\n"
-            "· Camera RAW support (requires rawpy)\n"
-            "· Target-size auto-tuning, resizing, smart renaming\n"
-            "· Parallel processing, EXIF preservation, subfolder organization"
-        ),
-        "about_env": "Environment",
-        "about_deps": "Optional Components",
-        "dep_installed": "installed",
-        "dep_missing": "not installed",
-        "about_license": "License: MIT License",
-        # ── More tools menu ──
-        "more_btn": "More Tools",
-        "more_watch": "Folder Watch",
-        "more_contact": "Contact Sheet",
-        "more_cull": "Cull Filter",
-        "more_hash": "Checksums",
-        "more_hdr": "HDR merge",
-        "more_presets": "Presets",
-        # ── Visual preview ──
-        "preview_render": "Rendering preview…",
-        "preview_error": "Preview failed: {err}",
-        "preview_rendered": "{in_size} → {out_size} · q{q}",
-        # ── Folder watcher ──
-        "watch_title": "Folder Watcher",
-        "watch_dir": "Watch directory",
-        "watch_recursive": "Include subfolders",
-        "watch_outdir": "Output dir (blank = same folder)",
-        "watch_format": "Output format",
-        "watch_quality": "Quality",
-        "watch_remove_original": "Delete original after processing",
-        "watch_start": "Start watching",
-        "watch_stop": "Stop",
-        "watch_running": "Watching…",
-        "watch_stopped": "Stopped",
-        "watch_processed": "Processed {n} files",
-        "watch_no_dir": "Pick a directory to watch",
-        "watch_no_watchdog": "watchdog not installed — pip install photo-s-tools[watch]",
-        # ── Contact sheet ──
-        "contact_title": "Contact Sheet",
-        "contact_output": "Output file",
-        "contact_cols": "Columns",
-        "contact_thumb": "Thumbnail WxH",
-        "contact_caption": "Show filenames",
-        "contact_bg": "Background (#RRGGBB)",
-        "contact_generate": "Generate",
-        "contact_done": "Saved: {path}",
-        "contact_failed": "Generation failed: {err}",
-        "contact_open": "Open",
-        "contact_need_files": "Add and check images first",
-        "contact_bad_bg": "Invalid background color, using black",
-        # ── HDR merge ──
-        "hdr_title": "HDR Merge",
-        "hdr_need_files": "Check at least 2 bracketed exposures",
-        "hdr_count": "Merging {n} exposures",
-        "hdr_output": "Output file",
-        "hdr_align": "Align handheld (AlignMTB, kills ghosting)",
-        "hdr_merge": "Merge HDR",
-        "hdr_done": "Saved: {out}",
-        "hdr_failed": "Merge failed: {err} (needs pip install photo-s-tools[enhance])",
-        # ── Cull ──
-        "cull_title": "Cull Filter",
-        "cull_overexposed": "Overexposed max %",
-        "cull_underexposed": "Underexposed max %",
-        "cull_lum_min": "Luminance min (0-1)",
-        "cull_lum_max": "Luminance max (0-1)",
-        "cull_sharp": "Sharpness min",
-        "cull_scan": "Scan",
-        "cull_apply": "Keep only matches",
-        "cull_kept": "Matched {kept}/{total}",
-        "cull_failed": "Scan failed: {err}",
-        "cull_no_files": "No files in the list",
-        "cull_processing": "Cannot apply while processing",
-        "undo_cull": "Undo cull (restore {n})",
-        # ── Checksums ──
-        "hash_title": "Checksums",
-        "hash_tab_gen": "Generate",
-        "hash_tab_verify": "Verify",
-        "hash_output": "Output file",
-        "hash_generate": "Generate",
-        "hash_done": "Written {path} ({n} entries)",
-        "hash_failed": "Failed: {err}",
-        "hash_choose": "Choose manifest",
-        "hash_verify": "Verify",
-        "hash_total": "{n} entries",
-        "hash_ok": "OK {n}",
-        "hash_missing": "Missing {n}",
-        "hash_mismatched": "Mismatched {n}",
-        "hash_all_ok": "All OK",
-        "hash_open": "Open",
-        "hash_no_files": "Nothing to hash",
-        # ── Batch rename ──
-        "rename_btn": "Rename",
-        "rename_title": "Batch Rename",
-        "rename_pattern_lbl": "Name template",
-        "rename_mode_inplace": "Rename in place",
-        "rename_mode_copy": "Copy to folder",
-        "rename_overwrite": "Overwrite existing files",
-        "rename_col_old": "Original",
-        "rename_col_new": "New name",
-        "rename_col_status": "Status",
-        "rename_status_conflict": "Conflict · auto-suffix",
-        "rename_conflict_note": "Duplicate name in batch; will be saved as {name}",
-        "rename_counts": "{n} files · {c} conflicts · {e} errors",
-        "rename_preview_updating": "Updating preview…",
-        "rename_need_dir": "Choose an output folder first",
-        "rename_execute": "Rename files",
-        "rename_confirm": "Rename {n} files as previewed? This cannot be undone.",
-        "rename_done": "Done: {ok} renamed ({c} auto-suffixed) · {e} failed",
-        # ── Presets ──
-        "presets_title": "Presets",
-        "presets_list": "Presets",
-        "presets_name": "Name",
-        "presets_desc": "Description",
-        "presets_save": "Save current settings",
-        "presets_load": "Load",
-        "presets_delete": "Delete",
-        "presets_saved": "Saved",
-        "presets_loaded": "Loaded: {name}",
-        "presets_deleted": "Deleted: {name}",
-        "presets_name_required": "Enter a preset name",
-        "presets_load_failed": "Failed to load: {name}",
-        "presets_empty": "(empty)",
-        "presets_confirm_delete": "Delete preset {name}?",
-        # ── Multi-image compare ──
-        "compare_btn": "Compare",
-        "compare_view_title": "Compare Images",
-        "compare_need_two": "Check at least 2 images to compare (up to 4 shown)",
-        "compare_hint": "Wheel to zoom · drag to pan (both apply to the image under the cursor) · double-click resets all",
-        "compare_sync_zoom": "Sync zoom",
-        "compare_loading": "Loading…",
-    },
-}
 
 
 # ── Flat button (renders colors correctly on macOS Aqua) ─────────────────────
 
-class FlatButton(tk.Canvas):
-    """A flat, rounded-pill button that honors colors on every platform.
-
-    tk.Button on macOS Aqua ignores custom colors entirely, so the button is
-    drawn on a Canvas: a rounded rectangle (polygon with smooth corners)
-    plus centered text. Hover swaps the fill, a disabled state greys the
-    button and blocks clicks. ``configure(text=..., bg=..., fg=...,
-    state=...)`` keeps the classic widget API so callers (e.g. the
-    copy-flash in the settings dialog) need no changes.
-    """
-
-    def __init__(self, master, text, command, bg, fg="white",
-                 hover_bg=None, font=None, padx=16, pady=7,
-                 border_color=None):
-        self._command = command
-        self._bg = bg
-        self._fg = fg
-        self._hover_bg = hover_bg or bg
-        self._border = border_color
-        self._font = font or FONT_BUTTON
-        self._padx, self._pady = padx, pady
-        self._state = "normal"
-        self._text = text
-        self._fill = bg  # current rendered fill (hover-aware)
-        try:
-            super().__init__(
-                master, bg=master.cget("bg"), highlightthickness=0, bd=0,
-                cursor="pointinghand",
-            )
-        except Exception:
-            # Some environments (e.g. headless Xvfb) lack the 'pointinghand'
-            # cursor; degrade to the default cursor instead of failing.
-            super().__init__(
-                master, bg=master.cget("bg"), highlightthickness=0, bd=0,
-            )
-        self._measure_and_redraw()
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-        self.bind("<Button-1>", self._on_click)
-        # keyboard accessibility: Canvas widgets are not focus targets by
-        # default, so every FlatButton was mouse-only
-        self.configure(takefocus=True)
-        self.bind("<Return>", self._on_key_activate)
-        self.bind("<space>", self._on_key_activate)
-
-    # ── internals ─────────────────────────────────────────────────────────
-
-    def _measure_and_redraw(self):
-        """Size the canvas to the text, then (re)draw the pill + label."""
-        f = tkfont.Font(font=self._font)
-        w = f.measure(self._text) + 2 * self._padx + 4
-        h = f.metrics("linespace") + 2 * self._pady
-        # bypass the FlatButton.configure override (avoid recursion)
-        tk.Canvas.configure(self, width=w, height=h)
-        self.delete("all")
-        radius = h // 2  # full pill
-        pts = [radius, 1, w - radius, 1, w - 1, 1, w - 1, radius,
-               w - 1, h - radius, w - 1, h - 1, w - radius, h - 1,
-               radius, h - 1, 1, h - 1, 1, h - radius, 1, radius, 1, 1]
-        fill = COLORS["border"] if self._state == "disabled" else self._fill
-        outline = self._border or fill
-        self.create_polygon(pts, smooth=True, fill=fill, outline=outline)
-        text_color = (COLORS["text_secondary"] if self._state == "disabled"
-                      else self._fg)
-        self.create_text(w / 2, h / 2, text=self._text, fill=text_color,
-                         font=self._font)
-
-    def configure(self, cnf=None, **kw):
-        if isinstance(cnf, dict):
-            kw.update(cnf)
-        changed = bool(kw)
-        old_bg, old_hover = self._bg, self._hover_bg
-        for key in ("text", "bg", "fg", "hover_bg", "border_color"):
-            if key in kw:
-                setattr(self, "_" + key, kw.pop(key))
-        # keep the rendered fill in sync with new colors
-        if self._fill == old_bg:
-            self._fill = self._bg  # idle → follow the new base color
-        if self._fill == old_hover:
-            self._fill = self._hover_bg  # hovering → new hover color
-        if "state" in kw:
-            self._state = kw.pop("state")
-        if kw:
-            tk.Canvas.configure(self, **kw)
-        if changed:
-            self._measure_and_redraw()
-
-    config = configure
-
-    def cget(self, key):
-        if key == "state":
-            return self._state
-        if key == "text":
-            return self._text
-        if key == "bg":
-            return self._fill
-        if key == "fg":
-            return self._fg
-        return super().cget(key)
-
-    def _is_enabled(self):
-        return self._state != "disabled"
-
-    def _on_key_activate(self, _event):
-        if self._is_enabled() and self._command:
-            self._command()
-        return "break"
-
-    def _on_enter(self, _event):
-        if self._is_enabled() and self._fill != self._hover_bg:
-            self._fill = self._hover_bg
-            self._measure_and_redraw()
-
-    def _on_leave(self, _event):
-        if self._fill != self._bg:
-            self._fill = self._bg
-            self._measure_and_redraw()
-
-    def _on_click(self, _event):
-        if self._is_enabled() and self._command:
-            self._command()
 
 
-def _open_image_safe(path):
-    """Open a PhotoS-supported image for GUI display (PIL cannot open
-    RAW — falls back to the engine loader which handles rawpy/HEIC
-    with fallbacks). Raises on anything unreadable; callers catch."""
-    from PIL import Image
-    try:
-        return Image.open(path)
-    except Exception:
-        from .engine import _get_image
-        return _get_image(path)
 
 
-def _mask_spec_string(name, kind, params, feather, invert) -> str:
-    """Serialize one mask spec tuple -> compact string (shared by the
-    mask workflow OK handler and the v1.7 dialog — they duplicated this
-    and drifted: combo crashed both, _masks_ok missed object/color).
-    """
-    def _n(v):
-        v = round(float(v), 4)
-        return str(int(v)) if v == int(v) else str(v)
-
-    if kind == "brush":
-        # 减模式点存 (x, y, -r)：序列化成 -x,y,r（负号在 x 位，与
-        # MaskSpec.to_string 一致；-r 在半径位 parser 不认）
-        seg = f"{name}:brush:" + "|".join(
-            (f"-{_n(x)},{_n(y)},{_n(-r)}" if r < 0 else
-             f"{_n(x)},{_n(y)},{_n(r)}")
-            for x, y, r in params)
-    elif kind in ("subject", "person"):
-        seg = f"{name}:{kind}"
-    elif kind == "object":
-        seg = f"{name}:object:{params[0] if params else 'car'}"
-    elif kind == "color":
-        p = [int(round(float(v))) for v in params[:3]]
-        seg = f"{name}:color:{_n(p[0])},{_n(p[1])},{_n(p[2])}"
-        if len(params) > 3:
-            seg += f",tol={_n(float(params[3]))}"
-    elif kind == "combo":
-        a, op, b = params
-        seg = f"{name}:combo:{a}{op}{b}"
-    else:
-        seg = f"{name}:{kind}:" + ",".join(_n(p) for p in params)
-    if feather:
-        seg += f",feather={_n(feather)}"
-    if invert:
-        seg += ",invert"
-    return seg
 
 
-def _exif_datetime_str(meta):
-    """Normalize meta['date']/['time'] ('YYYY-MM-DD' / 'HH-MM-SS' as read
-    by read_exif_metadata) into the EXIF DateTimeOriginal form
-    'YYYY:MM:DD HH:MM:SS' shown in the review editor's date field."""
-    d = (meta.get("date") or "").replace("-", ":")
-    t = (meta.get("time") or "").replace("-", ":")
-    return (d + " " + t).strip()
 
 
-def canvas_unbind_safe(widget):
-    """Drop any leftover global mousewheel binding from a destroyed panel.
-
-    bind_all is interp-global: destroying the settings card does not remove
-    its handler, and a stale one would target a destroyed canvas. Called at
-    the top of every settings-panel build.
-    """
-    try:
-        widget.unbind_all("<MouseWheel>")
-    except Exception:
-        pass
 
 
-class _ZoomPanState:
-    """Tk-free zoom/pan state for the multi-image compare viewer.
-
-    zoom = 1.0 fits the whole image; the visible window is the 1/zoom
-    fraction of the source centered on (fx, fy) — image-fraction
-    coordinates in [0, 1]. Each compare panel owns one instance: wheel
-    zoom and drag pan target a single instance by default, or every
-    instance when the viewer's sync-zoom checkbox is on. Pure math:
-    no tkinter import, fully unit-testable.
-    """
-
-    MIN_ZOOM = 1.0
-    MAX_ZOOM = 16.0
-
-    def __init__(self):
-        self.zoom = self.MIN_ZOOM
-        self.fx = 0.5
-        self.fy = 0.5
-
-    def fit(self):
-        """Reset to the fit-the-whole-image view."""
-        self.zoom = self.MIN_ZOOM
-        self.fx = self.fy = 0.5
-
-    def zoom_at(self, factor):
-        """Scale zoom by ``factor``, clamped to [1, 16]. Landing back on
-        1.0 re-centers the view (a fit view has nothing to pan)."""
-        self.zoom = min(self.MAX_ZOOM,
-                        max(self.MIN_ZOOM, self.zoom * factor))
-        if self.zoom <= self.MIN_ZOOM:
-            self.fx = self.fy = 0.5
-        else:
-            self._clamp_center()
-
-    def pan(self, dfx, dfy):
-        """Move the center by (dfx, dfy) in image-fraction units."""
-        self.fx += dfx
-        self.fy += dfy
-        self._clamp_center()
-
-    def _clamp_center(self):
-        # The visible half-extent is 1/(2*zoom); keep the center at least
-        # that far from every edge so the window never leaves the image.
-        # At zoom == 1 the range degenerates to 0.5 — pan is a no-op.
-        m = 0.5 / self.zoom
-        self.fx = min(1.0 - m, max(m, self.fx))
-        self.fy = min(1.0 - m, max(m, self.fy))
 
 
 # ── Main Application ────────────────────────────────────────────────────────
@@ -1678,17 +135,13 @@ class PhotoSApp:
 
     def __init__(self, root):
         self.root = root
-        # Per-monitor DPI awareness on Windows: without it Tk renders
-        # blurry on scaled displays and mouse coordinates misalign.
-        if sys.platform == "win32":
-            try:
-                from ctypes import windll
-                windll.shcore.SetProcessDpiAwareness(1)
-            except Exception:
-                pass
+        # DPI awareness on Windows: without it Tk renders blurry on
+        # scaled displays and mouse coordinates misalign (theme.py owns
+        # the escalating per-monitor-v2 chain).
+        apply_dpi_awareness()
         # Startup language: persisted user choice > PHOTO_S_LANG env >
         # system detection. DEFAULT_LANG stays as the _t missing-key fallback.
-        from . import i18n
+        from .. import i18n
         self.lang = i18n.resolve_language(use_config=False, use_persisted=True)
         self.dark_mode = _system_dark_mode()
         # COLORS is module-global and may be left flipped by a previous
@@ -1697,11 +150,17 @@ class PhotoSApp:
         # THIS instance's dark_mode.
         _apply_palette(self.dark_mode)
         self.root.title(self._t("window_title"))
-        _saved_geom = self._load_gui_state().get("geometry")
-        self.root.geometry(_saved_geom or f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
+        _gui_state = self._load_gui_state()
+        self.root.geometry(_gui_state.get("geometry")
+                           or f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         self.root.minsize(MIN_WIDTH, MIN_HEIGHT)
         self.root.configure(bg=COLORS["bg"])
         self.root.protocol("WM_DELETE_WINDOW", self._on_main_close)
+
+        # Active workspace module (v2.0): restored across restarts
+        self._active_module = _gui_state.get("module")
+        if self._active_module not in MODULES:
+            self._active_module = "library"
 
         # State
         self.files: List[str] = []
@@ -1828,7 +287,10 @@ class PhotoSApp:
         # image on each refresh freezes the UI on RAW files
         self._preview_tempdirs: set = set()
         self._dims_cache: dict = {}
-        self._thumb_cache: dict = {}   # (path, size, mtime) → PIL Image (False = failed)
+        # Byte-bounded LRU (v2.0): plain dict kept every decode alive for
+        # the session — a 5k-photo folder could pin GBs of PIL images.
+        # False = failed-decode marker (see _drain_thumbnails).
+        self._thumb_cache = ThumbCache()
         self._thumb_decoding: set = set()  # cache keys with a RAW decode in flight
         self._thumb_size = 96          # file-list thumbnail edge px
         self._pending_thumbs: list = []   # (label, path, cache_key) queue
@@ -1837,12 +299,31 @@ class PhotoSApp:
         self.rename_pattern = tk.StringVar(value="")
         self.folder_pattern = tk.StringVar(value="")
         self.jobs = tk.StringVar(value=str(auto_jobs()))  # parallel workers
+        # Develop module state (v2.0 workspace) — the embedded preview
+        # renders through the real pipeline with a debounce loop, like
+        # the preview dialog but in-panel.
+        self._dev_selected = ""            # path currently in the viewer
+        self._dev_strip_sig = None         # files-tuple the filmstrip built
+        self._dev_render_state = {"sig": None, "stable": 0,
+                                  "inflight": False, "rendered": None,
+                                  "before_photo": None, "after_photo": None,
+                                  "tempdir": None}
+        self._dev_img_cache = ThumbCache(max_bytes=64 * 1024 * 1024)
+        self._dev_show_before = tk.BooleanVar(value=False)
+        self._dev_bus = UiBus(self.root)   # drained by _dev_tick; never started
 
         self._configure_ttk_styles()
 
         # Build UI
         self._build_ui()
         self._bind_global_shortcuts()
+
+        # System-appearance follower (v2.0): a manual toggle pins the
+        # choice until restart (see _recheck_system_theme).
+        self._theme_user_override = False
+        self._theme_poll_after = None
+        self.root.bind("<FocusIn>", self._on_focus_theme_check, add="+")
+        self._schedule_theme_poll()
 
         # Periodic update for progress polling
         self._progress_lock = threading.Lock()
@@ -1882,26 +363,101 @@ class PhotoSApp:
             except tk.TclError:
                 pass
 
-    def _set_language(self, lang):
-        """Switch UI language by rebuilding the interface.
+    # ── Live language / theme switching (v2.0) ───────────────────────────────
+    # Switches used to destroy and rebuild the whole UI (hence the old
+    # "every tk.Variable must live in __init__" rule). Now the existing
+    # widget tree is retranslated / recolored in place: scroll position,
+    # expanded sections and row selection survive a switch.
 
-        All user state lives in tk Variables and self.files, so a rebuild
-        loses nothing. The language combobox is disabled while processing
-        (via _toggle_settings), so a rebuild can never interrupt a batch.
+    def _walk_widgets(self, parent):
+        """Yield every widget in the subtree, depth-first."""
+        for child in parent.winfo_children():
+            yield child
+            yield from self._walk_widgets(child)
+
+    @staticmethod
+    def _translation_remap(old_lang, new_lang):
+        """old-language UI text → new-language UI text.
+
+        Built from the STRINGS reverse map. When several keys share one
+        old text (e.g. zh "亮度" is both the brightness label and the HSL
+        luminance label), the majority target wins — a tie drops the
+        entry (staying in the old language is safe, mis-translating is
+        not)."""
+        old = STRINGS.get(old_lang) or {}
+        new = STRINGS.get(new_lang) or {}
+        votes = {}   # old text → {new text: count}
+        for key, text in old.items():
+            tgt = new.get(key)
+            if not isinstance(text, str) or tgt is None:
+                continue
+            votes.setdefault(text, {}).setdefault(tgt, 0)
+            votes[text][tgt] += 1
+        remap = {}
+        for text, tally in votes.items():
+            best = max(tally.items(), key=lambda kv: kv[1])
+            runners = [t for t, n in tally.items()
+                       if n == best[1] and t != best[0]]
+            if not runners:                     # clear majority/unique
+                remap[text] = best[0]
+        return remap
+
+    def _retranslate_widgets(self, old_lang):
+        """Remap every static UI string in the widget tree to the new
+        language (v2.0 — replaces the destroy+rebuild switch).
+
+        Static texts were built from STRINGS[old], so the reverse map
+        identifies them; texts it doesn't recognize (user content,
+        numbers, paths, formatted strings) are left alone. Dynamic labels
+        (file count, mode rows, progress) are recomputed by their owners
+        right after this call. Combobox value lists remap entry-wise and
+        keep their selection translated.
         """
+        remap = self._translation_remap(old_lang, self.lang)
+        if not remap:
+            return
+        for w in self._walk_widgets(self.root):
+            try:
+                t = w.cget("text")
+            except tk.TclError:
+                t = None
+            if isinstance(t, str) and t in remap:
+                try:
+                    w.configure(text=remap[t])
+                except tk.TclError:
+                    pass
+            if isinstance(w, ttk.Combobox):
+                try:
+                    vals = list(w.cget("values"))
+                except tk.TclError:
+                    vals = []
+                if any(str(v) in remap for v in vals):
+                    cur = w.get()
+                    w.configure(values=[remap.get(str(v), v) for v in vals])
+                    if cur in remap:
+                        w.set(remap[cur])
+
+    def _set_language(self, lang):
+        """Switch UI language live (v2.0): static texts remap in place,
+        dynamic labels recompute — nothing is destroyed, so scroll
+        position and section state survive. Dialogs still close via
+        their WM protocol (they were built with the old language and may
+        hold formatted text the remap can't reach)."""
         if lang == self.lang:
             return
+        old = self.lang
         self.lang = lang
         self.root.title(self._t("window_title"))
-
         self._close_dialogs()
-        for child in self.root.winfo_children():
-            child.destroy()
-        self._build_ui()
-
-        # Re-apply dynamic state to the freshly built widgets
+        self._retranslate_widgets(old)
+        try:
+            self.lang_combo.current(0 if lang == "zh" else 1)
+        except tk.TclError:
+            pass
+        # Dynamic labels re-rendered in the new language by their owners
         self._refresh_file_list()
         self._on_mode_change()
+        self._update_count_label()
         self._update_stats()
         if not self.processing:
             self.progress_label.config(
@@ -1937,6 +493,14 @@ class PhotoSApp:
             ("<Control-d>", self._show_dedup, False),
             ("<Command-g>", self._show_gallery_export, False),
             ("<Control-g>", self._show_gallery_export, False),
+            ("<Command-1>", lambda: self._show_module("library"), True),
+            ("<Control-1>", lambda: self._show_module("library"), True),
+            ("<Command-2>", lambda: self._show_module("develop"), True),
+            ("<Control-2>", lambda: self._show_module("develop"), True),
+            ("<Command-3>", lambda: self._show_module("export"), True),
+            ("<Control-3>", lambda: self._show_module("export"), True),
+            ("<Command-4>", lambda: self._show_module("tools"), True),
+            ("<Control-4>", lambda: self._show_module("tools"), True),
             ("<Command-z>", self._undo, False),
             ("<Control-z>", self._undo, False),
             ("<Command-Z>", self._redo, False),
@@ -1954,57 +518,121 @@ class PhotoSApp:
             self._cancel_processing()
 
     def _toggle_theme(self):
-        """Flip between dark and light palette (manual override of the
-        system appearance). Rebuilds the UI like _set_language — all state
-        lives in tk Variables, so nothing is lost."""
+        """Flip between dark and light palette, live (v2.0): palette
+        values remap in place across the widget tree, ttk styles follow
+        via _configure_ttk_styles — nothing is destroyed. A manual toggle
+        pins the choice: the system-appearance follower stands down until
+        restart."""
         self.dark_mode = not self.dark_mode
+        self._theme_user_override = True
+        self._apply_theme_live()
+
+    def _apply_theme_live(self):
+        """Re-apply the palette for self.dark_mode without rebuilding."""
+        old_colors = dict(COLORS)          # old palette values, by token
         _apply_palette(self.dark_mode)
+        remap = {old: COLORS[k] for k, old in old_colors.items()}
         self._configure_ttk_styles()  # styles persist — must follow the palette
-        self.root.configure(bg=COLORS["bg"])
         self._close_dialogs()
-        for child in self.root.winfo_children():
-            child.destroy()
-        self._build_ui()
+        self._recolor_widgets(remap)
+        self.root.configure(bg=COLORS["bg"])
+        try:
+            self.theme_btn.configure(
+                text="☀️" if self.dark_mode else "🌙")
+        except (AttributeError, tk.TclError):
+            pass  # button not built yet (early theme flip in tests)
         self._refresh_file_list()
         self._on_mode_change()
+        self._update_count_label()
         self._update_stats()
         if not self.processing:
             self.progress_label.config(
                 text=self._t("ready"), fg=COLORS["text_secondary"])
 
+    def _recolor_widgets(self, remap):
+        """Walk the tree and remap bg/fg values from the old palette to
+        the new one. Widgets colored outside the palette (HSL chips, the
+        color wheel) don't match any entry and stay untouched."""
+        for w in self._walk_widgets(self.root):
+            for opt in ("bg", "fg"):
+                try:
+                    cur = w.cget(opt)
+                except tk.TclError:
+                    continue
+                if cur in remap:
+                    try:
+                        w.configure(**{opt: remap[cur]})
+                    except tk.TclError:
+                        pass
+            # FlatButton extras not exposed through bg/fg cget
+            hover = getattr(w, "_hover_bg", None)
+            if hover in remap:
+                try:
+                    w.configure(hover_bg=remap[hover])
+                except tk.TclError:
+                    pass
+            border = getattr(w, "_border", None)
+            if border in remap:
+                try:
+                    w.configure(border_color=remap[border])
+                except tk.TclError:
+                    pass
+
+    # ── System appearance follower (v2.0) ────────────────────────────────────
+    # Re-checks the OS appearance on window focus and every 30 s; when it
+    # changed AND the user hasn't toggled manually, the theme flips live.
+    # A manual toggle pins the choice until restart.
+
+    def _schedule_theme_poll(self):
+        try:
+            self._theme_poll_after = self.root.after(
+                30_000, self._poll_system_theme)
+        except tk.TclError:
+            pass  # root already gone
+
+    def _poll_system_theme(self):
+        self._recheck_system_theme()
+        self._schedule_theme_poll()
+
+    def _recheck_system_theme(self):
+        if self._theme_user_override or self.processing:
+            return
+        try:
+            want = _system_dark_mode()
+        except Exception:
+            return
+        if want != self.dark_mode:
+            self.dark_mode = want
+            self._apply_theme_live()
+
+    def _on_focus_theme_check(self, _event=None):
+        self._recheck_system_theme()
+
     # ── Layout memory (~/.photos/gui_state.json) ─────────────────────────────
 
     @staticmethod
     def _state_file():
-        from pathlib import Path
-        return Path.home() / ".photos" / "gui_state.json"
+        return state_file()
 
     def _load_gui_state(self) -> dict:
         """Restore window geometry / thumbnail size across restarts."""
+        state = load_state()
         try:
-            import json
-            with open(self._state_file(), encoding="utf-8") as f:
-                state = json.load(f)
-            self._thumb_size = int(state.get("thumb_size", self._thumb_size))
+            self._thumb_size = int(state.get("thumb_size",
+                                             self._thumb_size))
             if self._thumb_size not in (48, 96, 144):
                 self._thumb_size = 96
-            return state
         except Exception:
-            return {}
+            pass
+        return state
 
     def _save_gui_state(self):
         """Persist window geometry + thumbnail size; never crashes on save."""
-        try:
-            import json
-            state = {
-                "geometry": self.root.geometry(),
-                "thumb_size": self._thumb_size,
-            }
-            p = self._state_file()
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(state), encoding="utf-8")
-        except Exception:
-            pass
+        save_state({
+            "geometry": self.root.geometry(),
+            "thumb_size": self._thumb_size,
+            "module": self._active_module,
+        })
 
     def _on_main_close(self):
         # Request cancellation of any in-flight batch before the Tk loop
@@ -2027,7 +655,7 @@ class PhotoSApp:
         self._set_language(lang)
         # Persist the user's choice so it survives restarts (auto-detect only
         # applies on the first launch / when nothing is stored).
-        from . import i18n
+        from .. import i18n
         i18n.save_language(lang)
 
     def _configure_ttk_styles(self):
@@ -2155,38 +783,592 @@ class PhotoSApp:
         self.lang_combo.bind("<<ComboboxSelected>>", self._on_language_selected)
         self.lang_combo.pack(side="right", padx=(0, 8), pady=(6, 0))
 
-        # Theme toggle (right side, before language)
+        # Theme toggle (right side, before language). Stored as an
+        # attribute: the icon flips live on theme switches (no rebuild).
         theme_icon = "☀️" if self.dark_mode else "🌙"
-        theme_btn = FlatButton(
+        self.theme_btn = FlatButton(
             title_frame, text=theme_icon, command=self._toggle_theme,
             bg=COLORS["bg"], fg=COLORS["text_secondary"],
             hover_bg=COLORS["divider"], font=FONT_SMALL, padx=8, pady=4,
         )
-        theme_btn.pack(side="right", padx=(0, 4), pady=(6, 0))
+        self.theme_btn.pack(side="right", padx=(0, 4), pady=(6, 0))
 
-        # ── Main content area (two columns) ─────────────────────────────────
-        main_frame = tk.Frame(self.root, bg=COLORS["bg"])
-        main_frame.pack(fill="both", expand=True, padx=22, pady=14)
+        # ── Module bar (v2.0 workspace) ─────────────────────────────────────
+        module_bar = tk.Frame(self.root, bg=COLORS["bg"])
+        module_bar.pack(fill="x", padx=22, pady=(12, 0))
 
-        # Right column: settings — packed FIRST so its fixed width is always
-        # honored; the file list gets whatever space remains
-        right_frame = tk.Frame(main_frame, bg=COLORS["bg"], width=SETTINGS_WIDTH)
-        right_frame.pack(side="right", fill="y", padx=(8, 0))
-        right_frame.pack_propagate(False)
+        self._module_btns = {}
+        for name in MODULES:
+            btn = FlatButton(
+                module_bar, text=self._t("module_" + name),
+                command=lambda n=name: self._show_module(n),
+                bg=COLORS["bg"], fg=COLORS["text_secondary"],
+                hover_bg=COLORS["divider"], border_color=COLORS["bg"],
+                font=FONT_BUTTON, padx=18, pady=6,
+            )
+            btn.pack(side="left", padx=(0, 6))
+            self._module_btns[name] = btn
 
-        self._build_settings_panel(right_frame)
+        # ── Content area: one frame per module, switched by packing ────────
+        # All four are built once at startup (widgets/tests rely on them
+        # existing regardless of visibility); _show_module only (un)packs.
+        content = tk.Frame(self.root, bg=COLORS["bg"])
+        content.pack(fill="both", expand=True, padx=22, pady=(10, 8))
 
-        # Left column: file list
-        left_frame = tk.Frame(main_frame, bg=COLORS["bg"])
-        left_frame.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        self._module_frames = {}
+        for name in MODULES:
+            self._module_frames[name] = tk.Frame(content, bg=COLORS["bg"])
 
-        self._build_file_panel(left_frame)
+        # Library: the file list, full width (v2.0 — was the left column)
+        self._build_file_panel(self._module_frames["library"])
+        # Develop: preview workspace — the edit tools live beside the
+        # preview (histogram + ADJUST tab in the right column)
+        self._build_develop_panel(self._module_frames["develop"])
+        # Export: the queue of finished photos + the export settings
+        export_row = tk.Frame(self._module_frames["export"], bg=COLORS["bg"])
+        export_row.pack(fill="both", expand=True)
+        self._build_export_queue(export_row)
+        export_col = tk.Frame(export_row, bg=COLORS["bg"],
+                              width=SETTINGS_WIDTH)
+        export_col.pack(side="right", fill="y", padx=(10, 0))
+        export_col.pack_propagate(False)
+        self._build_settings_panel(export_col, self._dev_settings_host)
+        # Tools: workflow launchers
+        self._build_tools_panel(self._module_frames["tools"])
+
+        self._show_module(self._active_module)
 
         # ── Bottom: progress and actions ────────────────────────────────────
         bottom_frame = tk.Frame(self.root, bg=COLORS["bg"])
         bottom_frame.pack(fill="x", padx=22, pady=(0, 18))
 
         self._build_bottom_panel(bottom_frame)
+
+    # ── Workspace modules (v2.0) ────────────────────────────────────────────
+
+    # Tools module: (title key, description key, PhotoSApp opener method).
+    # Each card launches the existing workflow dialog; in-place non-modal
+    # panels are the follow-up batch (plan §4.2).
+    TOOLS_CARDS = (
+        ("review_title", "tools_desc_review", "_show_review"),
+        ("dedup_title", "tools_desc_dedup", "_show_dedup"),
+        ("compare_view_title", "tools_desc_compare", "_show_compare"),
+        ("gallery_title", "tools_desc_gallery", "_show_gallery_export"),
+        ("contact_title", "tools_desc_contact", "_show_contact_sheet"),
+        ("cull_title", "tools_desc_cull", "_show_cull"),
+        ("hash_title", "tools_desc_hash", "_show_hash"),
+        ("hdr_title", "tools_desc_hdr", "_show_hdr"),
+        ("watch_title", "tools_desc_watch", "_show_watch"),
+        ("rename_title", "tools_desc_rename", "_show_rename"),
+        ("presets_title", "tools_desc_presets", "_show_presets"),
+        ("analyze_title", "tools_desc_analyze", "_show_analysis"),
+    )
+
+    def _show_module(self, name):
+        """Switch the visible workspace module. Pure pack switching — no
+        widget is created or destroyed, so module state (filmstrip,
+        scroll positions) survives round-trips."""
+        if name not in MODULES:
+            name = "library"
+        self._active_module = name
+        for frame in self._module_frames.values():
+            frame.pack_forget()
+        self._module_frames[name].pack(fill="both", expand=True)
+        for n, btn in self._module_btns.items():
+            if n == name:
+                btn.configure(bg=COLORS["card"], fg=COLORS["text"],
+                              border_color=COLORS["border"])
+            else:
+                btn.configure(bg=COLORS["bg"], fg=COLORS["text_secondary"],
+                              border_color=COLORS["bg"])
+        if name == "develop":
+            self._dev_refresh_filmstrip()
+        elif name == "export":
+            self._refresh_export_queue()
+
+    def _build_tools_panel(self, parent):
+        """Tools module: a grid of workflow launcher cards. The cards are
+        ordinary widgets, so the batch lockout (_toggle_settings) disables
+        them like the toolbar buttons."""
+        holder = tk.Frame(parent, bg=COLORS["bg"])
+        holder.pack(fill="both", expand=True)
+        grid = tk.Frame(holder, bg=COLORS["bg"])
+        grid.pack(anchor="n", fill="x", pady=(4, 0))
+        for col in range(3):
+            grid.columnconfigure(col, weight=1, uniform="tools")
+        for i, (title_key, desc_key, opener) in enumerate(self.TOOLS_CARDS):
+            card = tk.Frame(grid, bg=COLORS["card"], bd=0,
+                            highlightthickness=0)
+            card.grid(row=i // 3, column=i % 3, sticky="nsew",
+                      padx=(0, 8) if i % 3 < 2 else 0, pady=(0, 8))
+            inner = tk.Frame(card, bg=COLORS["card"])
+            inner.pack(fill="both", expand=True, padx=12, pady=(10, 4))
+            tk.Label(inner, text=self._t(title_key), font=FONT_SECTION,
+                     fg=COLORS["text"], bg=COLORS["card"],
+                     anchor="w").pack(fill="x")
+            tk.Label(inner, text=self._t(desc_key), font=FONT_SMALL,
+                     fg=COLORS["text_secondary"], bg=COLORS["card"],
+                     anchor="w", wraplength=220,
+                     justify="left").pack(fill="x", pady=(4, 8))
+            FlatButton(
+                inner, text=self._t("tools_open"),
+                command=getattr(self, opener),
+                bg=COLORS["accent"],
+                hover_bg=COLORS["accent_hover"], font=FONT_SMALL,
+                padx=12, pady=4,
+            ).pack(anchor="w", pady=(0, 8))
+
+    # ── Export module: queue of finished photos (v2.0) ──────────────────────
+
+    def _build_export_queue(self, parent):
+        """Export module left card: the photos that will be exported
+        (the checked set — check state is managed in Library)."""
+        card = tk.Frame(parent, bg=COLORS["card"], bd=0, highlightthickness=0)
+        card.pack(side="left", fill="both", expand=True)
+
+        head = tk.Frame(card, bg=COLORS["card"])
+        head.pack(fill="x", padx=14, pady=(12, 0))
+        tk.Label(head, text=self._t("export_queue"), font=FONT_SECTION,
+                 fg=COLORS["text"], bg=COLORS["card"]).pack(anchor="w")
+        tk.Label(head, text=self._t("export_queue_hint"), font=FONT_TINY,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"],
+                 wraplength=360, justify="left").pack(
+            anchor="w", pady=(2, 6))
+
+        holder = tk.Frame(card, bg=COLORS["card"])
+        holder.pack(fill="both", expand=True, padx=14, pady=(0, 14))
+        canvas = tk.Canvas(holder, bg=COLORS["card"], highlightthickness=0,
+                           bd=0)
+        sb = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        self._export_queue_inner = tk.Frame(canvas, bg=COLORS["card"])
+        qwin = canvas.create_window((0, 0), window=self._export_queue_inner,
+                                    anchor="nw")
+
+        def _sync(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas.itemconfigure(qwin, width=canvas.winfo_width())
+        self._export_queue_inner.bind("<Configure>", _sync)
+        canvas.bind("<Configure>", _sync)
+
+        def _wheel(event):
+            canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        canvas.bind("<Enter>",
+                    lambda e: canvas.bind_all("<MouseWheel>", _wheel))
+        canvas.bind("<Leave>",
+                    lambda e: canvas.unbind_all("<MouseWheel>"))
+        self._refresh_export_queue()
+
+    def _refresh_export_queue(self):
+        """Rebuild the export queue rows (called on file changes and when
+        the Export module is shown)."""
+        if not hasattr(self, "_export_queue_inner"):
+            return
+        inner = self._export_queue_inner
+        for w in inner.winfo_children():
+            w.destroy()
+        files = self._checked_files()
+        if not files:
+            tk.Label(inner, text=self._t("export_queue_empty"),
+                     font=FONT_SMALL, fg=COLORS["text_secondary"],
+                     bg=COLORS["card"]).pack(anchor="w", pady=8)
+            return
+        total = 0
+        for i, p in enumerate(files):
+            row = tk.Frame(inner, bg=COLORS["card"])
+            row.pack(fill="x", pady=1)
+            try:
+                sz = os.path.getsize(p)
+                total += sz
+                size_txt = format_size(sz)
+            except OSError:
+                size_txt = "—"
+            tk.Label(row, text="{}. {}".format(i + 1, os.path.basename(p)),
+                     font=FONT_SMALL, fg=COLORS["text"], bg=COLORS["card"],
+                     anchor="w").pack(side="left")
+            tk.Label(row, text=size_txt, font=FONT_TINY,
+                     fg=COLORS["text_secondary"],
+                     bg=COLORS["card"]).pack(side="right")
+        foot = tk.Frame(inner, bg=COLORS["card"])
+        foot.pack(fill="x", pady=(6, 0))
+        tk.Label(foot, text="{} · {}".format(
+            self._t("files_count", n=len(files)), format_size(total)),
+            font=FONT_TINY, fg=COLORS["text_secondary"],
+            bg=COLORS["card"]).pack(anchor="w")
+
+    # ── Develop module: preview workspace (v2.0) ────────────────────────────
+
+    def _build_develop_panel(self, parent):
+        """Develop: filmstrip + large preview rendered through the REAL
+        pipeline (debounced, like the preview dialog) + a persistent
+        histogram & exposure readout of the processed result."""
+        body = tk.Frame(parent, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True)
+
+        # Filmstrip: horizontally scrolling thumbnails of self.files
+        strip_canvas = tk.Canvas(parent, bg=COLORS["card"], height=92,
+                                 highlightthickness=0)
+        strip_canvas.pack(fill="x")
+        self._dev_strip_canvas = strip_canvas
+        self._dev_strip = tk.Frame(strip_canvas, bg=COLORS["card"])
+        win_id = strip_canvas.create_window((0, 0), window=self._dev_strip,
+                                            anchor="nw")
+
+        def _sync_strip(_event=None):
+            strip_canvas.configure(scrollregion=strip_canvas.bbox("all"))
+            strip_canvas.itemconfigure(
+                win_id, width=self._dev_strip.winfo_reqwidth())
+        self._dev_strip.bind("<Configure>", _sync_strip)
+
+        def _strip_wheel(event):
+            strip_canvas.xview_scroll(-1 if event.delta > 0 else 1,
+                                      "units")
+        strip_canvas.bind(
+            "<Enter>", lambda e: strip_canvas.bind_all(
+                "<MouseWheel>", _strip_wheel))
+        strip_canvas.bind(
+            "<Leave>", lambda e: strip_canvas.unbind_all("<MouseWheel>"))
+
+        # Main row: viewer card + analysis sidebar
+        main = tk.Frame(body, bg=COLORS["bg"])
+        main.pack(fill="both", expand=True, pady=(8, 0))
+
+        side = tk.Frame(main, bg=COLORS["bg"], width=SETTINGS_WIDTH)
+        side.pack(side="right", fill="y", padx=(10, 0))
+        side.pack_propagate(False)
+
+        viewer_card = tk.Frame(main, bg=COLORS["card"], bd=0,
+                               highlightthickness=0)
+        viewer_card.pack(side="left", fill="both", expand=True)
+
+        top = tk.Frame(viewer_card, bg=COLORS["card"])
+        top.pack(fill="x", padx=12, pady=(8, 0))
+        self._dev_nav_lbl = tk.Label(top, text="", font=FONT_SMALL,
+                                     fg=COLORS["text_secondary"],
+                                     bg=COLORS["card"])
+        self._dev_nav_lbl.pack(side="left")
+        self._dev_status_lbl = tk.Label(top, text="", font=FONT_SMALL,
+                                        fg=COLORS["text_secondary"],
+                                        bg=COLORS["card"])
+        self._dev_status_lbl.pack(side="right")
+
+        self._dev_image_lbl = tk.Label(viewer_card, bg=COLORS["card"],
+                                       fg=COLORS["text_secondary"],
+                                       font=FONT_BODY)
+        self._dev_image_lbl.pack(expand=True, fill="both", pady=8)
+
+        bottom_bar = tk.Frame(viewer_card, bg=COLORS["card"])
+        bottom_bar.pack(fill="x", padx=12, pady=(0, 10))
+        self._dev_toggle_btn = FlatButton(
+            bottom_bar, text=self._t("dev_show_before"),
+            command=self._dev_toggle_view, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=12,
+            pady=4)
+        self._dev_toggle_btn.pack(side="left")
+        tk.Label(bottom_bar, text=self._t("dev_hint"), font=FONT_TINY,
+                 fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).pack(side="right")
+
+        # Sidebar: histogram + readouts (rebuilt per render)
+        hist_card = tk.Frame(side, bg=COLORS["card"], bd=0,
+                             highlightthickness=0)
+        hist_card.pack(fill="x")
+        tk.Label(hist_card, text=self._t("dev_hist_title"),
+                 font=FONT_SMALL, fg=COLORS["text"], bg=COLORS["card"],
+                 anchor="w").pack(fill="x", padx=10, pady=(8, 2))
+        self._dev_hist = tk.Canvas(hist_card, height=120,
+                                   bg=COLORS["card"], highlightthickness=0)
+        self._dev_hist.pack(fill="x", padx=10)
+        self._dev_expo_lbl = tk.Label(hist_card, text="", font=FONT_SMALL,
+                                      fg=COLORS["text_secondary"],
+                                      bg=COLORS["card"], anchor="w",
+                                      justify="left")
+        self._dev_expo_lbl.pack(fill="x", padx=10, pady=(8, 2))
+        self._dev_kelvin_lbl = tk.Label(hist_card, text="", font=FONT_SMALL,
+                                        fg=COLORS["text_secondary"],
+                                        bg=COLORS["card"], anchor="w")
+        self._dev_kelvin_lbl.pack(fill="x", padx=10, pady=(0, 10))
+
+        # Edit tools host: _build_settings_panel fills this with the
+        # ADJUST tab (tone / grading / correction) below the histogram.
+        self._dev_settings_host = tk.Frame(side, bg=COLORS["card"], bd=0,
+                                           highlightthickness=0)
+        self._dev_settings_host.pack(fill="both", expand=True, pady=(8, 0))
+
+        self._dev_display_current()
+        # Debounce tick (~500ms stability ≈ 3 × 160ms), like _preview
+        self.root.after(160, self._dev_tick)
+
+    def _dev_tick(self):
+        """Poll loop: drain worker callbacks, then re-render the selected
+        photo once the options signature has been stable. Runs for the
+        app's lifetime; cheap no-op unless the Develop module is active."""
+        try:
+            self._dev_bus.drain_pending()
+            st = self._dev_render_state
+            if (self._active_module == "develop" and self._dev_selected
+                    and not self.processing):
+                cur = self._dev_current_sig()
+                if cur != st["sig"]:
+                    st["sig"] = cur
+                    st["stable"] = 0
+                else:
+                    st["stable"] += 1
+                if (st["stable"] >= 3 and not st["inflight"]
+                        and cur != st["rendered"]):
+                    self._dev_render(cur)
+            self.root.after(160, self._dev_tick)
+        except tk.TclError:
+            pass  # root gone — loop dies with it
+
+    def _dev_current_sig(self):
+        return (self._build_options(), self._dev_selected)
+
+    def _dev_render(self, sig):
+        """Launch a real-pipeline render of the selected file (worker
+        thread; results marshalled back via the dev bus)."""
+        st = self._dev_render_state
+        opts, path = sig
+        if not st["tempdir"]:
+            st["tempdir"] = tempfile.mkdtemp(prefix="photos_devpreview_")
+            self._preview_tempdirs.add(st["tempdir"])
+        st["inflight"] = True
+        render_opts = workflows.preview_options(opts, st["tempdir"])
+        self._dev_status_lbl.configure(text=self._t("dev_rendering"),
+                                       fg=COLORS["text_secondary"])
+
+        def work():
+            try:
+                result = workflows.preview_render(path, render_opts)
+            except Exception:
+                result = None
+            self._dev_bus.schedule(
+                lambda: self._dev_render_done(result, sig))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _dev_render_done(self, result, sig):
+        st = self._dev_render_state
+        st["inflight"] = False
+        if sig != self._dev_current_sig():
+            return  # stale — selection or options moved on
+        if result is None or not getattr(result, "success", False):
+            err = (getattr(result, "error", None) or "unknown")[:120]
+            self._dev_status_lbl.configure(
+                text=self._t("dev_render_failed", err=err),
+                fg=COLORS["danger"])
+            return
+        st["rendered"] = sig
+        try:
+            from PIL import Image
+            img = Image.open(result.output_path)
+            img.load()
+            st["after_photo"] = self._dev_fit_photo(img)
+        except Exception:
+            return
+        self._dev_status_lbl.configure(text="")
+        try:
+            from ..metrics import analyze_image
+            analysis = analyze_image(result.output_path)
+        except Exception:
+            analysis = {}
+        self._dev_draw_analysis(analysis)
+        self._dev_display_current()
+
+    def _dev_fit_photo(self, img):
+        """Fit a PIL image into the viewer label (LANCZOS thumbnail) and
+        wrap it as a PhotoImage. Must run on the UI thread."""
+        from PIL import Image, ImageTk
+        w = max(200, self._dev_image_lbl.winfo_width() - 16)
+        h = max(150, self._dev_image_lbl.winfo_height() - 16)
+        im = img.convert("RGB")
+        im.thumbnail((w, h), Image.LANCZOS)
+        return ImageTk.PhotoImage(im)
+
+    def _dev_toggle_view(self):
+        """Flip before/after. The button label always names the OTHER
+        view (what clicking will show)."""
+        show_before = not self._dev_show_before.get()
+        self._dev_show_before.set(show_before)
+        self._dev_toggle_btn.configure(
+            text=self._t("dev_show_before" if not show_before
+                         else "dev_show_after"))
+        self._dev_display_current()
+
+    def _dev_display_current(self):
+        st = self._dev_render_state
+        photo = st["before_photo"] if self._dev_show_before.get() \
+            else (st["after_photo"] or st["before_photo"])
+        if photo is not None:
+            self._dev_image_lbl.configure(image=photo, text="")
+            self._dev_image_lbl.image = photo
+        else:
+            self._dev_image_lbl.configure(image="")
+            self._dev_image_lbl.configure(
+                text=self._t("dev_no_selection"))
+
+    def _dev_select(self, path):
+        """Pick a photo for the viewer: reset the debounce, decode the
+        original off-thread (RAW-safe), keep any rendered 'after' until a
+        new one lands."""
+        self._dev_selected = path
+        st = self._dev_render_state
+        st.update(sig=None, stable=0, rendered=None, after_photo=None,
+                  before_photo=None)
+        try:
+            idx = self.files.index(path) + 1
+        except ValueError:
+            idx = "?"
+        self._dev_nav_lbl.configure(
+            text="{}/{} · {}".format(idx, len(self.files),
+                                     os.path.basename(path)))
+        self._dev_highlight_strip()
+        self._dev_display_current()
+
+        def work():
+            try:
+                img = _open_image_safe(path).convert("RGB")
+            except Exception:
+                img = None
+            self._dev_bus.schedule(
+                lambda: self._dev_before_ready(path, img))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _dev_before_ready(self, path, img):
+        if path != self._dev_selected or img is None:
+            return
+        st = self._dev_render_state
+        st["before_photo"] = self._dev_fit_photo(img)
+        if st["after_photo"] is None or self._dev_show_before.get():
+            self._dev_display_current()
+
+    def _dev_refresh_filmstrip(self):
+        """Rebuild the filmstrip when self.files changed (cheap no-op via
+        signature compare — called from _refresh_file_list)."""
+        if not hasattr(self, "_dev_strip"):
+            return
+        sig = tuple(self.files)
+        if sig == self._dev_strip_sig:
+            return
+        self._dev_strip_sig = sig
+        self._dev_strip_cells = {}
+        for w in self._dev_strip.winfo_children():
+            w.destroy()
+        for path in self.files:
+            cell = tk.Frame(self._dev_strip, bg=COLORS["card"],
+                            highlightthickness=2,
+                            highlightbackground=COLORS["card"])
+            cell.pack(side="left", padx=(6, 0), pady=6)
+            lbl = tk.Label(cell, text="…", width=9, height=4,
+                           bg=COLORS["card"],
+                           fg=COLORS["text_secondary"], font=FONT_TINY)
+            lbl.pack(padx=1, pady=1)
+            lbl.bind("<Button-1>", lambda e, p=path: self._dev_select(p))
+            self._dev_strip_cells[path] = (cell, lbl)
+            self._dev_load_thumb(lbl, path)
+        if self.files:
+            if not self._dev_selected or self._dev_selected not in self.files:
+                checked = self._checked_files()
+                self._dev_select(checked[0] if checked else self.files[0])
+            else:
+                self._dev_highlight_strip()
+        else:
+            self._dev_selected = ""
+            self._dev_render_state.update(
+                sig=None, rendered=None, before_photo=None,
+                after_photo=None)
+            self._dev_nav_lbl.configure(text="")
+            self._dev_display_current()
+
+    def _dev_load_thumb(self, lbl, path):
+        """Filmstrip thumbnail through the shared decode helper and a
+        small dedicated LRU (RAW decodes off the UI thread)."""
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            mtime = 0
+        key = (path, 64, mtime)
+        cached = self._dev_img_cache.get(key)
+        if cached:
+            self._dev_show_thumb(lbl, cached)
+            return
+
+        def work():
+            try:
+                img = self._decode_thumb_source(path, 64)
+            except Exception:
+                img = False
+            self._dev_img_cache[key] = img
+            if img:
+                self._dev_bus.schedule(
+                    lambda: self._dev_show_thumb(lbl, img))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _dev_show_thumb(self, lbl, img):
+        try:
+            from PIL import ImageTk
+            photo = ImageTk.PhotoImage(img)
+            lbl.configure(image=photo, text="", width=photo.width(),
+                          height=photo.height())
+            lbl.image = photo
+        except tk.TclError:
+            pass  # label destroyed with the strip rebuild
+
+    def _dev_highlight_strip(self):
+        """Accent-outline the selected filmstrip cell."""
+        for path, (cell, _lbl) in getattr(self, "_dev_strip_cells",
+                                          {}).items():
+            try:
+                cell.configure(
+                    highlightbackground=COLORS["accent"]
+                    if path == self._dev_selected else COLORS["card"])
+            except tk.TclError:
+                pass
+
+    def _dev_draw_analysis(self, analysis):
+        """Render the analysis sidebar: luma bars + R/G/B polylines on a
+        Canvas, exposure/Kelvin text below. Data-viz colors are literal
+        (not palette tokens) — they represent channel data, like the HSL
+        chips."""
+        cv = self._dev_hist
+        cv.delete("all")
+        if not analysis or not analysis.get("ok", True):
+            self._dev_expo_lbl.configure(text="")
+            self._dev_kelvin_lbl.configure(text="")
+            return
+        hist = analysis.get("histogram") or {}
+        w = max(120, cv.winfo_width())
+        h = max(60, cv.winfo_height())
+        luma = hist.get("luma") or [0] * 32
+        peak = max(max(luma), 1)
+        bw = w / 32.0
+        for i, count in enumerate(luma):
+            bh = count / peak * (h - 6)
+            cv.create_rectangle(i * bw, h - bh - 2, (i + 1) * bw - 1, h - 2,
+                                fill=COLORS["divider"], width=0)
+        for key, color in (("r", "#e0453a"), ("g", "#30a14e"),
+                           ("b", "#3478f6")):
+            data = hist.get(key)
+            if not data:
+                continue
+            peakc = max(max(data), 1)
+            pts = []
+            for i, count in enumerate(data):
+                pts += [i * bw + bw / 2,
+                        h - 3 - count / peakc * (h - 8)]
+            cv.create_line(*pts, fill=color, width=1)
+        expo = analysis.get("exposure") or {}
+        self._dev_expo_lbl.configure(text=self._t(
+            "dev_exposure_line", lum=expo.get("luminance", "—"),
+            over=expo.get("overexposed_pct", 0),
+            under=expo.get("underexposed_pct", 0),
+            blur=analysis.get("blur_score", "—")))
+        wb = analysis.get("white_balance") or {}
+        self._dev_kelvin_lbl.configure(text=self._t(
+            "dev_kelvin_line", k=wb.get("kelvin_estimate", "—"),
+            tint=wb.get("tint_gm", "—")))
 
     def _build_file_panel(self, parent):
         """Build the left-side file list panel."""
@@ -2428,8 +1610,15 @@ class PhotoSApp:
         )
         drop_hint.pack(fill="x", padx=14, pady=(0, 10))
 
-    def _build_settings_panel(self, parent):
-        """Build the right-side settings panel."""
+    def _build_settings_panel(self, parent, develop_parent):
+        """Build the settings panels (v2.0 workspace split).
+
+        ``parent`` hosts the export notebook (output / fx / metadata /
+        options). ``develop_parent`` — the Develop module's right column —
+        hosts the ADJUST tab contents as a standalone scroll area (it is
+        the only develop tab, so no notebook). The same tk.Variables back
+        both: a slider moved in Develop drives the preview there and the
+        export pipeline here."""
         # Defensive: a rebuild (theme/language) destroys the old card while
         # its Enter/Leave handlers are gone, but any bind_all left behind by
         # the old panel would target a destroyed canvas. Clear it first.
@@ -2504,10 +1693,15 @@ class PhotoSApp:
             return _make_tab_scroll(tab)
 
         OUT = _add_tab("tab_output")      # format/mode/resize/output/sizes/naming/subfolder
-        ADJ = _add_tab("tab_adjust")      # tone / composition / correction (+ LR grading)
         FX = _add_tab("tab_fx")           # watermark
         META = _add_tab("tab_metadata")   # EXIF date / GPX / privacy / face blur
         OPT = _add_tab("tab_options")     # preserve/overwrite/jobs/…
+        # The adjust tab lives in the Develop module (edit tools beside
+        # the preview); same scroll mechanics, no notebook needed.
+        adj_host = tk.Frame(develop_parent, bg=COLORS["card"], bd=0,
+                            highlightthickness=0)
+        adj_host.pack(fill="both", expand=True)
+        ADJ = _make_tab_scroll(adj_host)
 
         pad = {"padx": 18, "pady": 4}
 
@@ -3182,7 +2376,7 @@ class PhotoSApp:
                  fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
             row=6, column=0, sticky="w", pady=(8, 0))
         try:
-            from .lensprofile import lens_profile_names
+            from ..lensprofile import lens_profile_names
             _lens_profiles = [""] + lens_profile_names()
         except Exception:
             _lens_profiles = [""]
@@ -3396,8 +2590,8 @@ class PhotoSApp:
 
     def _open_curve_editor(self):
         """Draggable point-curve editor: RGB master + R/G/B tabs."""
-        from .gui_widgets import CurveEditor
-        from .grade import _parse_curves
+        from .widgets import CurveEditor
+        from ..grade import _parse_curves
         if self._dlg_cooldown_active():
             return
         win = tk.Toplevel(self.root)
@@ -3421,7 +2615,7 @@ class PhotoSApp:
 
         def _curve_render(base_img, _path):
             """Render the current curve state onto the preview (live)."""
-            from .grade import _parse_curves, apply_curves
+            from ..grade import _parse_curves, apply_curves
             specs = []
             for ch, ed in editors.items():
                 if CurveEditor.is_identity(ed.get_points()):
@@ -3462,7 +2656,7 @@ class PhotoSApp:
             ed.set_points([(0, 0), (255, 255)])
 
     def _curve_editor_ok(self, win, editors):
-        from .gui_widgets import CurveEditor
+        from .widgets import CurveEditor
         specs = []
         for ch, ed in editors.items():
             if CurveEditor.is_identity(ed.get_points()):
@@ -3479,8 +2673,8 @@ class PhotoSApp:
         Each wheel carries a luminance slider (brightness bar): the picked
         hue/sat tint the zone, the luminance shifts its value.
         """
-        from .gui_widgets import ColorWheel
-        from .grade import _parse_color_grading
+        from .widgets import ColorWheel
+        from ..grade import _parse_color_grading
         if self._dlg_cooldown_active():
             return
         win = tk.Toplevel(self.root)
@@ -3532,7 +2726,7 @@ class PhotoSApp:
 
         def _wheels_render(base_img, _path):
             """Render current wheel state onto the preview (live)."""
-            from .grade import _parse_color_grading, apply_color_grading
+            from ..grade import _parse_color_grading, apply_color_grading
             specs = []
             for zone, wheel in wheels.items():
                 h, s = wheel.get_value()
@@ -3580,7 +2774,7 @@ class PhotoSApp:
 
     def _open_hsl_dialog(self):
         """8-color HSL split editor (click a chip, drive h/s/l sliders)."""
-        from .gui_widgets import HSLPanel, HSL_COLORS
+        from .widgets import HSLPanel, HSL_COLORS
         if self._dlg_cooldown_active():
             return
         win = tk.Toplevel(self.root)
@@ -3597,7 +2791,7 @@ class PhotoSApp:
 
         def _hsl_render(base_img, _path):
             """Render current HSL state onto the preview (live)."""
-            from .grade import _parse_hsl, apply_hsl
+            from ..grade import _parse_hsl, apply_hsl
             s = panel.dump()
             if not s:
                 return base_img
@@ -3633,7 +2827,7 @@ class PhotoSApp:
 
     def _open_point_color_dialog(self):
         """Form editor for the point_color compact spec (list + sliders)."""
-        from .grade import _parse_point_color
+        from ..grade import _parse_point_color
         if self._dlg_cooldown_active():
             return
         win = tk.Toplevel(self.root)
@@ -3771,7 +2965,7 @@ class PhotoSApp:
 
         def _pc_render(base_img, _path):
             """Render current point-color targets onto the preview."""
-            from .grade import apply_point_color
+            from ..grade import apply_point_color
             if not targets:
                 return base_img
             return apply_point_color(base_img, list(targets))
@@ -3830,7 +3024,7 @@ class PhotoSApp:
 
     def _open_mask_dialog(self):
         """Form editor for masks + mask_adjust, with red-overlay preview."""
-        from .mask import parse_masks, parse_mask_adjust, render_mask
+        from ..mask import parse_masks, parse_mask_adjust, render_mask
         if self._dlg_cooldown_active():
             return
         win = tk.Toplevel(self.root)
@@ -4028,7 +3222,7 @@ class PhotoSApp:
                 if key == "brush":
                     if not m_brush_points:
                         raise ValueError("no dots")
-                    from .mask import MaskSpec
+                    from ..mask import MaskSpec
                     spec = MaskSpec("brush", tuple(m_brush_points),
                                     feather=0.0, invert=m_invert.get())
                 else:
@@ -4040,7 +3234,7 @@ class PhotoSApp:
                               int(round(vals[2])),
                               max(0.02, vals[3] if len(vals) > 3 else 0.15)) \
                         if key == "color" else tuple(vals[:4])
-                    from .mask import MaskSpec
+                    from ..mask import MaskSpec
                     spec = MaskSpec(key, params,
                                     feather=m_feather.get() / 100.0,
                                     invert=m_invert.get())
@@ -4231,7 +3425,7 @@ class PhotoSApp:
             messagebox.showwarning(self._t("dlg_no_files_title"),
                                    self._t("mask_no_check"))
             return
-        from .mask import (MaskError, MaskSpec, parse_masks,
+        from ..mask import (MaskError, MaskSpec, parse_masks,
                            parse_mask_adjust, render_mask)
         win = tk.Toplevel(self.root)
         win.title(self._t("mask_workflow"))
@@ -4804,7 +3998,7 @@ class PhotoSApp:
         def _ai_mask(kind, label=None):
             """Add an AI mask (subject/person/object) to the current photo."""
             try:
-                from .segmask import segment
+                from ..segmask import segment
                 base = _img_photo["pil"]
                 if base is None:
                     return
@@ -5352,9 +4546,9 @@ class PhotoSApp:
         """Dialog to manage official plugins: list installed + available,
         install / uninstall / pre-fetch weights. Uses the same logic as the
         `photo-s plugin` CLI (photo_s.plugincmd)."""
-        from .registry import OFFICIAL_PLUGINS, to_dict
-        from .plugincmd import _pip_run, _installed_version
-        from .plugin import clear_cache, discover_plugins
+        from ..registry import OFFICIAL_PLUGINS, to_dict
+        from ..plugincmd import _pip_run, _installed_version
+        from ..plugin import clear_cache, discover_plugins
 
         win = tk.Toplevel(self.root)
         win.title(self._t("plugins_title"))
@@ -5372,21 +4566,9 @@ class PhotoSApp:
 
         # Worker threads must never touch Tk directly: they put UI
         # callbacks on a queue and a main-thread after-loop drains it.
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
-
-        def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            if win.winfo_exists():
-                win.after(80, drain)
-
-        win.after(80, drain)
+        bus = UiBus(win)
+        schedule = bus.schedule
+        bus.start()
 
         def _section_title(text):
             tk.Label(body, text=text, font=FONT_SECTION,
@@ -5506,7 +4688,7 @@ class PhotoSApp:
         """Settings dialog: MCP server status + launch/config, optional
         dependency installs, and a link to the plugin manager."""
         import importlib.util
-        from .plugincmd import _pip_run
+        from ..plugincmd import _pip_run
 
         win = tk.Toplevel(self.root)
         win.title(self._t("settings_title"))
@@ -5668,22 +4850,12 @@ class PhotoSApp:
                 b.configure(state="disabled")
         status_lbl.config(text=self._t("dep_installing"))
 
-        q = queue.Queue()
-
-        def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            if win.winfo_exists():
-                win.after(80, drain)
-
-        win.after(80, drain)
+        bus = UiBus(win)
+        bus.start()
 
         def worker():
             try:
-                from .plugincmd import _pip_run
+                from ..plugincmd import _pip_run
                 proc = _pip_run(["install", "--quiet", dist])
                 ok = proc.returncode == 0
                 detail = (proc.stderr or "").strip()[-200:]
@@ -5704,7 +4876,7 @@ class PhotoSApp:
                     status_lbl.config(
                         text="❌ " + (detail or self._t("mcp_missing")),
                         fg=COLORS["danger"])
-            q.put(finish)
+            bus.schedule(finish)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -5713,7 +4885,7 @@ class PhotoSApp:
     def _show_analysis(self):
         """Dialog showing exposure / sharpness stats + luminance histogram
         for the currently selected file (via photo_s.metrics)."""
-        from .metrics import compute_exposure_stats, compute_blur_score
+        from ..metrics import compute_exposure_stats, compute_blur_score
 
         selected = list(self._selected_rows)
         if not selected:
@@ -5798,68 +4970,53 @@ class PhotoSApp:
 
     def _gallery_build(self, paths, out_dir, title="PhotoS Gallery",
                        thumb_size=360):
-        """Sync: build the HTML gallery (thin wrapper so tests can call it
-        without touching Tk)."""
-        from .gallery import build_gallery
-        return build_gallery(list(paths), out_dir, title=title,
-                             thumb_size=thumb_size)
+        """Sync seam → gui.workflows.gallery_build (Tk-free, testable)."""
+        return workflows.gallery_build(paths, out_dir, title=title,
+                                       thumb_size=thumb_size)
+
 
     def _preview_render(self, path, options):
-        """Sync: render one file through the real engine pipeline."""
-        from .engine import process_image
-        return process_image(path, options)
+        """Sync seam → gui.workflows.preview_render (Tk-free, testable)."""
+        return workflows.preview_render(path, options)
+
 
     def _preview_options(self, tempdir):
-        """Sync: options for a preview render. NEVER deletes the source:
-        remove_original is force-set to False, and naming/output are pinned
-        so the result lands predictably inside the temp dir."""
-        from dataclasses import replace
-        opts = self._build_options()
-        return replace(opts, output_dir=tempdir, overwrite=True,
-                       remove_original=False, suffix="", prefix="",
-                       rename_pattern="", folder_pattern=None,
-                       output_sizes=None)
+        """Sync seam → gui.workflows.preview_options (Tk-free; base options
+        from _build_options, preview NEVER deletes the source)."""
+        return workflows.preview_options(self._build_options(), tempdir)
+
 
     def _contact_sheet_build(self, files, output, cols=4,
                              thumb_size=(240, 240), captions=True,
                              bg=(0, 0, 0)):
-        """Sync: build a contact sheet (thin wrapper so tests can call it
-        without touching Tk)."""
-        from .contact import build_contact_sheet
-        return build_contact_sheet(files, output, cols=cols,
-                                   thumb_size=thumb_size, captions=captions,
-                                   bg=bg)
+        """Sync seam → gui.workflows.contact_sheet_build (Tk-free)."""
+        return workflows.contact_sheet_build(files, output, cols=cols,
+                                             thumb_size=thumb_size,
+                                             captions=captions, bg=bg)
+
 
     def _cull_scan(self, paths, thresholds, progress_cb=None):
-        """Sync: classify files against exposure/sharpness thresholds."""
-        from .cull import cull_files
-        return cull_files(list(paths), progress_callback=progress_cb,
-                          **thresholds)
+        """Sync seam → gui.workflows.cull_scan (Tk-free, testable)."""
+        return workflows.cull_scan(paths, thresholds,
+                                   progress_cb=progress_cb)
+
 
     def _hash_generate(self, paths, output, algorithm="sha256",
                        progress_cb=None):
-        """Sync: hash files and write a manifest (returns the output path)."""
-        from .check import compute_checksums, write_manifest
-        entries = compute_checksums(list(paths), algorithm=algorithm,
-                                    progress_callback=progress_cb)
-        write_manifest(output, entries, algorithm=algorithm)
-        return output
+        """Sync seam → gui.workflows.hash_generate (Tk-free, testable)."""
+        return workflows.hash_generate(paths, output, algorithm=algorithm,
+                                       progress_cb=progress_cb)
+
 
     def _hash_verify(self, path):
-        """Sync: verify a manifest (returns the verify_manifest report)."""
-        from .check import verify_manifest
-        return verify_manifest(path)
+        """Sync seam → gui.workflows.hash_verify (Tk-free, testable)."""
+        return workflows.hash_verify(path)
+
 
     def _hdr_merge(self, paths, output, align=False):
-        """Sync: merge bracketed exposures into an HDR image.
+        """Sync seam → gui.workflows.hdr_merge (Tk-free, testable)."""
+        return workflows.hdr_merge(paths, output, align=align)
 
-        Thin wrapper so tests can call it without touching Tk. Returns the
-        output path on success, raises (RuntimeError/ValueError) on failure.
-        """
-        from .hdr import merge_hdr
-        result = merge_hdr(list(paths), align=align)
-        result.save(output, quality=95)
-        return output
 
     def _apply_options_to_ui(self, opts):
         """Map a ProcessOptions back onto the GUI's tk.Variables (preset
@@ -6034,21 +5191,9 @@ class PhotoSApp:
         # callbacks on a queue and a main-thread after-loop drains it
         # (win.after from a worker raises "main thread is not in main
         # loop" whenever the mainloop is not running).
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
-
-        def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            if win.winfo_exists():
-                win.after(80, drain)
-
-        win.after(80, drain)
+        bus = UiBus(win)
+        schedule = bus.schedule
+        bus.start()
 
         def set_status(text, color=None):
             if win.winfo_exists():
@@ -6111,60 +5256,21 @@ class PhotoSApp:
     # ── Duplicate viewer ────────────────────────────────────────────────────
 
     def _dedup_scan(self, paths, threshold=5, progress_cb=None):
-        """Sync: find duplicate groups + per-image blur scores.
+        """Sync seam → gui.workflows.dedup_scan (Tk-free, testable)."""
+        return workflows.dedup_scan(paths, threshold=threshold,
+                                    progress_cb=progress_cb)
 
-        Returns (groups, scores): groups is a list of path-lists (each
-        >= 2 members), scores maps path -> blur score (0.0 on error).
-        Tk-free so tests can call it directly.
-        """
-        from .dedup import find_duplicates
-        from .metrics import compute_blur_score
-
-        dup_groups = find_duplicates(list(paths), threshold=threshold,
-                                     progress_callback=progress_cb)
-        groups = [list(g) for g in dup_groups.values() if len(g) >= 2]
-        scores = {}
-        for group in groups:
-            for p in group:
-                try:
-                    scores[p] = compute_blur_score(p)
-                except Exception:
-                    scores[p] = 0.0
-        return groups, scores
 
     def _dedup_trash_path(self, path, trash_dir):
-        """Trash destination: trash_dir/basename with a numeric suffix if
-        the name is taken (mirrors dedup.py move collision logic)."""
-        dest = os.path.join(trash_dir, os.path.basename(path))
-        stem, ext = os.path.splitext(dest)
-        n = 1
-        while os.path.exists(dest):
-            dest = "{}_{}{}".format(stem, n, ext)
-            n += 1
-        return dest
+        """Sync seam → gui.workflows.dedup_trash_path (Tk-free)."""
+        return workflows.dedup_trash_path(path, trash_dir)
+
 
     def _dedup_move_to_trash(self, paths, trash_dir, progress_cb=None):
-        """Sync: move ``paths`` into ``trash_dir`` (created if needed).
-        Returns (moved, failed, moved_map) where moved_map maps
-        original -> trash destination (for undo). Tk-free so tests can
-        call it directly."""
-        moved, failed = 0, 0
-        moved_map = {}
-        try:
-            os.makedirs(trash_dir, exist_ok=True)
-        except OSError:
-            return 0, len(paths), moved_map
-        for i, p in enumerate(paths):
-            try:
-                dest = self._dedup_trash_path(p, trash_dir)
-                os.rename(p, dest)
-                moved_map[p] = dest
-                moved += 1
-            except OSError:
-                failed += 1
-            if progress_cb:
-                progress_cb(i + 1, len(paths))
-        return moved, failed, moved_map
+        """Sync seam → gui.workflows.dedup_move_to_trash (Tk-free)."""
+        return workflows.dedup_move_to_trash(paths, trash_dir,
+                                             progress_cb=progress_cb)
+
 
     def _show_dedup(self):
         """Duplicate viewer: scan in a background thread, render groups
@@ -6228,21 +5334,9 @@ class PhotoSApp:
         state = {"groups": [], "scores": {}, "checks": [], "sharp": set()}
 
         # Worker→UI marshalling queue (see gallery dialog for rationale)
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
-
-        def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            if win.winfo_exists():
-                win.after(80, drain)
-
-        win.after(80, drain)
+        bus = UiBus(win)
+        schedule = bus.schedule
+        bus.start()
 
         def render():
             for w in inner.winfo_children():
@@ -6415,23 +5509,9 @@ class PhotoSApp:
     # ── Review & rate dialog ────────────────────────────────────────────────
 
     def _review_scan(self, paths, progress_cb=None):
-        """Sync: read EXIF metadata for all paths. Returns {path: meta}.
-        Tk-free so tests can call it directly."""
-        from .engine import read_exif_metadata
-        meta = {}
-        total = len(paths)
-        for i, p in enumerate(paths):
-            try:
-                meta[p] = read_exif_metadata(p)
-            except Exception:
-                meta[p] = {"rating": None, "keywords": [], "title": "",
-                           "caption": "", "date": "", "time": "",
-                           "camera": "", "make": "", "iso": "",
-                           "focal": "", "lens": "", "fnumber": "",
-                           "shutter": ""}
-            if progress_cb:
-                progress_cb(i + 1, total)
-        return meta
+        """Sync seam → gui.workflows.review_scan (Tk-free, testable)."""
+        return workflows.review_scan(paths, progress_cb=progress_cb)
+
 
     def _review_save(self, path, rating=None, keywords=None, title=None,
                      make=None, model=None, lens=None, iso=None,
@@ -6445,7 +5525,7 @@ class PhotoSApp:
         revert, entry): revert undoes this exact write (None when
         nothing changed); entry is the global undo entry pushed (None
         likewise). Tk-free so tests can call it directly."""
-        from .engine import apply_exif_tags, read_exif_metadata
+        from ..engine import apply_exif_tags, read_exif_metadata
 
         m = read_exif_metadata(path)
         tags = {}
@@ -6506,25 +5586,11 @@ class PhotoSApp:
 
     def _select_move(self, paths, selects_dir, rejects_dir,
                      keep_min=4, reject_max=2, mode="move"):
-        """Sync: sort rated files into selects/rejects folders.
+        """Sync seam → gui.workflows.select_move (Tk-free, testable)."""
+        return workflows.select_move(paths, selects_dir, rejects_dir,
+                                     keep_min=keep_min,
+                                     reject_max=reject_max, mode=mode)
 
-        Tk-free seam (mirrors _cull_scan) so the review lightbox can call it
-        directly; ratings are read from EXIF — the ones the review flow wrote.
-        Returns (results, ok_count, error_count).
-        """
-        from .select import select_files
-        try:
-            results = select_files(
-                list(paths), keep_min=keep_min, reject_max=reject_max,
-                selects_dir=selects_dir, rejects_dir=rejects_dir,
-                mode=mode, dry_run=False,
-            )
-        except ValueError as e:
-            return None, 0, 0, str(e)
-        ok_count = sum(1 for r in results if r["ok"] and r["action"]
-                       in ("move", "copy"))
-        error_count = sum(1 for r in results if not r["ok"])
-        return results, ok_count, error_count, ""
 
     def _post_more_menu(self):
         """Toolbar 'More Tools' popup: watch / contact sheet / cull / hash /
@@ -6572,7 +5638,7 @@ class PhotoSApp:
                                 self._t("check_none"))
             return
 
-        from .engine import read_exif_metadata
+        from ..engine import read_exif_metadata
         has_piexif = importlib.util.find_spec("piexif") is not None
 
         win = tk.Toplevel(self.root)
@@ -6811,21 +5877,9 @@ class PhotoSApp:
                            COLORS["accent"])
 
         # Worker→UI marshalling queue (see gallery dialog for rationale)
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
-
-        def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            if win.winfo_exists():
-                win.after(80, drain)
-
-        win.after(80, drain)
+        bus = UiBus(win)
+        schedule = bus.schedule
+        bus.start()
 
         def set_status(text, color=None):
             status_lbl.configure(text=text,
@@ -7539,6 +6593,8 @@ class PhotoSApp:
 
         self._update_count_label()
         self._schedule_thumbnails()
+        self._dev_refresh_filmstrip()
+        self._refresh_export_queue()
 
     def _visible_files(self):
         """Files matching the filter box (display-only view over self.files)."""
@@ -7689,7 +6745,7 @@ class PhotoSApp:
         status "ok" | "conflict" | "error". Tk-free so tests can call it
         directly.
         """
-        from .rename import rename_files
+        from ..rename import rename_files
         rows = rename_files(list(paths), pattern, output_dir=output_dir,
                             overwrite=overwrite, dry_run=True)
         if overwrite:
@@ -7724,7 +6780,7 @@ class PhotoSApp:
         flagged), refreshed by a debounced background dry-run on every
         change. Execute confirms, runs the real rename in a worker, then
         refreshes the main file list. Not wired into the undo stack."""
-        from .rename import rename_files
+        from ..rename import rename_files
 
         files = self._checked_files()
         if not files:
@@ -7813,21 +6869,9 @@ class PhotoSApp:
         footer.pack(fill="x", padx=20, pady=(4, 16))
 
         # Worker→UI marshalling queue (see dedup dialog for rationale)
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
-
-        def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            if win.winfo_exists():
-                win.after(80, drain)
-
-        win.after(80, drain)
+        bus = UiBus(win)
+        schedule = bus.schedule
+        bus.start()
 
         state = {"after_id": None, "token": 0, "rows": []}
 
@@ -8059,7 +7103,7 @@ class PhotoSApp:
             except (ValueError, TypeError):
                 return default
 
-        from .cli import _parse_sizes  # lazy: cli imports engine only
+        from ..cli import _parse_sizes  # lazy: cli imports engine only
 
         # Invalid sizes input degrades to None instead of raising — this
         # runs on the preview drain tick and before processing starts, so
@@ -8185,7 +7229,7 @@ class PhotoSApp:
         win.configure(bg=COLORS["bg"])
         win.transient(self.root)
 
-        from .engine import ProcessOptions, SUPPORTED_FORMATS
+        from ..engine import ProcessOptions, SUPPORTED_FORMATS
 
         watch_dir = tk.StringVar()
         out_dir = tk.StringVar()
@@ -8271,10 +7315,8 @@ class PhotoSApp:
                           fg=COLORS["text_secondary"], bg=COLORS["bg"])
         status.grid(row=9, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
+        bus = UiBus(win)
+        schedule = bus.schedule
 
         def _start():
             # stop-then-start race: the previous watcher thread may still be
@@ -8316,7 +7358,7 @@ class PhotoSApp:
             rec = recursive.get()  # read on the main thread only
 
             def run():
-                from .watcher import start_watching
+                from ..watcher import start_watching
                 start_watching(d, opts, recursive=rec,
                                on_process=lambda r: schedule(
                                    lambda: _on_result(r)),
@@ -8344,17 +7386,9 @@ class PhotoSApp:
                     text=self._t("watch_processed", n=state["count"]),
                     fg=COLORS["success"])
 
-        def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            if win.winfo_exists():
-                win.after(80, drain)
 
         win.protocol("WM_DELETE_WINDOW", lambda: (_stop(), win.destroy()))
-        win.after(80, drain)
+        bus.start()
 
     def _show_contact_sheet(self):
         """Contact sheet: grid of thumbnails from the checked files."""
@@ -8437,13 +7471,11 @@ class PhotoSApp:
                              hover_bg=COLORS["accent_hover"])
         gen_btn.grid(row=7, column=0, sticky="w", pady=(8, 0))
 
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
+        bus = UiBus(win)
+        schedule = bus.schedule
 
         def _parse_thumb():
-            from .cli import _parse_dimensions
+            from ..cli import _parse_dimensions
             try:
                 tw, th = _parse_dimensions(thumb_var.get().strip())
                 return (tw or 240, th or 240)
@@ -8457,7 +7489,7 @@ class PhotoSApp:
                 return 4
 
         def _parse_bg():
-            from .adjust import hex_to_rgb
+            from ..adjust import hex_to_rgb
             try:
                 return hex_to_rgb(bg_var.get().strip())
             except (ValueError, AttributeError):
@@ -8503,16 +7535,8 @@ class PhotoSApp:
             if p and os.path.isfile(p):
                 webbrowser.open(Path(os.path.abspath(p)).as_uri())
 
-        def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            if win.winfo_exists():
-                win.after(80, drain)
 
-        win.after(80, drain)
+        bus.start()
 
     def _show_hdr(self):
         """HDR merge: fuse the checked bracketed exposures into one image.
@@ -8583,10 +7607,8 @@ class PhotoSApp:
                                hover_bg=COLORS["accent_hover"])
         merge_btn.grid(row=4, column=0, sticky="w", pady=(10, 0))
 
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
+        bus = UiBus(win)
+        schedule = bus.schedule
 
         def _merge():
             merge_btn.configure(state="disabled")
@@ -8615,16 +7637,8 @@ class PhotoSApp:
             status.configure(text=self._t("hdr_done", out=out),
                              fg=COLORS["success"])
 
-        def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            if win.winfo_exists():
-                win.after(80, drain)
 
-        win.after(80, drain)
+        bus.start()
 
     def _show_cull(self):
         """Cull: classify the file list by exposure/sharpness thresholds,
@@ -8710,10 +7724,8 @@ class PhotoSApp:
         vsb.grid(row=7, column=3, sticky="ns")
         body.rowconfigure(7, weight=1)
 
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
+        bus = UiBus(win)
+        schedule = bus.schedule
 
         def _scan():
             scan_btn.configure(state="disabled")
@@ -8778,16 +7790,8 @@ class PhotoSApp:
                                           total=len(self.files)),
                              fg=COLORS["success"])
 
-        def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            if win.winfo_exists():
-                win.after(80, drain)
 
-        win.after(80, drain)
+        bus.start()
 
     def _show_hash(self):
         """Checksums: generate a manifest of the checked files, or verify an
@@ -8882,10 +7886,8 @@ class PhotoSApp:
         tree.grid(row=3, column=0, columnspan=3, sticky="nsew", pady=(8, 0))
         ver.rowconfigure(3, weight=1)
 
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
+        bus = UiBus(win)
+        schedule = bus.schedule
 
         def _gen():
             files = self._checked_files()
@@ -8962,16 +7964,8 @@ class PhotoSApp:
             if p and os.path.isfile(p):
                 webbrowser.open(Path(os.path.abspath(p)).as_uri())
 
-        def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            if win.winfo_exists():
-                win.after(80, drain)
 
-        win.after(80, drain)
+        bus.start()
 
     def _show_presets(self):
         """Presets: save / load / delete named option sets (stored as JSON in
@@ -8982,7 +7976,7 @@ class PhotoSApp:
         win.configure(bg=COLORS["bg"])
         win.transient(self.root)
 
-        from . import presets
+        from .. import presets
 
         body = tk.Frame(win, bg=COLORS["bg"])
         body.pack(fill="both", expand=True, padx=20, pady=16)
@@ -9231,13 +8225,11 @@ class PhotoSApp:
                 status.configure(text=self._t("preview_error",
                                               err=result.error or "?"))
 
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
+        bus = UiBus(win)
+        schedule = bus.schedule
 
         def launch(sig, path, opts):
-            from .engine import ProcessResult
+            from ..engine import ProcessResult
             state["inflight"] = True
             # The staleness signature must include the file: ProcessOptions
             # compares by value, so an options-only sig cannot tell a stale
@@ -9261,11 +8253,7 @@ class PhotoSApp:
             threading.Thread(target=render, daemon=True).start()
 
         def drain():
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
+            bus.drain_pending()
             if not win.winfo_exists():
                 # Keep draining until an in-flight render finishes, then
                 # remove the temp dir — never rmtree while writing.
@@ -9815,10 +8803,8 @@ class PhotoSApp:
                    bg=COLORS["accent"], hover_bg=COLORS["accent_hover"],
                    font=FONT_BUTTON, padx=24, pady=6).pack(side="right")
 
-        q = queue.Queue()
-
-        def schedule(fn):
-            q.put(fn)
+        bus = UiBus(win)
+        schedule = bus.schedule
 
         def _load_done(p, img):
             p["img"] = img
@@ -9841,18 +8827,9 @@ class PhotoSApp:
                 else:
                     schedule(lambda p=p, img=img: _load_done(p, img))
 
-        def drain():
-            if not win.winfo_exists():
-                return
-            try:
-                while True:
-                    q.get_nowait()()
-            except queue.Empty:
-                pass
-            win.after(80, drain)
 
         threading.Thread(target=_load_all, daemon=True).start()
-        win.after(80, drain)
+        bus.start()
         _schedule_redraw()  # paint the loading placeholders right away
 
     def _update_stats(self, result: BatchResult = None):
@@ -9920,7 +8897,7 @@ def run_gui():
     """Launch the PhotoS GUI application."""
     # Resolve the startup language once (persisted choice > env > system);
     # PhotoSApp.__init__ resolves again but _system_language() is memoized.
-    from . import i18n
+    from .. import i18n
     _lang = i18n.resolve_language(use_config=False, use_persisted=True)
     # Use TkinterDnD root window when available so drag-and-drop works
     if DND_AVAILABLE:

@@ -19,8 +19,29 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
-GUI_SRC = os.path.join(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__))), "photo_s", "gui.py")
+
+@pytest.fixture(autouse=True)
+def _isolate_home(tmp_path, monkeypatch):
+    """Hermetic gui_state: the app restores geometry/thumb-size/active
+    module from ~/.photos/gui_state.json — a polluted real file once
+    flipped the startup module, made the Develop panel auto-render in
+    unrelated tests (its lazy tempdir then tripped other files'
+    mkdtemp-tracking assertions) and leaked live Tk roots that cascaded
+    into focus-event storms on later tests."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
+def _gui_sources():
+    """All v2.0 GUI package sources (app.py + theme/strings/workflows/
+    widgets/*) — the audit below scans every module, not one file."""
+    gui_dir = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "photo_s", "gui")
+    paths = [os.path.join(gui_dir, f) for f in sorted(os.listdir(gui_dir))
+             if f.endswith(".py") and f != "__init__.py"]
+    wdir = os.path.join(gui_dir, "widgets")
+    paths += [os.path.join(wdir, f) for f in sorted(os.listdir(wdir))
+              if f.endswith(".py") and f != "__init__.py"]
+    return paths
 
 
 def _make_app():
@@ -109,8 +130,8 @@ class TestWorkerExceptionBinding:
         ends — a plain ``lambda: ... str(e)`` scheduled onto the drain
         queue raises NameError when drained and kills the drain loop.
         Every such lambda must bind ``err=str(e)`` as a default arg."""
-        with open(GUI_SRC, encoding="utf-8") as f:
-            src = f.read()
+        src = "".join(open(p, encoding="utf-8").read()
+                      for p in _gui_sources())
         bad = re.findall(r"schedule\(lambda: [^\n]*str\(e\)", src)
         assert bad == [], \
             "scheduled lambdas capturing the except var: " + "; ".join(bad)

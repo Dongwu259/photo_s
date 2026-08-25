@@ -8,8 +8,9 @@
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **CLI for AI agents, GUI for humans.** PhotoS is a cross-platform batch photo
-toolbox: a full Tkinter GUI (visual preview, review & rate lightbox, dedup
-viewer, gallery export) for photographers — and a CLI / REST / MCP surface with
+toolbox: a full Tkinter GUI — v2.0 workspace with Library / Develop (live
+pipeline preview + histogram + edit tools beside it) / Export (photo queue +
+output settings) / Tools modules — and a CLI / REST / MCP surface with
 one versioned JSON contract for AI agents.
 
 > 🖥 GUI for humans · ⌨️ CLI for AI agents · `pip install photo-s-tools`

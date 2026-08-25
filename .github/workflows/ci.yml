@@ -86,6 +86,34 @@ jobs:
         # execute for real here (they skip headless on Linux) — this is
         # the main Windows-verification path for the GUI.
 
+  test-linux-gui:
+    # v2.0: run the GUI suite for real on Linux under xvfb. Experimental
+    # (continue-on-error) until it has been green on main for a while —
+    # a bare Xvfb has no window manager, so focus-driven tests may
+    # behave differently than on the Windows desktop sessions. Once
+    # stable, merge into the main matrix legs.
+    name: GUI tests on Linux (xvfb, experimental)
+    runs-on: ubuntu-latest
+    needs: test
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb
+          pip install -e ".[all]"
+          pip install pytest
+      - name: Run GUI tests under xvfb
+        run: |
+          xvfb-run -a python -m pytest tests/test_gui_app.py \
+            tests/test_gui_settings.py tests/test_gui_widgets.py \
+            tests/test_gui_workflows.py tests/test_gui_audit_fixes.py \
+            tests/test_theme.py -q
+
   bundle:
     name: Bundle (Windows exe)
     runs-on: windows-latest

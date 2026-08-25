@@ -19,6 +19,7 @@
 | 第七轮 | v1.4.0 深化 | EXIF 编辑器扩拍摄信息 7 字段、批量重命名实时预览、多图并排对比（首个 Canvas 缩放视口，见 §9） |
 | 第八轮 | v1.6.0 工作流 | 评审灯箱加「移动精选/淘汰」（`_select_move` seam）、HDR 合并对话框（「更多工具」）、设置面板人脸模糊选项（见 §11） |
 | 第九轮 | v1.8.0 蒙版工作流 | LR 式画布蒙版工作流（`_open_mask_workflow`）、调色对话框实时预览（见 §12） |
+| 第十轮 | v2.0.0 工作区 | 拆包（gui.py→gui/ 包）+ 语言/主题活切换 + UiBus + Library/Develop/Export/Tools 工作区 + 缩略图 LRU（见 §13） |
 
 ---
 
@@ -554,3 +555,46 @@ worker 只 `queue.Queue.put(fn)`，主线程 `win.after(80, drain)` 循环消费
   解析进 lens_distort/vignette/ca（显式参数优先；未知档案 per-file 报错）。
 - 新增 GUI STRINGS（zh/en）：`highlight_recovery`、`raw_color_space`、
   `raw_16bit`、`lens_profile`。
+
+---
+
+## 13. 第十轮：v2.0.0 拆包 + 活切换 + 工作区
+
+> 设计方案：`docs/GUI_UPGRADE_PLAN.md`。**对外契约零变化**：`from photo_s.gui import
+> PhotoSApp, run_gui, STRINGS, COLORS, FlatButton, …` 全部照旧（包 `__init__` 重导出）；
+> agent 面（CLI/REST/MCP/JSON 契约）不动。
+
+### 13.1 拆包（`photo_s/gui.py` → `photo_s/gui/`）
+
+`app.py`（PhotoSApp + run_gui）、`theme.py`（调色板/字体/间距 token + 三平台深色检测
+（Linux: gsettings→kdeglobals 补齐）+ Windows DPI PMv2 链）、`strings.py`（STRINGS）、
+`widgets/`（FlatButton/editors/util/zoompan）、`workflows.py`（13 个 Tk-free seam 函数，
+app 方法薄委托）、`state.py`（gui_state.json + ThumbCache）、`bus.py`（UiBus）。
+`photo_s/gui_widgets.py` 变兼容 shim；lite spec excludes 显式列出全部 gui 子模块。
+
+### 13.2 活切换（不再销毁重建）
+
+- 语言：`_translation_remap` 反向映射遍历器（旧语言文本→新语言文本，同文多键**多数表决**、
+  平票丢弃），动态标签由属主重算；滚动位置/折叠区状态保留。
+- 主题：`_recolor_widgets` 调色板值重映射遍历器 + ttk 样式刷新；系统外观实时跟随
+  （FocusIn + 30s 轮询），手动 toggle 钉住选择直至重启。
+
+### 13.3 UiBus（`bus.py`）
+
+worker→UI 事件总线，替换 12 处内联 queue+after-drain 循环（排空前也查窗口存活）；
+preview 防抖混合轮询是唯一例外（`drain_pending()`）。
+
+### 13.4 工作区（模块栏 + Cmd/Ctrl+1..4，活动模块持久化）
+
+- **图库 Library**：文件面板全宽（含缩略图 LRU：256MB 字节上限、线程安全）。
+- **修图 Develop**：胶片条 + 大图预览（160ms 防抖、真实管线渲染、stale 丢弃、
+  before/after 切换）+ 常驻直方图/曝光/色温读数（`metrics.analyze_image`）+
+  **右栏调整设置区**（原调整 Tab：影调/曲线/调色/矫正/局部——与导出共用同一组 tk.Variable）。
+- **导出 Export**：导出队列（勾选照片 + 体积合计 + 空态）+ 输出/水印/元数据/选项 Notebook。
+- **工具 Tools**：12 张工作流启动卡片（仍打开既有对话框，非模态化后续批）。
+
+### 13.5 测试约定（新增不变量）
+
+GUI 测试一律 HOME 隔离（autouse `_isolate_home`）：app 从 `~/.photos/gui_state.json`
+恢复几何/缩略图/活动模块，真实 HOME 污染曾引发跨文件级联失败（Develop 自动渲染 →
+mkdtemp 追踪误伤 → root 泄漏 → macOS focus 事件风暴）。
