@@ -267,6 +267,11 @@ class ProcessOptions:
     gpx_trace: Optional[str] = None  # GPX track path for GPS geo-tagging
     blur_faces: Optional[str] = None  # "blur"|"pixelate" privacy mask (opencv)
     blur_faces_margin: Optional[int] = None  # face-box expansion % (default 20)
+    # Cutout / background removal (v2.1.0): subject | person | object:label |
+    # color:R,G,B[,tol=30][,feather=0][,invert] — mask -> alpha channel.
+    # Needs a transparency-capable output (PNG/WebP/TIFF/AVIF/HEIC); JPEG
+    # raises a per-file error rather than silently flattening to white.
+    cutout: Optional[str] = None
 
 
 @dataclass
@@ -1485,6 +1490,20 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
         if options.export_sharpen:
             from .grade import apply_export_sharpen
             img = apply_export_sharpen(img, options.export_sharpen)
+
+        # ── Cutout / background removal (v2.1.0) ────────────────────────────
+        # Last pixel stage: after resize/watermark/sharpen so the alpha cuts
+        # the FINAL saved pixels; before EXIF extraction (reads .info only)
+        # and _save_image (RGBA-safe: PNG/WebP/TIFF write alpha natively).
+        # JPEG output is rejected here (fail fast, before any segmentation)
+        # — flattening the cutout to white would be a silent failure.
+        if options.cutout:
+            from .cutout import apply_cutout, parse_cutout
+            if _canonical_format(options.output_format) == "JPEG":
+                raise ValueError(
+                    f"cutout ({options.cutout}) needs a format that supports "
+                    f"transparency (PNG/WebP/TIFF/AVIF/HEIC)")
+            img = apply_cutout(img, parse_cutout(options.cutout))
 
         # ── Extract EXIF metadata for smart rename ──────────────────────────
         exif_meta = _extract_exif_metadata(img, input_path)

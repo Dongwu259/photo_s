@@ -188,3 +188,136 @@ class TestColorKey:
         out = apply_cutout(_img(4, 4, fill=(10, 10, 10)),
                            parse_cutout("color:0,0,0,tol=1"))
         assert out.mode == "RGBA"
+
+
+# ── engine integration (process_image) ──────────────────────────────────
+
+from photo_s.engine import ProcessOptions, process_image  # noqa: E402
+
+
+def _process(src, out_dir, fmt="JPEG", suffix="_out", **kwargs):
+    opts = ProcessOptions(output_dir=str(out_dir), suffix=suffix,
+                          output_format=fmt, **kwargs)
+    return process_image(str(src), opts)
+
+
+def _save(img, path):
+    img.save(path)
+    return path
+
+
+class TestEngineIntegration:
+    def test_png_roundtrip(self, tmp_path):
+        src = _save(_block_img((255, 0, 0), (255, 255, 255), w=4, h=4),
+                    tmp_path / "src.png")
+        res = _process(src, tmp_path / "out", fmt="PNG",
+                       cutout="color:255,255,255,tol=10")
+        assert res.success
+        out = Image.open(res.output_path)
+        assert out.mode == "RGBA"
+        assert out.getpixel((0, 0))[3] == 255    # red subject opaque
+        assert out.getpixel((3, 3))[3] == 0      # white bg transparent
+
+    def test_jpeg_per_file_error(self, tmp_path):
+        src = _save(_block_img((255, 0, 0), (255, 255, 255)),
+                    tmp_path / "src.png")
+        res = _process(src, tmp_path / "out", fmt="JPEG",
+                       cutout="color:255,255,255,tol=10")
+        assert not res.success
+        assert "needs a format that supports transparency" in res.error
+
+    def test_jpeg_error_lowercase_format(self, tmp_path):
+        # REST/MCP can send lowercase format strings — must be caught too
+        src = _save(_img(4, 4), tmp_path / "src.png")
+        res = _process(src, tmp_path / "out", fmt="jpeg",
+                       cutout="color:255,255,255")
+        assert not res.success
+        assert "transparency" in res.error
+
+    def test_tiff_alpha(self, tmp_path):
+        src = _save(_block_img((255, 0, 0), (255, 255, 255), w=4, h=4),
+                    tmp_path / "src.png")
+        res = _process(src, tmp_path / "out", fmt="TIFF",
+                       cutout="color:255,255,255,tol=10")
+        assert res.success
+        out = Image.open(res.output_path)
+        assert out.mode == "RGBA"
+        assert out.getpixel((0, 0))[3] == 255
+
+    def test_bad_spec_per_file_error(self, tmp_path):
+        src = _save(_img(4, 4), tmp_path / "src.png")
+        res = _process(src, tmp_path / "out", fmt="PNG", cutout="car")
+        assert not res.success
+        assert "'car'" in res.error
+
+    def test_ai_subject_pipeline_hermetic(self, tmp_path, monkeypatch):
+        import numpy as np
+        import photo_s.segmask as sm
+
+        def fake_segment(img, kind, label=None):
+            return np.full((img.height, img.width), 0.9, np.float32)
+
+        monkeypatch.setattr(sm, "segment", fake_segment)
+        src = _save(_img(8, 8), tmp_path / "src.png")
+        res = _process(src, tmp_path / "out", fmt="PNG", cutout="subject")
+        assert res.success
+        a = Image.open(res.output_path).getpixel((2, 2))[3]
+        assert 229 <= a <= 230          # round(0.9 * 255)
+
+    def test_ai_object_pipeline_hermetic(self, tmp_path, monkeypatch):
+        import numpy as np
+        import photo_s.segmask as sm
+        seen = {}
+
+        def fake_segment(img, kind, label=None):
+            seen["label"] = label
+            return np.full((img.height, img.width), 0.9, np.float32)
+
+        monkeypatch.setattr(sm, "segment", fake_segment)
+        src = _save(_img(8, 8), tmp_path / "src.png")
+        res = _process(src, tmp_path / "out", fmt="PNG", cutout="object:car")
+        assert res.success
+        assert seen.get("label") == "car"
+
+    def test_ai_missing_cv2_per_file_error(self, tmp_path, monkeypatch):
+        import photo_s.segmask as sm
+
+        def _no_cv2():
+            raise RuntimeError(
+                "AI masks (subject/person/object) need opencv: "
+                "pip install 'photo-s-tools[enhance]'")
+
+        monkeypatch.setattr(sm, "_cv2", _no_cv2)
+        src = _save(_img(8, 8), tmp_path / "src.png")
+        res = _process(src, tmp_path / "out", fmt="PNG", cutout="subject")
+        assert not res.success
+        assert "opencv" in res.error
+
+
+# ── CLI wiring (--cutout reaches the batch pipeline) ─────────────────────
+
+class TestCliSmoke:
+    def test_cli_cutout_png(self, tmp_path, capsys):
+        from photo_s.cli import run_cli
+        src = _save(_block_img((255, 0, 0), (255, 255, 255), w=4, h=4),
+                    tmp_path / "src.png")
+        rc = run_cli(["batch", str(src), "-o", str(tmp_path / "out"),
+                      "--cutout", "color:255,255,255,tol=10",
+                      "-f", "png", "--json"])
+        assert rc == 0
+        outs = list((tmp_path / "out").glob("*.png"))
+        assert len(outs) == 1
+        result = Image.open(outs[0])
+        assert result.mode == "RGBA"
+        assert result.getpixel((0, 0))[3] == 255    # subject opaque
+        assert result.getpixel((3, 3))[3] == 0      # white bg transparent
+
+    def test_cli_cutout_jpeg_rc1(self, tmp_path, capsys):
+        from photo_s.cli import run_cli
+        src = _save(_img(4, 4), tmp_path / "src.png")
+        rc = run_cli(["batch", str(src), "-o", str(tmp_path / "out"),
+                      "--cutout", "color:255,255,255",
+                      "-f", "jpeg", "--json"])
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "transparency" in captured.out + captured.err

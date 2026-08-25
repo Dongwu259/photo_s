@@ -487,6 +487,10 @@ def _add_transform_args(parser):
         "--blur-faces-margin", type=int, default=argparse.SUPPRESS,
         metavar="PCT", help=_t('help___blur_faces_margin'),
     )
+    parser.add_argument(
+        "--cutout", type=str, default=argparse.SUPPRESS, metavar="SPEC",
+        help=_t('help___cutout'),
+    )
 
 
 def _add_raw_args(parser):
@@ -700,6 +704,7 @@ def _build_process_options(parsed) -> ProcessOptions:
         gpx_trace=getattr(parsed, 'gpx_trace', None),
         blur_faces=getattr(parsed, 'blur_faces', None),
         blur_faces_margin=getattr(parsed, 'blur_faces_margin', None),
+        cutout=getattr(parsed, 'cutout', None),
         # Lightroom-direction grading (v1.6.0)
         wb_tint=getattr(parsed, 'wb_tint', 0.0),
         levels=getattr(parsed, 'levels', ""),
