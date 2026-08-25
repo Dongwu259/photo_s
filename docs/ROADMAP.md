@@ -22,6 +22,17 @@
 
 ## 规划中
 
+### v2.1.0（抠图 / 背景移除 —— 主题：交付透明 PNG，2026-08-25 实施中）
+
+> **目标**：`--cutout` 蒙版 → alpha → 透明输出。AI 分割（subject/person/object:label）复用 v1.8 segmask 权重零新增下载；颜色键控（color:R,G,B,tol,feather,invert）纯 numpy 解决白底文字/logo 去底（AI 模型不含文字类）。透明输出需 PNG/WebP/TIFF/AVIF/HEIC，JPEG 按文件报错（不静默拍平白底）。
+
+- [x] `photo_s/cutout.py`：CutoutSpec/parse_cutout（四模式紧凑 spec，CutoutError(ValueError) 契约）+ cutout_mask（AI 委托 mask.render_mask；color 硬阈值欧氏距离+绝对像素羽化）+ apply_cutout（RGBA+putalpha，info 保留）
+- [x] 引擎：ProcessOptions.cutout 字段 + 管线槽位（export_sharpen 后/EXIF 提取前）+ JPEG 校验（_canonical_format）；preset/REST/MCP 自动继承（_scalar_groups）
+- [x] CLI：`--cutout`（compress/convert/batch/preset save 四 parser）+ i18n zh/en
+- [x] GUI：Export 选项 Tab `sec_cutout` 区块（模式下拉 + 参数区动态显隐，活切换兼容）
+- [ ] 真图冒烟（subject/颜色键控实拍验证）
+- [ ] 发布 v2.1.0（版本三处 bump + RELEASE.md 清单）
+
 ### v1.8.0（AI 识别蒙版 + 笔刷 -- 主题：智能局部调整，方向已定）
 
 > **实施（2026-08-21，发布就绪未发版）**：四项 + GUI 工作流全部落地，**1075 测试全绿**。

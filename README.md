@@ -70,6 +70,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | Auto-straighten | ✅ | ✅¹ | Level the horizon, confidence-gated (`[enhance]` extra) |
 | HDR merge | ✅ | ✅¹ | Exposure fusion, handheld alignment (`[enhance]` extra) |
 | Face blur | ✅ | ✅¹ | Blur or pixelate faces, Haar cascade (`[enhance]` extra) |
+| Cutout | ✅ | ✅ | Background removal → alpha: AI segmentation (`subject`/`person`/`object:class`) or color key (`color:R,G,B[tol,feather,invert]` — white-bg text/logo); PNG/WebP/TIFF/AVIF/HEIC (JPEG errors per file) |
 | Crop / Rotate / Flip / Pad | ✅ | ✅ | Unified aspect crop + arbitrary geometry |
 | Print size | ✅ | ✅ | Center-crop + exact print pixels at a DPI |
 | Smart rename | ✅ | ✅ | Date/camera/sequence templates |

@@ -79,6 +79,16 @@ key ∈ exposure/brightness/contrast/saturation/vibrance/clarity/texture/sharpen
 - **per-photo 蒙版**：REST `process` 的 `options` 键与 CLI 同；逐照片差异经
   `batch_process(per_file_options=)` 钩子注入（钩子始终收到未变异的 base options）
 
+**抠图 / 背景移除（v2.1.0，`--cutout`）**：蒙版 → alpha 通道 → 透明输出。
+
+| spec | 含义 |
+|---|---|
+| `subject` / `person` | AI 分割（U2Netp / PP-HumanSeg，复用 v1.8 权重，需 `[enhance]`） |
+| `object:car` | YOLOv8n-seg COCO 类 |
+| `color:255,255,255,tol=30,feather=0,invert` | 颜色键控：欧氏 RGB 距离 ≤ tol 变透明；feather 为绝对像素羽化；`invert` 反选 |
+
+约束：透明输出需 PNG/WebP/TIFF/AVIF/HEIC；**JPEG + cutout → per-file 报错**（不会静默拍平白底）。坏 spec 同样 per-file 报错（错误含原始 spec）。REST `process` 的 options 键与 MCP `process` 工具直接传 `cutout` 字符串即可。
+
 ### 2.7 LR 数据桥接（v1.7.1+，个人修图数据 → PhotoS 参数空间）
 
 | 命令 | stdout JSON shape | 说明 |
@@ -314,7 +324,7 @@ shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
 
 | 工具 | 关键参数 | 输出 |
 |---|---|---|
-| `process` | `paths[]`, `recursive`, `quality`, `output_format`, `output_dir`, `resize` "WxH", `scale`, `suffix`, `target_size` "500KB", `strip_gps`, `denoise`, `ev`, `log_curve`, `wb_temp`, `auto_straighten`, `crop_ratio` "16:9", `blur_faces` "blur"\|"pixelate", `blur_faces_margin`, v1.6 调色（`wb_tint`/`levels`/`curves`/`vibrance`/`color_grading`/`hsl`/`clarity`/`texture`/`dehaze`/`vignette`/`grain`），v1.7 局部与镜头（`masks`/`mask_adjust`/`point_color`/`lens_distort`/`lens_vignette`/`lens_ca`/`lens_profile`），v1.9 输出质量（`jpeg_subsampling`/`raw_demosaic`/`export_sharpen`/`highlight_recovery`/`raw_color_space`/`raw_16bit`）, `jobs`, `dry_run`, `evaluate` | `BatchResult` JSON + `ok`；`dry_run` → `{"dry_run", "count", "files", "settings"}`；`evaluate=true` 时每文件带 `ssim`（同 `--evaluate`）。`blur_faces` 需 `photo-s-tools[enhance]`（opencv），缺失时 per-file 报错 |
+| `process` | `paths[]`, `recursive`, `quality`, `output_format`, `output_dir`, `resize` "WxH", `scale`, `suffix`, `target_size` "500KB", `strip_gps`, `denoise`, `ev`, `log_curve`, `wb_temp`, `auto_straighten`, `crop_ratio` "16:9", `blur_faces` "blur"\|"pixelate", `blur_faces_margin`, v1.6 调色（`wb_tint`/`levels`/`curves`/`vibrance`/`color_grading`/`hsl`/`clarity`/`texture`/`dehaze`/`vignette`/`grain`），v1.7 局部与镜头（`masks`/`mask_adjust`/`point_color`/`lens_distort`/`lens_vignette`/`lens_ca`/`lens_profile`），v1.9 输出质量（`jpeg_subsampling`/`raw_demosaic`/`export_sharpen`/`highlight_recovery`/`raw_color_space`/`raw_16bit`），v2.1 抠图（`cutout`，见 §2.6）, `jobs`, `dry_run`, `evaluate` | `BatchResult` JSON + `ok`；`dry_run` → `{"dry_run", "count", "files", "settings"}`；`evaluate=true` 时每文件带 `ssim`（同 `--evaluate`）。`blur_faces` 需 `photo-s-tools[enhance]`（opencv），缺失时 per-file 报错 |
 | `info` | — | 同 `photo-s info --json`（含 `optional_features`/`plugins`） |
 | `exif` | `action` "show"\|"write", `paths[]`, `recursive`, `rating_min`, `rating`, `keywords`, `camera`, `tags` {"path": {…}}, `gps` "lat,lon" | show → `{"count", "results": [{path, rating, keywords, …}]}`；write → `{"written", "errors"}`。`gps` 把同一坐标批量写入 `paths` 全部文件 |
 | `dedup` | `paths[]`, `recursive`, `threshold` (默认 5), `action` "report"\|"keep-sharpest", `dry_run` (默认 **True**) | report → `{"count", "duplicate_count", "savings_bytes", "groups"}`；keep-sharpest → `{"kept", "removed", "dry_run"}` |

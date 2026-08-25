@@ -1,6 +1,6 @@
 # PhotoS 功能清单 — Feature Inventory
 
-> 以代码实际为准（v1.8.0），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
+> 以代码实际为准（v2.1.0），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
 ## 1. CLI 命令（34 个）
@@ -48,9 +48,9 @@
 
 **并发调优（v1.4.0 实测定案）**：真实交付集（29 张 24MP）`-j 1,2,4,8` 实测 2.62s→0.45s，8 线程 **5.83x**，线程远未饱和——重活（解码/缩放/编码/降噪推理）都在 Pillow/numpy/onnxruntime 里释放 GIL，纯 Python 段占比小，**多进程是负优化**（降噪场景内存翻倍）。调优旋钮：`-j` 提并发；SCUNet 降噪时可用 `OMP_NUM_THREADS` / onnxruntime intra-op 控制单算子线程数，避免与外层 `-j` 超额订阅。机器不同结论可能不同，用 `bench` 实测。
 
-## 2. 引擎处理能力（ProcessOptions 88 字段）
+## 2. 引擎处理能力（ProcessOptions 89 字段）
 
-**管线顺序**：open -> 插件 pre_process -> auto_rotate -> **镜头矫正（v1.7.0：畸变/消 CA/去暗角，几何先行）** -> auto_straighten -> log_curve -> 色彩管理 -> 影调 -> **LUT 调色（`--lut` .cube/预设，plugin provider 优先否则内置三线性）** -> 白平衡(temp+tint) -> 曝光 -> **LR 调色块（v1.6.0：`--levels` -> `--curves` -> `--clarity` -> `--texture` -> `--dehaze` -> `--vibrance` -> `--hsl` -> `--point-color` -> `--color-grading`）** -> **局部调整（v1.7.0：`--masks`/`--mask-adjust`，蒙版内标量调整）** -> denoise -> 自动色阶 -> **暗角/颗粒（`--vignette`/`--grain`）** -> crop/rotate/flip -> resize -> pad -> 打印尺寸 -> watermark -> save
+**管线顺序**：open -> 插件 pre_process -> auto_rotate -> **镜头矫正（v1.7.0：畸变/消 CA/去暗角，几何先行）** -> auto_straighten -> log_curve -> 色彩管理 -> 影调 -> **LUT 调色（`--lut` .cube/预设，plugin provider 优先否则内置三线性）** -> 白平衡(temp+tint) -> 曝光 -> **LR 调色块（v1.6.0：`--levels` -> `--curves` -> `--clarity` -> `--texture` -> `--dehaze` -> `--vibrance` -> `--hsl` -> `--point-color` -> `--color-grading`）** -> **局部调整（v1.7.0：`--masks`/`--mask-adjust`，蒙版内标量调整）** -> denoise -> 自动色阶 -> **暗角/颗粒（`--vignette`/`--grain`）** -> crop/rotate/flip -> resize -> pad -> 打印尺寸 -> watermark -> 人脸模糊 -> 导出锐化 -> **抠图（v2.1.0：`--cutout` 蒙版→alpha 通道，透明输出需 PNG/WebP/TIFF/AVIF/HEIC，JPEG 按文件报错）** -> save
 
 **LR 方向调色（v1.6.0，`photo_s/grade.py` 纯 numpy/PIL 零依赖）**：点曲线 `--curves "0,0;128,140;255,255"`（PCHIP 单调样条，支持 rgb/r/g/b 分通道）· 手动色阶 `--levels "80,200,1.1"` · 自然饱和度 `--vibrance` · 三向颜色分级 `--color-grading "shadows:120,0.3"` · WB tint `--wb-tint`（G/M 轴）· HSL 分色 `--hsl "green:10,0.2,0.1"`（8 色域软过渡）· 清晰度/纹理 `--clarity`/`--texture`（USM 局部对比）· 去雾 `--dehaze`（暗通道先验）· 暗角 `--vignette "0.5,0.4,0.4"` · 颗粒 `--grain "0.15,1.5"`
 
@@ -66,6 +66,7 @@
 | 曝光 | ev（2^EV）、auto_exposure |
 | 降噪 | denoise 0-20（SCUNet provider 优先，否则 NLM） |
 | 校正 | auto_levels（自动色阶）、**highlight_recovery（LR 式高光恢复 0-1：压缩硬切高光恢复渐变）**、log_curve（LOG 还原）、auto_straighten（扶正）、lens_distort/lens_vignette/lens_ca/lens_profile（镜头矫正 + 命名档案库） |
+| 抠图 | **cutout（v2.1.0 背景移除→alpha）：AI 分割 `subject`/`person`/`object:label`（复用 v1.8 segmask 权重）+ 颜色键控 `color:R,G,B,tol,feather,invert`（白底文字/logo 去底）；透明输出 PNG/WebP/TIFF/AVIF/HEIC，JPEG 按文件报错** |
 | 局部调整 | masks（命名蒙版 linear/radial/color）、mask_adjust（蒙版内 11 项标量）、point_color（取样色定向） |
 | 构图 | crop、crop_ratio、rotate、flip、pad |
 | 多尺寸 | output_sizes（`label:WxH,…`） |
@@ -77,6 +78,8 @@
 **RAW 输入**：.arw .cr2 .cr3 .crw .dng .erf .kdc .mef .mos .mrw .nef .nrw .orf .pef .raf .raw .rw2 .rwl .sr2 .srf .srw .x3f .3fr …（共 37 种）
 
 ## 3. GUI（Tkinter，双语 zh/en，明暗主题）
+
+**工作区（v2.0.0，gui.py → `photo_s/gui/` 包拆包）**：模块栏 Library 图库 / Develop 修图 / Export 导出 / Tools 工具 四工作区（⌘1..4 切换、活动模块持久化 gui_state.json）；Develop = 胶片条 + 160ms 防抖真实管线预览（stale 丢弃）+ 常驻直方图/曝光/色温读数 + 右栏调整设置区（与导出共用同一组 tk.Variable）；Export = 导出队列（勾选照片+体积合计+空态）+ 输出/水印/元数据/选项 Notebook；语言/主题**活切换**（`_translation_remap`/`_recolor_widgets` 遍历器，不再销毁重建，系统外观 FocusIn+30s 轮询跟随）；UiBus 事件总线（worker→UI，替代 12 处内联 drain）；ThumbCache 256MB LRU 缩略图；对外契约零变化（`__init__` 重导出旧名）
 
 **文件区**：添加文件/文件夹（不支持自动跳过+提醒）、勾选式二次选定（全选/全不选）、移除、分析
 **处理**：批量处理+进度、Esc 取消、队列追加续跑、双击对比、RAW 原生预览、**视觉预览**（⌘P：真实管线渲染原图↔处理后并排，设置变化防抖自动刷新，只写临时目录绝不删源）
@@ -125,4 +128,4 @@
 ## 9. 平台 / 验证
 
 - macOS / Linux / Windows（CI 7 jobs：py3.9-3.12 全量 + Windows 真实 Tk + SCUNet 真推理 + exe 打包双版本：完整版 + lite 无 GUI 精简版）
-- 测试 1164 个全绿
+- 测试 1204 个全绿

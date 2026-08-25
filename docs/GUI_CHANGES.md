@@ -1,8 +1,9 @@
 # PhotoS GUI 变更文档（供其他 Agent 对接）
 
-> 本文档记录 GUI 六轮改动的全部内容、接口契约和后续开发约定。
-> 涉及文件：`photo_s/gui.py`（重写）、`photo_s/engine.py`（取消支持）、
-> `pyproject.toml`（gui 可选依赖）、`tests/test_engine.py`（新增测试）。
+> 本文档记录 GUI 十轮改动的全部内容、接口契约和后续开发约定。
+> 涉及文件：`photo_s/gui.py` → `photo_s/gui/` 包（v2.0.0 拆包，`__init__.py`
+> 重导出全部旧名，含 filedialog/messagebox/threading——测试 monkeypatch 契约）、
+> `photo_s/engine.py`、`pyproject.toml`、`tests/test_gui_*.py`（新增测试，HOME 隔离夹具）。
 
 ---
 
@@ -598,3 +599,23 @@ preview 防抖混合轮询是唯一例外（`drain_pending()`）。
 GUI 测试一律 HOME 隔离（autouse `_isolate_home`）：app 从 `~/.photos/gui_state.json`
 恢复几何/缩略图/活动模块，真实 HOME 污染曾引发跨文件级联失败（Develop 自动渲染 →
 mkdtemp 追踪误伤 → root 泄漏 → macOS focus 事件风暴）。
+
+## 14. 第十一轮：v2.1.0 抠图（背景移除）
+
+### 14.1 入口与变量
+
+- Export 输出设置「选项」Tab 新折叠区块 `sec_cutout`（raw_16bit 之后、水印之前）：
+  模式下拉（关闭/主体(AI)/人物(AI)/物体(AI)/颜色键控）+ 参数区
+- 7 个 tk.Variable：`cutout_mode`（存**本地化标签**，活切换兼容，仿 blur_faces）/
+  `cutout_label`（COCO 类）/ `cutout_r,g,b`（默认 255）/ `cutout_tol`（30）/ `cutout_feather`（0）
+- `_on_cutout_mode_changed`（trace）：object 模式显示类别输入、color 模式显示
+  R/G/B+tol+feather（grid_remove 保留 grid 选项）；语言切换后比较仍经 `_t` 一致
+- 正向 `_cutout_spec()`（本地化标签→spec；坏 RGB 降级 None）；逆解析
+  `_apply_options_to_ui`（parse_cutout try/except，`invert` 不暴露 GUI、加载时丢弃）
+
+### 14.2 行为契约
+
+- 透明输出需 PNG/WebP/TIFF/AVIF/HEIC；**JPEG + cutout → per-file 报错**（不静默拍平白底）
+- Develop 实时预览经 `_build_options` 签名自动流入（零额外接线）
+- AI 分割需 `photo-s-tools[enhance]` + 首次自动下载权重（复用 segmask/modelstore）
+- GUI 测试 HOME 隔离不变式继续适用；新测试仿 `test_v17_fields_roundtrip`
