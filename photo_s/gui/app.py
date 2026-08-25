@@ -30,7 +30,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from .. import watermark  # for POSITIONS on the watermark section
 
@@ -272,6 +272,15 @@ class PhotoSApp:
         self.gpx_trace = tk.StringVar(value="")
         self.blur_faces = tk.StringVar(value="")       # ""|blur|pixelate
         self.blur_faces_margin = tk.StringVar(value="20")
+        # Cutout / background removal (v2.1.0); mode stores the localized
+        # label (live-switch remaps combobox values entry-wise)
+        self.cutout_mode = tk.StringVar(value="")
+        self.cutout_label = tk.StringVar(value="")     # COCO class (object)
+        self.cutout_r = tk.StringVar(value="255")      # color-key RGB
+        self.cutout_g = tk.StringVar(value="255")
+        self.cutout_b = tk.StringVar(value="255")
+        self.cutout_tol = tk.StringVar(value="30")
+        self.cutout_feather = tk.StringVar(value="0")
         # Composition
         self.crop = tk.StringVar(value="")
         self.crop_ratio = tk.StringVar(value="")
@@ -1998,6 +2007,61 @@ class PhotoSApp:
 
         self._add_checkbox(opts_frame, self._t("raw_16bit"),
                            self.raw_16bit, row=14)
+
+        # ── Cutout / background removal (v2.1.0) ─────────────────────────────
+        cut_frame = self._add_collapsible_section(OPT, "sec_cutout")
+        cut_frame.columnconfigure(1, weight=1)
+        tk.Label(cut_frame, text=self._t("cutout_mode"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"]).grid(
+            row=0, column=0, sticky="w", pady=(4, 0))
+        ttk.Combobox(cut_frame,
+                     values=(self._t("cutout_off"), self._t("cutout_subject"),
+                             self._t("cutout_person"), self._t("cutout_object"),
+                             self._t("cutout_color")),
+                     textvariable=self.cutout_mode, state="readonly",
+                     width=12, font=FONT_SMALL).grid(
+            row=0, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
+        # object mode: COCO class entry
+        cut_label_frame = tk.Frame(cut_frame, bg=COLORS["card"])
+        tk.Label(cut_label_frame, text=self._t("cutout_label"),
+                 font=FONT_SMALL, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).pack(side="left", padx=(0, 6))
+        ttk.Entry(cut_label_frame, textvariable=self.cutout_label,
+                  font=FONT_BODY, width=14).pack(side="left")
+        # color mode: R/G/B + tol + feather entries
+        cut_color_frame = tk.Frame(cut_frame, bg=COLORS["card"])
+        for i, (key, var) in enumerate((
+                ("cutout_r", self.cutout_r), ("cutout_g", self.cutout_g),
+                ("cutout_b", self.cutout_b))):
+            tk.Label(cut_color_frame, text=self._t(key), font=FONT_SMALL,
+                     fg=COLORS["text_secondary"], bg=COLORS["card"]).pack(
+                side="left", padx=(0 if i == 0 else 8, 2))
+            ttk.Entry(cut_color_frame, textvariable=var, width=3,
+                      font=FONT_BODY).pack(side="left")
+        for key, var in (("cutout_tol", self.cutout_tol),
+                         ("cutout_feather", self.cutout_feather)):
+            tk.Label(cut_color_frame, text=self._t(key), font=FONT_SMALL,
+                     fg=COLORS["text_secondary"], bg=COLORS["card"]).pack(
+                side="left", padx=(12, 2))
+            ttk.Entry(cut_color_frame, textvariable=var, width=4,
+                      font=FONT_BODY).pack(side="left")
+        cut_label_frame.grid(row=1, column=0, columnspan=2, sticky="w",
+                             pady=(4, 0))
+        cut_color_frame.grid(row=1, column=0, columnspan=2, sticky="w",
+                             pady=(4, 0))
+        tk.Label(cut_frame, text=self._t("cutout_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        tk.Label(cut_frame, text=self._t("cutout_ai_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        # dynamic visibility: object shows the label frame, color the rgb frame
+        self._cutout_frames = {"object": cut_label_frame,
+                               "color": cut_color_frame}
+        self.cutout_mode.trace_add("write", self._on_cutout_mode_changed)
+        self._on_cutout_mode_changed()
 
         # ── Watermark ────────────────────────────────────────────────────────
         wm_frame = self._add_collapsible_section(FX, "sec_watermark")
@@ -4447,6 +4511,25 @@ class PhotoSApp:
             content.pack(fill="x", padx=18, pady=(2, 4))
         return content
 
+    def _on_cutout_mode_changed(self, *_):
+        """Show the params frame matching the cutout mode (object label vs
+        color RGB/tol/feather); grid_remove keeps the grid options for the
+        re-show. The mode var holds a localized label, so compare via _t."""
+        frames = getattr(self, "_cutout_frames", None)
+        if not frames:
+            return
+        mode = self.cutout_mode.get()
+        visible = None
+        if mode == self._t("cutout_object"):
+            visible = frames["object"]
+        elif mode == self._t("cutout_color"):
+            visible = frames["color"]
+        for frame in frames.values():
+            if frame is visible:
+                frame.grid()
+            else:
+                frame.grid_remove()
+
     def _add_checkbox(self, parent, text, variable, row):
         """Add a native-styled checkbox."""
         cb = ttk.Checkbutton(parent, text=text, variable=variable)
@@ -5023,6 +5106,11 @@ class PhotoSApp:
         load). Forgiving: each field is wrapped in try/except so an
         unexpected value degrades instead of aborting. Fields without a GUI
         var (gpx_trace, scrub, date_shift, resume, …) are skipped."""
+        def _fmt_num(v) -> str:
+            if float(v) == int(v):
+                return str(int(v))
+            return f"{float(v):.4g}"
+
         def _set(var, value, fmt=str):
             try:
                 if value is None:
@@ -5073,6 +5161,39 @@ class PhotoSApp:
                 getattr(opts, "blur_faces", None), ""))
         _set(self.blur_faces_margin, getattr(opts, "blur_faces_margin", None),
              str)
+        # cutout spec → vars (inverse of _cutout_spec; mode first so the
+        # trace shows the right params frame; invalid/None resets; the
+        # invert keyword is not exposed in the GUI and is dropped)
+        cutout = getattr(opts, "cutout", None)
+        if not cutout:
+            self.cutout_mode.set("")
+            self.cutout_label.set("")
+            self.cutout_r.set("255")
+            self.cutout_g.set("255")
+            self.cutout_b.set("255")
+            self.cutout_tol.set("30")
+            self.cutout_feather.set("0")
+        else:
+            try:
+                from ..cutout import parse_cutout
+                spec = parse_cutout(cutout)
+                kind_label = {
+                    "subject": self._t("cutout_subject"),
+                    "person": self._t("cutout_person"),
+                    "object": self._t("cutout_object"),
+                    "color": self._t("cutout_color")}.get(spec.kind, "")
+            except Exception:
+                kind_label = ""
+            self.cutout_mode.set(kind_label)
+            if kind_label == self._t("cutout_object"):
+                self.cutout_label.set(spec.label or "")
+            elif kind_label == self._t("cutout_color"):
+                r, g, b = spec.rgb
+                self.cutout_r.set(str(r))
+                self.cutout_g.set(str(g))
+                self.cutout_b.set(str(b))
+                self.cutout_tol.set(_fmt_num(spec.tol))
+                self.cutout_feather.set(_fmt_num(spec.feather))
         # ints
         _set(self.quality, getattr(opts, "quality", None), int)
         _set(self.watermark_opacity, getattr(opts, "watermark_opacity", None),
@@ -7060,6 +7181,42 @@ class PhotoSApp:
         else:
             self.folder_pattern.set(value)
 
+    def _cutout_spec(self) -> Optional[str]:
+        """Build the cutout spec string from the UI vars (None when off).
+
+        The mode var holds a localized label — map back via _t. A color
+        mode with unparseable R/G/B degrades to None (like size parsing).
+        """
+        mode = self.cutout_mode.get()
+        if not mode or mode == self._t("cutout_off"):
+            return None
+        if mode == self._t("cutout_subject"):
+            return "subject"
+        if mode == self._t("cutout_person"):
+            return "person"
+        if mode == self._t("cutout_object"):
+            label = self.cutout_label.get().strip()
+            return f"object:{label}" if label else None
+        if mode == self._t("cutout_color"):
+            rgb = []
+            for v in (self.cutout_r.get(), self.cutout_g.get(),
+                      self.cutout_b.get()):
+                try:
+                    rgb.append(max(0, min(255, int(float(v)))))
+                except ValueError:
+                    return None
+            try:
+                tol = float(self.cutout_tol.get())
+            except ValueError:
+                tol = 30.0
+            try:
+                feather = float(self.cutout_feather.get())
+            except ValueError:
+                feather = 0.0
+            return (f"color:{rgb[0]},{rgb[1]},{rgb[2]},"
+                    f"tol={tol},feather={feather}")
+        return None
+
     def _build_options(self) -> ProcessOptions:
         """Build ProcessOptions from current UI state."""
         try:
@@ -7201,6 +7358,7 @@ class PhotoSApp:
                         self._t("blur_faces_pixelate"): "pixelate"}.get(
                             self.blur_faces.get()),
             blur_faces_margin=_to_float(self.blur_faces_margin.get(), 20.0),
+            cutout=self._cutout_spec(),
             max_straighten_angle=_to_float(self.max_straighten_angle.get(), 10.0),
             crop=self.crop.get().strip() or None,
             crop_ratio=self.crop_ratio.get().strip() or None,

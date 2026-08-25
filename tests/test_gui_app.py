@@ -195,6 +195,52 @@ class TestBuildOptions:
         assert app2.lens_distort.get() == "0.15"
         root.destroy()
 
+    def test_cutout_fields_roundtrip(self):
+        """v2.1.0 cutout vars map both directions (mode holds localized
+        labels, so the assertion goes through the current language)."""
+        root, app = _make_app()
+        from photo_s.engine import ProcessOptions
+        # color mode -> spec
+        app.cutout_mode.set(app._t("cutout_color"))
+        app.cutout_r.set("10")
+        app.cutout_g.set("20")
+        app.cutout_b.set("30")
+        app.cutout_tol.set("5")
+        app.cutout_feather.set("2")
+        assert app._build_options().cutout == "color:10,20,30,tol=5.0,feather=2.0"
+        # object mode -> spec
+        app.cutout_mode.set(app._t("cutout_object"))
+        app.cutout_label.set("car")
+        assert app._build_options().cutout == "object:car"
+        # empty label degrades to None
+        app.cutout_label.set("   ")
+        assert app._build_options().cutout is None
+        # off -> None
+        app.cutout_mode.set("")
+        assert app._build_options().cutout is None
+        # fresh app defaults
+        app2 = _make_app()[1]
+        assert app2._build_options().cutout is None
+        # options -> UI restores the vars
+        app2._apply_options_to_ui(ProcessOptions(
+            cutout="color:10,20,30,tol=5,feather=2"))
+        assert app2.cutout_mode.get() == app2._t("cutout_color")
+        assert app2.cutout_r.get() == "10" and app2.cutout_b.get() == "30"
+        assert app2.cutout_tol.get() == "5"
+        assert app2.cutout_feather.get() == "2"
+        # subject mode loads; invert keyword is dropped (not exposed in GUI)
+        app2._apply_options_to_ui(ProcessOptions(cutout="subject"))
+        assert app2.cutout_mode.get() == app2._t("cutout_subject")
+        app2._apply_options_to_ui(ProcessOptions(
+            cutout="color:255,255,255,invert"))
+        assert app2.cutout_mode.get() == app2._t("cutout_color")
+        assert app2.cutout_tol.get() == "30"
+        # None resets everything
+        app2._apply_options_to_ui(ProcessOptions())
+        assert app2.cutout_mode.get() == ""
+        assert app2.cutout_tol.get() == "30"
+        root.destroy()
+
     def test_point_color_ok_writes_spec(self):
         """_point_color_ok serializes targets back to the compact spec."""
         root, app = _make_app()
