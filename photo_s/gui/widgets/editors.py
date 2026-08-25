@@ -262,7 +262,10 @@ class ColorWheel(tk.Canvas):
         arr = np.clip(arr * 255.0, 0, 255).astype(np.uint8)
         arr[r > 1.0] = (245, 245, 245)  # outside the circle → neutral
         img = Image.fromarray(arr, "RGB")
-        self._tkimg = ImageTk.PhotoImage(img)
+        # master=self: without it the PhotoImage binds to the ambient
+        # default root — dead in multi-interp test processes, which
+        # surfaced as TclError "pyimageN doesn't exist" under Xvfb.
+        self._tkimg = ImageTk.PhotoImage(img, master=self)
         self.create_image(self.center, self.center, image=self._tkimg,
                           tags="wheel")
 

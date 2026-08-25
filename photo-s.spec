@@ -32,11 +32,17 @@ for mod in ("piexif", "tomli", "pillow_heif", "pillow_avif_plugin",
     except ImportError:
         pass
 # mcp is imported lazily inside functions (py3.9 support) — bundle the
-# whole package when the extra is installed, or `photo-s mcp` breaks
+# whole package when the extra is installed, or `photo-s mcp` breaks.
+# mcp.cli (the standalone `mcp` dev CLI) hard-imports typer, which newer
+# mcp releases moved to the mcp[cli] extra — collect with on_error
+# ignore and drop mcp.cli*: the server never imports it.
 try:
     __import__("mcp")
-    hiddenimports += collect_submodules("mcp")
-except ImportError:
+    hiddenimports += [
+        m for m in collect_submodules("mcp", on_error="ignore")
+        if not m.startswith("mcp.cli")
+    ]
+except Exception:
     pass
 # Pillow plugins are loaded via entry points / dynamic registration
 hiddenimports += collect_submodules("PIL")

@@ -1185,7 +1185,7 @@ class PhotoSApp:
         h = max(150, self._dev_image_lbl.winfo_height() - 16)
         im = img.convert("RGB")
         im.thumbnail((w, h), Image.LANCZOS)
-        return ImageTk.PhotoImage(im)
+        return ImageTk.PhotoImage(im, master=self._dev_image_lbl)
 
     def _dev_toggle_view(self):
         """Flip before/after. The button label always names the OTHER
@@ -1309,7 +1309,7 @@ class PhotoSApp:
     def _dev_show_thumb(self, lbl, img):
         try:
             from PIL import ImageTk
-            photo = ImageTk.PhotoImage(img)
+            photo = ImageTk.PhotoImage(img, master=lbl)
             lbl.configure(image=photo, text="", width=photo.width(),
                           height=photo.height())
             lbl.image = photo
@@ -2516,7 +2516,7 @@ class PhotoSApp:
         img_lbl.pack(fill="both", expand=True, pady=(4, 0))
 
         def _show(img, path):
-            st["tk"] = ImageTk.PhotoImage(img)
+            st["tk"] = ImageTk.PhotoImage(img, master=img_lbl)
             img_lbl.config(image=st["tk"])
             img_lbl.image = st["tk"]
             page.config(text=self._t(
@@ -3244,7 +3244,7 @@ class PhotoSApp:
                 mask_img = PILImage.fromarray(
                     (m * 255).astype("uint8"), "L").convert("L")
                 out = PILImage.composite(out, base, mask_img)
-                _photo["img"] = ImageTk.PhotoImage(out)
+                _photo["img"] = ImageTk.PhotoImage(out, master=preview)
                 preview.config(image=_photo["img"], text="", width=360,
                                height=270)
                 preview.image = _photo["img"]
@@ -3688,7 +3688,7 @@ class PhotoSApp:
                             self._t("mask_ai_overlay_warn"))
                     continue
             out = PILImage.fromarray(np.clip(over, 0, 255).astype(np.uint8))
-            _img_photo["tk"] = ImageTk.PhotoImage(out)
+            _img_photo["tk"] = ImageTk.PhotoImage(out, master=canvas)
             canvas.create_image(ox, oy, image=_img_photo["tk"],
                                 anchor="nw")
 
@@ -5376,7 +5376,7 @@ class PhotoSApp:
                     try:
                         img = _open_image_safe(p).convert("RGB")
                         img.thumbnail((150, 150), Image.LANCZOS)
-                        photo = ImageTk.PhotoImage(img)
+                        photo = ImageTk.PhotoImage(img, master=cell)
                         lbl = tk.Label(cell, image=photo, bg=COLORS["bg"],
                                        bd=0, highlightthickness=0)
                         lbl.image = photo  # keep the reference alive
@@ -6032,7 +6032,7 @@ class PhotoSApp:
                 from PIL import Image, ImageTk
                 img = _open_image_safe(p).convert("RGB")
                 img.thumbnail((900, 540), Image.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
+                photo = ImageTk.PhotoImage(img, master=img_lbl)
                 img_lbl.configure(image=photo, text="")
                 state["photo"] = photo  # keep the reference alive
             except Exception as e:
@@ -6700,7 +6700,7 @@ class PhotoSApp:
                     done += 1
                     continue
                 from PIL import ImageTk
-                photo = ImageTk.PhotoImage(img)
+                photo = ImageTk.PhotoImage(img, master=lbl)
                 lbl.configure(image=photo)
                 lbl._photo_ref = photo
                 lbl.configure(text="")
@@ -8181,7 +8181,7 @@ class PhotoSApp:
             try:
                 img = _open_image_safe(path).convert("RGB")
                 img.thumbnail((430, 300), Image.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
+                photo = ImageTk.PhotoImage(img, master=lbl)
                 lbl.configure(image=photo)
                 lbl.image = photo
             except Exception:
@@ -8614,7 +8614,7 @@ class PhotoSApp:
                 ratio = min(max_w / w, max_h / h, 1.0)
                 img = img.resize((max(1, int(w * ratio)), max(1, int(h * ratio))),
                                  Image.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
+                photo = ImageTk.PhotoImage(img, master=col)
                 img_label = tk.Label(col, image=photo, bg=COLORS["card"])
                 img_label.image = photo  # keep reference
                 img_label.pack(padx=12, pady=12)
@@ -8733,7 +8733,7 @@ class PhotoSApp:
                 p["scale"] = scale
                 view = img.resize((tw, th), Image.LANCZOS,
                                   box=(left, top, left + vw, top + vh))
-                photo = ImageTk.PhotoImage(view)
+                photo = ImageTk.PhotoImage(view, master=canvas)
                 p["photo"] = photo  # keep a reference or it is GC'd
                 canvas.delete("all")
                 canvas.create_image(cw / 2, ch / 2, image=photo)

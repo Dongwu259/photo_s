@@ -93,8 +93,11 @@ class TestFlatButton:
         btn.pack()
         root.update()
         # height floor is low: the default 11pt font can render a short
-        # canvas on Windows (observed 8px) — the canvas still must have size
-        assert btn.winfo_width() > 10 and btn.winfo_height() >= 6
+        # canvas on Windows (observed 8px) — the canvas still must have size.
+        # Requested size, not winfo_width(): a bare Xvfb (no window manager)
+        # never maps the toplevel, so the mapped size stays 1 — the request
+        # is what _measure_and_redraw actually sized.
+        assert btn.winfo_reqwidth() > 10 and btn.winfo_reqheight() >= 6
         assert len(btn.find_all()) == 2, "one rounded rect + one text item"
         btn.configure(text="A much longer label")
         root.update()
