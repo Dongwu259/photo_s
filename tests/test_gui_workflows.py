@@ -26,6 +26,7 @@ def _isolate_home(tmp_path, monkeypatch):
     mkdtemp-tracking assertions) and leaked live Tk roots that cascaded
     into focus-event storms on later tests."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
 
 

@@ -15,6 +15,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def _isolate_home(tmp_path, monkeypatch):
+    """Hermetic gui_state: the app restores geometry/thumb-size/active
+    module from ~/.photos/gui_state.json — a polluted real file once
+    flipped the startup module, made the Develop panel auto-render in
+    unrelated tests (its lazy tempdir then tripped other files'
+    mkdtemp-tracking assertions) and leaked live Tk roots that cascaded
+    into focus-event storms on later tests. USERPROFILE matters too:
+    Windows Path.home() reads it, not HOME."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+
+
 from photo_s.gui.state import ThumbCache, load_state, save_state, state_file
 from photo_s.gui.theme import (
     COLORS, SPACING, RADIUS,
@@ -74,7 +87,6 @@ class TestDarkDetection:
         monkeypatch.setattr(sys, "platform", "linux")
         monkeypatch.setattr(
             "photo_s.gui.theme.subprocess.run", _no_gsettings)
-        monkeypatch.setenv("HOME", str(tmp_path))
         (tmp_path / ".config").mkdir()
         (tmp_path / ".config" / "kdeglobals").write_text(
             "[General]\nColorScheme=BreezeDark\n", encoding="utf-8")
@@ -153,18 +165,15 @@ class TestThumbCache:
 
 class TestGuiState:
     def test_roundtrip(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("HOME", str(tmp_path))
         save_state({"geometry": "1120x720+10+20", "thumb_size": 144})
         assert state_file() == tmp_path / ".photos" / "gui_state.json"
         assert load_state() == {"geometry": "1120x720+10+20",
                                 "thumb_size": 144}
 
     def test_missing_file_returns_empty_dict(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("HOME", str(tmp_path))
         assert load_state() == {}
 
     def test_corrupt_file_returns_empty_dict(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("HOME", str(tmp_path))
         p = tmp_path / ".photos" / "gui_state.json"
         p.parent.mkdir(parents=True)
         p.write_text("{not json", encoding="utf-8")

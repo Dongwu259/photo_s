@@ -26,6 +26,7 @@ def _isolate_home(tmp_path, monkeypatch):
     assertion, leaked a live Tk root (assertion beat root.destroy) and
     the follow-up focus_force test spun in a native event storm."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
 
 def _make_app():
