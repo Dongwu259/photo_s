@@ -33,7 +33,7 @@
 #    不传则 AI 蒙版首次使用下载失败（不静默）。
 
 # 1. 本地验证（必须全绿）
-python3 -m pytest tests/ -q                 # 1164 个
+python3 -m pytest tests/ -q                 # 1236 个
 python3 -m photo_s.cli --help               # CLI 冒烟
 python3 -m photo_s.cli plugin list --json   # 官方插件目录
 
