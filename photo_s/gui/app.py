@@ -320,6 +320,17 @@ class PhotoSApp:
         self._dev_img_cache = ThumbCache(max_bytes=64 * 1024 * 1024)
         self._dev_show_before = tk.BooleanVar(value=False)
         self._dev_bus = UiBus(self.root)   # drained by _dev_tick; never started
+        # v2.2 editing efficiency: per-photo develop overlays (copy/paste +
+        # undo/redo) and persisted export recipes
+        self._settings_clipboard = None      # dev-fields dict (copy/paste)
+        self._photo_adjust = {}              # path → dev-fields overlay
+        self._dev_history = {}               # path → [dev-fields dict, …]
+        self._dev_history_pos = {}           # path → index into that list
+        self._export_recipes = getattr(self, "_pending_export_recipes", {})
+        try:
+            del self._pending_export_recipes
+        except AttributeError:
+            pass
 
         self._configure_ttk_styles()
 
@@ -633,6 +644,13 @@ class PhotoSApp:
                 self._thumb_size = 96
         except Exception:
             pass
+        recipes = state.get("export_recipes")
+        if isinstance(recipes, dict):
+            # consumed in __init__ after _export_recipes is initialized
+            # (_load_gui_state runs earlier in startup than that block)
+            self._pending_export_recipes = {
+                str(k): dict(v) for k, v in recipes.items()
+                if isinstance(v, dict)}
         return state
 
     def _save_gui_state(self):
@@ -641,6 +659,7 @@ class PhotoSApp:
             "geometry": self.root.geometry(),
             "thumb_size": self._thumb_size,
             "module": self._active_module,
+            "export_recipes": self._export_recipes,
         })
 
     def _on_main_close(self):
@@ -841,6 +860,44 @@ class PhotoSApp:
                               width=SETTINGS_WIDTH)
         export_col.pack(side="right", fill="y", padx=(10, 0))
         export_col.pack_propagate(False)
+        # v2.2: named export recipes (persisted in gui state) — packed
+        # before the settings notebook so it stays at the column top
+        recipe_card = tk.Frame(export_col, bg=COLORS["card"], bd=0,
+                               highlightthickness=0)
+        recipe_card.pack(fill="x", pady=(0, 10))
+        tk.Label(recipe_card, text=self._t("export_recipes"),
+                 font=FONT_SMALL, fg=COLORS["text"], bg=COLORS["card"],
+                 anchor="w").pack(fill="x", padx=10, pady=(8, 2))
+        recipe_row = tk.Frame(recipe_card, bg=COLORS["card"])
+        recipe_row.pack(fill="x", padx=10, pady=(0, 4))
+        self._recipe_var = tk.StringVar(value="")
+        self._recipe_combo = ttk.Combobox(
+            recipe_row, textvariable=self._recipe_var, font=FONT_SMALL,
+            values=sorted(self._export_recipes), state="readonly")
+        self._recipe_combo.pack(side="left", fill="x", expand=True)
+        FlatButton(
+            recipe_row, text=self._t("recipe_apply"),
+            command=self._export_recipe_apply, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=10,
+            pady=3).pack(side="left", padx=(6, 0))
+        FlatButton(
+            recipe_row, text=self._t("recipe_save"),
+            command=self._export_recipe_save, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=10,
+            pady=3).pack(side="left", padx=(6, 0))
+        FlatButton(
+            recipe_row, text=self._t("recipe_delete"),
+            command=self._export_recipe_delete, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=10,
+            pady=3).pack(side="left", padx=(6, 0))
+        self._recipe_status_lbl = tk.Label(recipe_card, text="",
+                                           font=FONT_TINY,
+                                           fg=COLORS["text_secondary"],
+                                           bg=COLORS["card"], anchor="w")
+        self._recipe_status_lbl.pack(fill="x", padx=10, pady=(0, 8))
         self._build_settings_panel(export_col, self._dev_settings_host)
         # Tools: workflow launchers
         self._build_tools_panel(self._module_frames["tools"])
@@ -872,6 +929,37 @@ class PhotoSApp:
         ("presets_title", "tools_desc_presets", "_show_presets"),
         ("analyze_title", "tools_desc_analyze", "_show_analysis"),
     )
+
+    # v2.2 copy/paste settings: the ProcessOptions fields that count as
+    # "develop" (adjustment) state. Copy grabs exactly these; paste writes
+    # them per photo. masks / mask_adjust are deliberately excluded —
+    # per-photo masks flow through the dedicated _photo_masks channel the
+    # mask dialog owns; a second channel would race the first.
+    _DEV_FIELDS = (
+        "brightness", "contrast", "saturation", "gamma", "sharpen",
+        "export_sharpen", "ev", "auto_exposure", "vibrance", "clarity",
+        "texture", "dehaze", "denoise", "wb_temp", "wb_tint",
+        "highlight_recovery", "lens_distort",
+        "grayscale", "sepia", "auto_levels", "auto_rotate", "auto_straighten",
+        "log_curve", "lut_file", "wb_reference", "levels", "curves",
+        "color_grading", "hsl", "vignette", "grain", "point_color",
+        "lens_vignette", "lens_ca", "lens_profile", "crop", "crop_ratio",
+        "rotate_bg", "flip", "pad_ratio", "pad_bg",
+    )
+
+    # Export recipes capture the output-side fields (format / size / naming /
+    # watermark / color-for-output). Values are canonical ProcessOptions
+    # values, so a recipe survives language switches and preset round-trips.
+    _EXPORT_RECIPE_FIELDS = (
+        "quality", "output_format", "output_dir", "prefix", "suffix",
+        "max_width", "max_height", "max_pixels", "scale_percent",
+        "target_size_bytes", "optimize", "progressive", "jpeg_subsampling",
+        "srgb", "flatten_cmyk", "preserve_exif", "strip_gps",
+        "watermark_text", "watermark_image", "watermark_position",
+        "watermark_opacity", "output_sizes",
+    )
+
+    _DEV_HISTORY_MAX = 50
 
     def _show_module(self, name):
         """Switch the visible workspace module. Pure pack switching — no
@@ -943,6 +1031,13 @@ class PhotoSApp:
                  fg=COLORS["text_secondary"], bg=COLORS["card"],
                  wraplength=360, justify="left").pack(
             anchor="w", pady=(2, 6))
+        # v2.2: paste Develop settings onto every checked photo at once
+        self._paste_checked_btn = FlatButton(
+            head, text=self._t("paste_to_checked"),
+            command=self._paste_settings_to_checked, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=12, pady=4)
+        self._paste_checked_btn.pack(anchor="w", pady=(0, 8))
 
         holder = tk.Frame(card, bg=COLORS["card"])
         holder.pack(fill="both", expand=True, padx=14, pady=(0, 14))
@@ -985,6 +1080,7 @@ class PhotoSApp:
                      bg=COLORS["card"]).pack(anchor="w", pady=8)
             return
         total = 0
+        adjusted = 0
         for i, p in enumerate(files):
             row = tk.Frame(inner, bg=COLORS["card"])
             row.pack(fill="x", pady=1)
@@ -997,15 +1093,24 @@ class PhotoSApp:
             tk.Label(row, text="{}. {}".format(i + 1, os.path.basename(p)),
                      font=FONT_SMALL, fg=COLORS["text"], bg=COLORS["card"],
                      anchor="w").pack(side="left")
+            if p in self._photo_adjust:
+                adjusted += 1
+                tk.Label(row, text=self._t("export_adjusted_badge"),
+                         font=FONT_TINY, fg=COLORS["accent"],
+                         bg=COLORS["card"]).pack(side="left", padx=(6, 0))
             tk.Label(row, text=size_txt, font=FONT_TINY,
                      fg=COLORS["text_secondary"],
                      bg=COLORS["card"]).pack(side="right")
         foot = tk.Frame(inner, bg=COLORS["card"])
         foot.pack(fill="x", pady=(6, 0))
-        tk.Label(foot, text="{} · {}".format(
-            self._t("files_count", n=len(files)), format_size(total)),
-            font=FONT_TINY, fg=COLORS["text_secondary"],
-            bg=COLORS["card"]).pack(anchor="w")
+        summary = "{} · {}".format(
+            self._t("files_count", n=len(files)), format_size(total))
+        if adjusted:
+            summary += " · {}".format(
+                self._t("export_adjusted_count", n=adjusted))
+        tk.Label(foot, text=summary,
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).pack(anchor="w")
 
     # ── Develop module: preview workspace (v2.0) ────────────────────────────
 
@@ -1077,6 +1182,33 @@ class PhotoSApp:
             border_color=COLORS["border"], font=FONT_SMALL, padx=12,
             pady=4)
         self._dev_toggle_btn.pack(side="left")
+        # v2.2: copy/paste adjustments + per-photo undo/redo
+        self._dev_copy_btn = FlatButton(
+            bottom_bar, text=self._t("dev_copy_settings"),
+            command=self._dev_copy_settings, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=12, pady=4)
+        self._dev_copy_btn.pack(side="left", padx=(8, 0))
+        self._dev_paste_btn = FlatButton(
+            bottom_bar, text=self._t("dev_paste_settings"),
+            command=self._dev_paste_settings, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=12, pady=4)
+        self._dev_paste_btn.pack(side="left", padx=(8, 0))
+        self._dev_undo_btn = FlatButton(
+            bottom_bar, text=self._t("dev_undo"), command=self._dev_undo,
+            bg=COLORS["bg"], fg=COLORS["text"],
+            hover_bg=COLORS["divider"], border_color=COLORS["border"],
+            font=FONT_SMALL, padx=12, pady=4)
+        self._dev_undo_btn.configure(state=tk.DISABLED)
+        self._dev_undo_btn.pack(side="left", padx=(8, 0))
+        self._dev_redo_btn = FlatButton(
+            bottom_bar, text=self._t("dev_redo"), command=self._dev_redo,
+            bg=COLORS["bg"], fg=COLORS["text"],
+            hover_bg=COLORS["divider"], border_color=COLORS["border"],
+            font=FONT_SMALL, padx=12, pady=4)
+        self._dev_redo_btn.configure(state=tk.DISABLED)
+        self._dev_redo_btn.pack(side="left", padx=(8, 0))
         tk.Label(bottom_bar, text=self._t("dev_hint"), font=FONT_TINY,
                  fg=COLORS["text_secondary"],
                  bg=COLORS["card"]).pack(side="right")
@@ -1122,6 +1254,18 @@ class PhotoSApp:
                     and not self.processing):
                 cur = self._dev_current_sig()
                 if cur != st["sig"]:
+                    # v2.2: an options change on the SAME photo is an edit —
+                    # persist it as the photo's develop overlay (a path
+                    # change is a selection, never an edit). The first edit
+                    # seeds the undo history with the pre-edit baseline.
+                    prev = st["sig"]
+                    if (prev is not None and prev[1] == cur[1]
+                            and isinstance(prev[0], ProcessOptions)):
+                        if cur[1] not in self._photo_adjust:
+                            self._dev_history_push(
+                                cur[1], self._dev_fields_of(prev[0]))
+                        self._photo_adjust[cur[1]] = \
+                            self._dev_fields_of(cur[0])
                     st["sig"] = cur
                     st["stable"] = 0
                 else:
@@ -1145,6 +1289,12 @@ class PhotoSApp:
             st["tempdir"] = tempfile.mkdtemp(prefix="photos_devpreview_")
             self._preview_tempdirs.add(st["tempdir"])
         st["inflight"] = True
+        # v2.2: a render of the SAME photo as the previous one is a settled
+        # edit — snapshot it into the undo history (deduped inside; first
+        # selections / photo switches never reach this branch)
+        prev = st["rendered"]
+        if prev is not None and prev[1] == path:
+            self._dev_history_push(path, self._dev_fields_of(opts))
         render_opts = workflows.preview_options(opts, st["tempdir"])
         self._dev_status_lbl.configure(text=self._t("dev_rendering"),
                                        fg=COLORS["text_secondary"])
@@ -1206,6 +1356,264 @@ class PhotoSApp:
                          else "dev_show_after"))
         self._dev_display_current()
 
+    # ── v2.2 editing efficiency: copy/paste + per-photo undo/redo ───────────
+
+    def _dev_fields_of(self, opts) -> dict:
+        """Snapshot of the develop (adjustment) fields from a
+        ProcessOptions — the copy/paste/undo currency."""
+        return {f: getattr(opts, f, None) for f in self._DEV_FIELDS}
+
+    def _apply_dev_fields(self, d: dict) -> None:
+        """Map develop fields back onto the GUI vars — a scoped version of
+        _apply_options_to_ui that never touches output/export fields.
+        Forgiving per field, like its parent."""
+        def _fmt(v):
+            if isinstance(v, float) and v == int(v):
+                return str(int(v))
+            return str(v)
+
+        norm = dict(d)
+        for k in ("export_sharpen", "highlight_recovery", "wb_tint"):
+            if norm.get(k) is None:
+                norm[k] = 0.0
+        for name in self._DEV_FIELDS:
+            var = getattr(self, name, None)
+            v = norm.get(name)
+            try:
+                if v is None:
+                    if isinstance(var, tk.StringVar):
+                        var.set("")
+                    elif isinstance(var, tk.BooleanVar):
+                        var.set(False)
+                    continue
+                if isinstance(var, tk.BooleanVar):
+                    var.set(bool(v))
+                elif isinstance(var, tk.StringVar):
+                    var.set(v if isinstance(v, str) else _fmt(v))
+                else:
+                    var.set(v)
+            except Exception:
+                pass
+
+    def _dev_history_push(self, path: str, d: dict) -> None:
+        """Append a state to the photo's undo stack (deduped; truncates the
+        redo tail; capped at _DEV_HISTORY_MAX)."""
+        hist = self._dev_history.setdefault(path, [])
+        pos = self._dev_history_pos.get(path, len(hist) - 1)
+        if hist and 0 <= pos < len(hist) and hist[pos] == d:
+            return
+        del hist[pos + 1:]
+        hist.append(dict(d))
+        if len(hist) > self._DEV_HISTORY_MAX:
+            del hist[:len(hist) - self._DEV_HISTORY_MAX]
+        self._dev_history_pos[path] = len(hist) - 1
+        self._dev_update_undo_buttons()
+
+    def _dev_undo(self):
+        hist = self._dev_history.get(self._dev_selected) or []
+        pos = self._dev_history_pos.get(self._dev_selected,
+                                        len(hist) - 1)
+        if pos <= 0:
+            return
+        pos -= 1
+        path = self._dev_selected
+        self._dev_history_pos[path] = pos
+        d = dict(hist[pos])
+        self._photo_adjust[path] = d
+        self._apply_dev_fields(d)
+        self._dev_update_undo_buttons()
+
+    def _dev_redo(self):
+        path = self._dev_selected
+        hist = self._dev_history.get(path) or []
+        pos = self._dev_history_pos.get(path, len(hist) - 1)
+        if pos >= len(hist) - 1:
+            return
+        pos += 1
+        self._dev_history_pos[path] = pos
+        d = dict(hist[pos])
+        self._photo_adjust[path] = d
+        self._apply_dev_fields(d)
+        self._dev_update_undo_buttons()
+
+    def _dev_update_undo_buttons(self):
+        """Reflect the selected photo's history position in the buttons."""
+        path = self._dev_selected
+        hist = self._dev_history.get(path) or []
+        pos = self._dev_history_pos.get(path, len(hist) - 1)
+        try:
+            self._dev_undo_btn.configure(
+                state=tk.NORMAL if pos > 0 else tk.DISABLED)
+            self._dev_redo_btn.configure(
+                state=tk.NORMAL if pos < len(hist) - 1 else tk.DISABLED)
+        except (AttributeError, tk.TclError):
+            pass  # buttons not built yet (early startup)
+
+    def _dev_undo_available(self) -> bool:
+        """Cmd+Z routing: per-photo history wins while Develop is active."""
+        if self._active_module != "develop" or not self._dev_selected:
+            return False
+        hist = self._dev_history.get(self._dev_selected) or []
+        pos = self._dev_history_pos.get(self._dev_selected,
+                                        len(hist) - 1)
+        return pos > 0
+
+    def _dev_redo_available(self) -> bool:
+        if self._active_module != "develop" or not self._dev_selected:
+            return False
+        hist = self._dev_history.get(self._dev_selected) or []
+        pos = self._dev_history_pos.get(self._dev_selected,
+                                        len(hist) - 1)
+        return 0 <= pos < len(hist) - 1
+
+    def _dev_copy_settings(self):
+        """Copy the selected photo's effective adjustments (its overlay if
+        any, else the current global sliders it is shown with)."""
+        if not self._dev_selected:
+            return
+        self._settings_clipboard = dict(
+            self._photo_adjust.get(self._dev_selected)
+            or self._dev_fields_of(self._build_options()))
+        self._dev_status_lbl.configure(
+            text=self._t("settings_copied"),
+            fg=COLORS["text_secondary"])
+
+    def _dev_paste_settings(self):
+        """Paste the clipboard onto the photo in the viewer."""
+        if not self._settings_clipboard:
+            self._dev_status_lbl.configure(
+                text=self._t("paste_need_copy"), fg=COLORS["warning"])
+            return
+        if not self._dev_selected:
+            return
+        self._paste_settings_to([self._dev_selected])
+        self._dev_status_lbl.configure(
+            text=self._t("paste_done", n=1), fg=COLORS["text_secondary"])
+
+    def _paste_settings_to(self, paths) -> None:
+        """Write the clipboard onto photos: per-photo overlay + history
+        (baseline first for photos never edited this session). If the
+        Develop viewer currently shows one of them, refresh its sliders."""
+        clip = self._settings_clipboard
+        if not clip or not paths:
+            return
+        for p in paths:
+            if p not in self._photo_adjust:
+                self._dev_history_push(
+                    p, self._dev_fields_of(self._build_options()))
+            d = dict(clip)
+            self._photo_adjust[p] = d
+            self._dev_history_push(p, d)
+        if self._dev_selected in paths:
+            self._apply_dev_fields(clip)
+        self._dev_update_undo_buttons()
+        self._refresh_export_queue()
+
+    def _paste_settings_to_checked(self):
+        """Export queue action: paste the clipboard onto every checked
+        photo."""
+        if not self._settings_clipboard:
+            self._recipe_status(self._t("paste_need_copy"))
+            return
+        files = self._checked_files()
+        if not files:
+            self._recipe_status(self._t("paste_need_checked"))
+            return
+        self._paste_settings_to(files)
+        self._recipe_status(self._t("paste_done", n=len(files)))
+
+    # ── v2.2 export recipes ─────────────────────────────────────────────────
+
+    def _recipe_status(self, text: str) -> None:
+        try:
+            self._recipe_status_lbl.configure(text=text)
+        except (AttributeError, tk.TclError):
+            pass
+
+    def _export_recipe_capture(self) -> dict:
+        return self._capture_recipe_fields(self._build_options())
+
+    def _capture_recipe_fields(self, opts) -> dict:
+        return {f: getattr(opts, f, None)
+                for f in self._EXPORT_RECIPE_FIELDS}
+
+    def _export_recipe_save(self):
+        name = self._recipe_var.get().strip()
+        if not name:
+            self._recipe_status(self._t("recipe_need_name"))
+            return
+        self._export_recipes[name] = self._export_recipe_capture()
+        self._save_gui_state()
+        self._recipe_combo.configure(values=sorted(self._export_recipes))
+        self._recipe_var.set(name)
+        self._recipe_status(self._t("recipe_saved", name=name))
+
+    def _export_recipe_apply(self):
+        name = self._recipe_var.get().strip()
+        recipe = self._export_recipes.get(name)
+        if not recipe:
+            self._recipe_status(self._t("recipe_need_pick"))
+            return
+        self._apply_recipe_fields(recipe)
+        self._recipe_status(self._t("recipe_applied", name=name))
+
+    def _export_recipe_delete(self):
+        name = self._recipe_var.get().strip()
+        if name not in self._export_recipes:
+            self._recipe_status(self._t("recipe_need_pick"))
+            return
+        del self._export_recipes[name]
+        self._save_gui_state()
+        self._recipe_combo.configure(values=sorted(self._export_recipes))
+        self._recipe_var.set("")
+        self._recipe_status(self._t("recipe_deleted", name=name))
+
+    def _apply_recipe_fields(self, d: dict) -> None:
+        """Map an export recipe onto the GUI vars (canonical values back to
+        vars — the inverse of _build_options for output-side fields)."""
+        def _set(name, value):
+            try:
+                getattr(self, name).set(value)
+            except (AttributeError, tk.TclError):
+                pass
+
+        def _num_or_empty(name, v):
+            _set(name, "" if v is None else str(int(v)))
+
+        _set("quality", int(d.get("quality") or 85))
+        _set("output_format", d.get("output_format") or "JPEG")
+        _set("output_dir", d.get("output_dir") or "")
+        _set("prefix", d.get("prefix") or "")
+        _set("suffix", d.get("suffix") or "")
+        _num_or_empty("max_width", d.get("max_width"))
+        _num_or_empty("max_height", d.get("max_height"))
+        _num_or_empty("max_pixels", d.get("max_pixels"))
+        _num_or_empty("scale_percent", d.get("scale_percent"))
+        tb = d.get("target_size_bytes")
+        _set("target_size_mode", bool(tb))
+        if tb:
+            if tb >= 1024 ** 2 and tb % 1024 ** 2 == 0:
+                _set("target_size_unit", "MB")
+                _set("target_size_value", str(tb // 1024 ** 2))
+            else:
+                _set("target_size_unit", "KB")
+                _set("target_size_value", str(max(1, round(tb / 1024))))
+        _set("optimize", bool(d.get("optimize")))
+        _set("progressive", bool(d.get("progressive")))
+        _set("jpeg_subsampling", d.get("jpeg_subsampling") or "420")
+        _set("srgb", bool(d.get("srgb")))
+        _set("flatten_cmyk", bool(d.get("flatten_cmyk")))
+        _set("preserve_exif", bool(d.get("preserve_exif")))
+        _set("strip_gps", bool(d.get("strip_gps")))
+        _set("watermark_text", d.get("watermark_text") or "")
+        _set("watermark_image", d.get("watermark_image") or "")
+        _set("watermark_position", d.get("watermark_position")
+             or "BOTTOM_RIGHT")
+        _set("watermark_opacity", int(d.get("watermark_opacity") or 50))
+        sizes = d.get("output_sizes")
+        _set("output_sizes", ",".join(str(s) for s in sizes) if sizes else "")
+
+
     def _dev_display_current(self):
         st = self._dev_render_state
         photo = st["before_photo"] if self._dev_show_before.get() \
@@ -1222,10 +1630,21 @@ class PhotoSApp:
         """Pick a photo for the viewer: reset the debounce, decode the
         original off-thread (RAW-safe), keep any rendered 'after' until a
         new one lands."""
+        # v2.2: flush mid-drag edits of the photo we are leaving (the tick
+        # may never have seen the final value), then load the new photo's
+        # own adjustments so the sliders beside the preview show them.
+        old = self._dev_selected
+        if old and old != path and old in self._photo_adjust:
+            self._photo_adjust[old] = self._dev_fields_of(
+                self._build_options())
         self._dev_selected = path
+        overlay = self._photo_adjust.get(path)
+        if overlay is not None:
+            self._apply_dev_fields(overlay)
         st = self._dev_render_state
         st.update(sig=None, stable=0, rendered=None, after_photo=None,
                   before_photo=None)
+        self._dev_update_undo_buttons()
         try:
             idx = self.files.index(path) + 1
         except ValueError:
@@ -6415,7 +6834,12 @@ class PhotoSApp:
             btn.configure(state=state)
 
     def _undo(self):
-        """Pop and run the latest undo entry; push its redo counterpart."""
+        """Pop and run the latest undo entry; push its redo counterpart.
+        In the Develop module, per-photo adjustment history wins over the
+        global file-action stack (v2.2)."""
+        if self._dev_undo_available():
+            self._dev_undo()
+            return
         if not self._undo_stack:
             messagebox.showinfo(self._t("undo"), self._t("undo_none"))
             return
@@ -6435,7 +6859,10 @@ class PhotoSApp:
 
     def _redo(self):
         """Re-apply the most recently undone action (when a redo closure
-        was recorded)."""
+        was recorded). Develop-module per-photo history takes precedence."""
+        if self._dev_redo_available():
+            self._dev_redo()
+            return
         if not self._redo_stack:
             messagebox.showinfo(self._t("redo"), self._t("redo_none"))
             return
@@ -6456,6 +6883,21 @@ class PhotoSApp:
         self._checked -= checked
         self._refresh_file_list()
         self._update_stats()
+
+    def _per_file_overlay(self, path: str, opts: ProcessOptions):
+        """Per-photo injections for batch processing (LR-style workflow):
+        develop overlays from copy/paste (v2.2) plus the mask editor's
+        per-photo masks. Returns the effective options for ``path``."""
+        from dataclasses import replace
+        edits = self._photo_adjust.get(path)
+        pm = (self._photo_masks or {}).get(path)
+        if not edits and not pm:
+            return opts
+        kw = dict(edits) if edits else {}
+        if pm:
+            kw["masks"] = pm.get("masks", opts.masks)
+            kw["mask_adjust"] = pm.get("mask_adjust", opts.mask_adjust)
+        return replace(opts, **kw)
 
     def _sync_redo_btn(self):
         btn = getattr(self, "redo_btn", None)
@@ -8518,15 +8960,7 @@ class PhotoSApp:
                 self._progress_status = status
 
         def _per_file_masks(path, opts):
-            """Inject per-photo masks (LR-style workflow) per file."""
-            from dataclasses import replace
-            pm = (self._photo_masks or {}).get(path)
-            if not pm:
-                return opts
-            return replace(
-                opts,
-                masks=pm.get("masks", opts.masks),
-                mask_adjust=pm.get("mask_adjust", opts.mask_adjust))
+            return self._per_file_overlay(path, opts)
 
         try:
             result = batch_process(

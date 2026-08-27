@@ -619,3 +619,42 @@ mkdtemp 追踪误伤 → root 泄漏 → macOS focus 事件风暴）。
 - Develop 实时预览经 `_build_options` 签名自动流入（零额外接线）
 - AI 分割需 `photo-s-tools[enhance]` + 首次自动下载权重（复用 segmask/modelstore）
 - GUI 测试 HOME 隔离不变式继续适用；新测试仿 `test_v17_fields_roundtrip`
+
+## 15. 第十二轮：v2.2.0 GUI 编辑效率（复制/粘贴 + 撤销/重做 + 导出配方）
+
+### 15.1 复制/粘贴设置（照片间同步调整）
+
+- Develop 底部工具条新增「复制设置/粘贴设置」（`_dev_copy_settings`/`_dev_paste_settings`）
+- 剪贴板 = `_DEV_FIELDS` 快照（42 个调整字段：影调/曲线/调色/矫正/几何；
+  **不含 masks/mask_adjust**——per-photo 蒙版走 `_photo_masks` 专属通道，避免双通道竞争）
+- 粘贴写入 `self._photo_adjust[path]`（per-photo 覆盖层）；若正被 Develop 查看则同步刷新滑杆
+- Export 队列头部「粘贴设置到勾选照片」一键套到全部勾选；行内「已调」徽标 + 底部合计
+- 批处理经 `_per_file_overlay(path, opts)` 注入（`dataclasses.replace` 合并
+  `_photo_adjust` 覆盖层 + `_photo_masks` 蒙版，原 `_per_file_masks` 闭包委托之）
+
+### 15.2 逐照片撤销/重做
+
+- `self._dev_history[path]`（快照栈，上限 50，去重、截断 redo 尾）+ `_dev_history_pos`
+- **首次编辑自动记基线**（`_dev_tick` 签名变化分支：同照片的 options 变化 = 编辑，
+  先存 prev 状态再写覆盖层）；**沉降时入栈**（`_dev_render`：同照片重渲染 = 一次定稿编辑，
+  拖动过程不刷栈）
+- `_dev_select` 切换前 flush 中途编辑、切换后加载该照片自己的覆盖层（LR 式
+  「滑杆显示当前照片设置」）；未编辑照片保持全局值（延续 v2.0 行为）
+- 按钮 `_dev_undo_btn`/`_dev_redo_btn`（FlatButton state 反映可用性）；
+  **Cmd/Ctrl+Z 在 Develop 模块优先走逐照片历史**（`_undo`/`_redo` 路由
+  `_dev_undo_available`/`_dev_redo_available`），否则回落全局文件操作栈
+
+### 15.3 导出配方（命名输出配置，持久化）
+
+- Export 右栏顶部配方卡：下拉（readonly）+ 套用/存为配方/删除
+- `_EXPORT_RECIPE_FIELDS`（22 个输出侧字段的**规范值**快照——格式/质量/尺寸/命名/
+  目标体积/水印/色彩输出；语言切换无感）
+- `_apply_recipe_fields` 逆映射回 vars，含 target_size_bytes → 模式+数值+单位 拆分
+- 持久化进 `gui_state.json` 的 `export_recipes` 键（`_load_gui_state` →
+  `_pending_export_recipes` → `__init__` 后半段接管，规避加载早于初始化的顺序坑）
+
+### 15.4 测试
+
+- `tests/test_gui_v22.py` 15 个：字段快照往返 / 复制粘贴（含队列徽标）/
+  撤销重走 + 去重 + Cmd+Z 路由 / `_per_file_overlay` 合并 / 配方往返 + 持久化 + 重启恢复
+- GUI 测试 HOME 隔离不变式继续适用（配方持久化断言直接读隔离后的 gui_state.json）
