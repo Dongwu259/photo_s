@@ -21,26 +21,9 @@
 | v2.0.0 | GUI v2.0：拆包 + 活切换 + 工作区 | **发布准备（2026-08-25）**：`gui.py`（10k 行）拆为 `gui/` 包（app/theme/strings/widgets/workflows/state/bus）；语言/主题**活切换**（反向映射遍历器，不再销毁重建）；UiBus 事件总线（12 处内联 drain 统一）；Library/Develop/Export/Tools **工作区**（Develop=胶片条+真实管线防抖预览+常驻直方图+旁侧调整工具，Export=导出队列+输出设置，两页共享 tk.Variable）；缩略图 ThumbCache LRU；Linux 深色检测 + Windows DPI PMv2；GUI 测试 HOME 隔离不变量；`docs/GUI_UPGRADE_PLAN.md` 全案 |
 | v2.1.0 | 抠图 / 背景移除 | **已发布 2026-08-25**：`--cutout` 紧凑 spec 四模式（`subject`/`person`/`object:label` AI 分割复用 v1.8 segmask 权重零新增下载 + `color:R,G,B[,tol][,feather][,invert]` 硬键控解白底文字/logo）→ alpha → PNG/WebP/TIFF/AVIF/HEIC 透明输出，JPEG 按文件报错不静默拍平；`ProcessOptions.cutout` 字段使 preset/REST/MCP 零胶水继承；GUI Export 选项 Tab 抠图区块。真图冒烟通过（2026-08-27：权重真实下载路径 + sha256 校验、cv2 5.0 推理、实拍柯基主体完整抠出、白底文字键控干净、JPEG 报错路径） |
 | v2.1.1 | patch：慢网络下载加固 + CI 转正 | modelstore 断点续传（HTTP Range 收养死进程 `.part`，完整未改名 part 离线采纳）+ 3 次重试 + 读超时 30→60s + 成功后清扫全部 `.part` 残片（v2.1.0 真图冒烟实证的慢网络首用失败）；CI Linux xvfb GUI job 去掉 `continue-on-error` 转正 + actions checkout@v5/setup-python@v6（Node 20 弃用警告） |
+| v2.2.0 | GUI 编辑效率 | **已发布 2026-08-27**：LR 式**复制/粘贴设置**（`_DEV_FIELDS` 42 字段快照，Develop 按钮 + Export 队列「粘贴到勾选」+「已调」徽标；per-photo 覆盖层 `_photo_adjust` 经 `_per_file_overlay` 与蒙版合并注入批处理）；**逐照片撤销/重做**（上限 50、首次编辑记基线、沉降入栈、切照片 flush/加载、Cmd+Z 在 Develop 优先逐照片历史）；**导出配方**（22 输出字段规范值快照，gui_state 持久化，套用/存/删）。agent 面零改动；新增 `test_gui_v22.py` 15 测，全量 1256 绿 |
 
 ## 规划中
-
-### v2.2.0（GUI 编辑效率 —— 主题：修好一张，套到全部；已实施）
-
-> **目标**：把 v2.0 工作区的价值兑现给人类用户——LR 式「复制设置 → 粘贴到多张」、
-> 逐照片撤销/重做、命名导出配方。全部纯 GUI 层，agent 面（CLI/REST/MCP）零改动。
-
-- [x] **复制/粘贴设置**：Develop「复制设置/粘贴设置」+ Export 队列「粘贴到勾选」；
-  `_DEV_FIELDS` 42 字段快照（不含蒙版——走 `_photo_masks` 专属通道防双通道竞争）；
-  per-photo 覆盖层 `_photo_adjust` 经 `_per_file_overlay` 注入批处理（与蒙版合并）；
-  队列行「已调」徽标
-- [x] **逐照片撤销/重做**：`_dev_history`（上限 50、去重、截断 redo 尾）；
-  首次编辑自动记基线（tick 签名分支）、沉降入栈（`_dev_render`，拖动不刷栈）；
-  切照片 flush + 加载该照片覆盖层；Cmd/Ctrl+Z 在 Develop 优先逐照片历史、
-  否则回落全局文件操作栈
-- [x] **导出配方**：Export 右栏配方卡（下拉 + 套用/存/删）；`_EXPORT_RECIPE_FIELDS`
-  22 输出侧字段规范值快照（语言切换无感）；持久化 `gui_state.json` `export_recipes`
-- [x] 测试 `test_gui_v22.py` 15 个（快照往返/粘贴徽标/撤销路由/注入合并/配方持久化+重启恢复）
-- [ ] 发布 v2.2.0
 
 ### v1.8.0（AI 识别蒙版 + 笔刷 -- 主题：智能局部调整，方向已定）
 
