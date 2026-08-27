@@ -25,6 +25,92 @@
 
 ## 规划中
 
+### v2.3.0（Agent 自动化闭环收口 —— 主题：装了插件 agent 就该看得见；2026-08-27 立项研究完成）
+
+> **立项研究结论（2026-08-27 全面盘点）**，四项不足按优先级：
+>
+> 1. **auto-tone 插件三线未接线（最严重）**：插件功能面完整（9 字段参数 + 置信度 +
+>    RAG + 批量 + Qwen advisor，权重仅 4.6MB），但 engine 只有 lut/denoise 两个
+>    provider 槽位（`auto_tone` provider 是死代码）；插件自带的 MCP 4 工具注册
+>    （`register_mcp_tools`）与 REST 4 路由注册从未被主仓调用（唯一调用方是测试）；
+>    `docs/PLUGINS.md` 的 `--preset auto-tone` 示例指向不存在的内置预设。
+>    **用户安装了插件，agent 却完全看不到它。**
+> 2. **analyze → 参数映射代码为零**：`AGENT_API.md` 的「判读速查表」只给 LLM 读；
+>    代码里仅有 auto_exposure/auto_levels 两个单点。无网络/无插件时 agent 拿到
+>    统计数据仍要自己猜参数。
+> 3. **batch 异步任务无 audit 钩子**：REST/MCP `batch_start` 的 result 只有
+>    BatchResult；验收要另调 `/audit`——闭环的 stop 条件不在任务里。
+> 4. **挑片维度割裂**：cull 是 5 阈值二分类（无综合质量分、无连拍分组）；
+>    keep-sharpest 藏在 dedup 里。摄影师挑片要跨三个工具拼。
+
+**P0 — 插件接线修复**：
+- [ ] engine 增 `auto_tone` provider 槽位（batch `--auto-tone [strength]` →
+      find_provider 预测 → 覆盖 9 字段；缺插件给安装提示不静默）
+- [ ] mcp_server / server 启动时发现已装插件的 `register_mcp_tools` /
+      `register_rest` 并调用（插件零改动即接线）
+- [ ] PLUGINS.md 示例修正（`--preset auto-tone` → 实际入口）
+- [ ] 插件批量路径 `batch_auto_tone` 接 engine 线程池（当前单线程逐图）
+
+**P0 — `photo-s suggest`（规则型参数推荐，零模型零依赖）**：
+- [ ] 新 `photo_s/suggest.py`：`analyze_image` 统计 → 推荐参数映射
+      （过曝→ev 降 / kelvin·tint 偏→wb 反向 / 低对比→curves S / 低饱和→vibrance
+      优先 / 高光死白→highlight_recovery / 两端裁切→levels / blur 启发→clarity 轻量），
+      每项带**理由与依据指标**（可解释）；输出紧凑字符串字段可直接喂 `--preset`/CLI
+- [ ] CLI `suggest`（`--apply` 直接生成 options、`--json`）+ MCP `suggest_tool` +
+      REST `POST /v1/suggest`
+- [ ] 与 auto-tone 分工写入 AGENT_API.md：suggest=零依赖规则层（快速/可解释/离线
+      保底），auto-tone=个人风格 AI 层（4.6MB 权重，装了就用）
+- [ ] 回归测试：`analyze → suggest → process → audit` 全链路脚本级测试
+
+**P1 — batch 任务 audit 内建**：
+- [ ] `batch_start` options 增 `audit: bool`；完成后 result 附每图
+      `{passed, reason}` + 整体 pass 率——agent 的 stop 条件进任务生命周期
+- [ ] REST `/process` 与 CLI `batch --audit` 同步暴露
+
+**P2 — 智能挑片 v2**：
+- [ ] cull 增 `--score`（亮度/对比/清晰度加权综合分，输出排序而非二分类）
+- [ ] cull 增 `--burst`（EXIF 时间戳+连拍间隔聚类分组，组内留最高分）
+- [ ] GUI Tools 卡片文案同步
+
+### v2.4.0 候选（GUI 一致性 + 大库性能 —— 主题：所见即所得，滚得动）
+
+> 立项研究结论：v2.2 的 per-photo 覆盖层加深了「三处所见不一致」——Develop 预览
+> 含覆盖层、⌘P 预览弹窗只走全局 options、review 灯箱/蒙版画布显示原图（三处同一个
+> 照片长得不一样）。Library 每行 7 个 widget 全量重建（勾选一张也重建全部行），
+> 几千张库可感知卡顿。§5 剩余四项（设置搜索/预设浏览器/快捷键表/首跑引导）全未做。
+
+- [ ] 三处所见统一：review 灯箱与蒙版画布走 develop 渲染管线（含 `_photo_adjust`），
+      ⌘P 预览注入选中照片覆盖层
+- [ ] Library 行级复用/差量刷新（勾选不再全量重建）→ VirtualGrid（Canvas 可视区
+      裁剪 + 固定行高，先 5k 张基准）
+- [ ] Library 键盘评级（1–5 星 / P 拒绝，对齐灯箱）+ `?` 快捷键表
+- [ ] Develop before/after 并排 + 分割线对比（_show_compare 缩放能力上移）
+- [ ] 设置搜索（命中高亮 + 自动展开折叠区）、预设侧栏浏览器（悬停实时预览）、
+      首跑引导卡
+- [ ] 蒙版画布从弹窗升格进 Develop、审查灯箱吸收进 Library（§4 后续批）
+
+### v2.5.0 候选（平台收尾 —— GUI_UPGRADE_PLAN §6 原案）
+
+- [ ] macOS：PyInstaller windowed `.app` + dmg（codesign ad-hoc、Tk 8.6 pin）；
+      `tk::mac::ShowPreferences/About` 菜单集成
+- [ ] Windows：无控制台 `photo-s-gui.exe`（console=False，主 exe 不变）
+- [ ] Linux：AppImage（可 allowed-to-fail）+ `.desktop` 随 sdist
+- [ ] CI bundle 三平台矩阵 + GUI 冒烟三平台各一次
+
+### 远期（数据/生态，未排期）
+
+- **XMP 写出**（LR 双向互通收口）：lrxmp 已能 LR→PhotoS；写 `.xmp` sidecar 让 LR
+  直接打开 PhotoS 调整续修——「agent 用的 Lightroom」定位的最后一块
+- **CLIP 语义搜索/自动打标**：`photo-s index` + `find "日落 海边"`（lr-similar
+  84 维特征已留升级口，换 CLIP embedding 即得；控制权重 ≤50MB 蒸馏模型）
+- **美学 verifier**（v1.9 阶段 3 首步）：CLIP/小 VLM + 回归头 → audit 的 reward 闸门
+  （复用 auto-tone 的权重发行/推理基建）
+- **AI 超分**（Real-ESRGAN 小模型）：复用 modelstore + SCUNet 分块推理基建，
+  交付导向 2x；先评估权重体积与速度
+- **watch 联动**：监视目录 → suggest/auto-tone 动态调参 → audit 自动验收的
+  无人值守管线（P0 落地后自然长出）
+- **分发渠道**：Homebrew tap / scoop / winget / Docker 镜像（REST/MCP server 容器化）
+
 ### v1.8.0（AI 识别蒙版 + 笔刷 -- 主题：智能局部调整，方向已定）
 
 > **实施（2026-08-21，发布就绪未发版）**：四项 + GUI 工作流全部落地，**1075 测试全绿**。
@@ -181,14 +267,14 @@ auto_rotate → auto_straighten → log_curve → 色彩管理
       sized 输出纳入撞名预分配、scaffold 拒绝覆盖 + 数字类名清洗、GPX 秒进位 + NaN 坐标过滤
 - [x] 双版本发行：完整版 exe（GUI+CLI）/ photo-s-lite exe（CLI+MCP，无 Tk，181MB vs 188MB）
 
-## 候选（未排期）
+## 候选（未排期，2026-08-27 清理）
 
-- **C. Agent 集成再深一层**：JSON 输出契约版本化（`schema_version`）、更多 MCP 工具
-  （bench / watch 状态）——边际收益递减，v1.3.0 已做主体
-- **D. 插件生态扩展**：更多官方 operation 插件（每个都要新 provider 槽位、动引擎，
-  跨层成本高）——差异化亮点但性价比低于 A/B
-- **E. 独立发行版生态**：`photo-s-plugin-lut` 已是纯 numpy 无权重；可探索更多
-  "零依赖纯代码"插件类型
+> 原候选 C/D/E 中已落地或已并入上方版本段落的条目移除；保留仍然成立的观察。
+
+- 插件生态扩展的成本结构未变：每个官方 operation 插件都要新 provider 槽位、动
+  引擎，跨层成本高——v2.3.0 的接线修复优先让**已有**插件的入口面（MCP/REST）
+  通用化，再考虑新官方插件
+- `photo-s-plugin-lut`（纯 numpy 无权重）的"零依赖纯代码"插件类型可继续探索
 
 ## 原则
 
