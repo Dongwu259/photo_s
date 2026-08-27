@@ -135,6 +135,12 @@ def register_routes(handler_class):
     handler_class._do_advisor = _do_advisor
     handler_class._do_batch_auto_tone = _do_batch_auto_tone
 
+    # 幂等守卫：photo-s 每次创建 server 都会调用 register_routes（类级
+    # 补丁是进程全局的）——重复包裹 do_POST 会让同一路由分发多次
+    if getattr(handler_class, "_auto_tone_routes_patched", False):
+        return
+    handler_class._auto_tone_routes_patched = True
+
     _orig_do_POST = handler_class.do_POST
 
     def _patched_do_POST(self):

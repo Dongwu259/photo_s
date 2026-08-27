@@ -86,6 +86,42 @@ class PhotoSPlugin:
             "{} declares 'lut' but does not implement lut()"
             .format(self.name))
 
+    def auto_tone(self, img, strength: float, ctx: PluginContext):
+        """Engine auto-tone-slot provider (v2.3). Called when 'auto_tone'
+        in self.provides and the user passed ``--auto-tone``.
+
+        Args:
+            img: PIL Image.
+            strength: 0-1 (``--auto-tone`` value, default 1.0).
+            ctx: PluginContext with input_path (the predictor reads the
+                original file — pixel-accurate features beat re-saved pixels).
+        Returns:
+            Adjusted PIL Image (never None — raise for a per-file error).
+        """
+        raise NotImplementedError(
+            "{} declares 'auto_tone' but does not implement auto_tone()"
+            .format(self.name))
+
+    def register_mcp_tools(self, mcp) -> None:
+        """Surface plugin tools on the MCP server (v2.3 wiring).
+
+        Called once at server startup for every loaded plugin that defines
+        this hook — typically ``mcp.add_tool(fn, name=..., description=...)``
+        for each plugin capability (see auto-tone's api/mcp_tools.py).
+        Exceptions are caught per-plugin and logged, never fatal.
+        Default: no extra tools.
+        """
+        pass
+
+    def register_rest(self, handler_class) -> None:
+        """Extend the REST server (v2.3 wiring). Called once at serve
+        startup with the ``_PhotoSHandler`` class — typically to add
+        dispatch branches / routes (see auto-tone's api/rest.py).
+        Exceptions are caught per-plugin and logged, never fatal.
+        Default: no extra routes.
+        """
+        pass
+
     def on_pre_process(self, img, options, ctx: PluginContext) -> None:
         """Called after image is loaded, before any transformation.
 

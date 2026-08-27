@@ -392,6 +392,10 @@ def _add_transform_args(parser):
         help=_t('help___denoise'),
     )
     parser.add_argument(
+        "--auto-tone", type=float, default=argparse.SUPPRESS,
+        metavar="0-1", help=_t('help___auto_tone'),
+    )
+    parser.add_argument(
         "--lut", type=str, default=argparse.SUPPRESS, metavar="FILE|PRESET",
         help=_t('help___lut'),
     )
@@ -683,6 +687,7 @@ def _build_process_options(parsed) -> ProcessOptions:
         auto_exposure=getattr(parsed, 'auto_exposure', None),
         log_curve=getattr(parsed, 'log_curve', None),
         denoise=getattr(parsed, 'denoise', None),
+        auto_tone=getattr(parsed, 'auto_tone', None),
         lut_file=getattr(parsed, 'lut', None),
         auto_straighten=getattr(parsed, 'auto_straighten', False),
         max_straighten_angle=getattr(parsed, 'max_straighten_angle', 10.0),
@@ -1647,6 +1652,18 @@ def run_cli(args: List[str] = None) -> int:
         "--list", action="store_true",
         help=_t('help___list'),
     )
+    cull_parser.add_argument(
+        "--score", action="store_true",
+        help=_t('help___cull_score'),
+    )
+    cull_parser.add_argument(
+        "--burst", action="store_true",
+        help=_t('help___cull_burst'),
+    )
+    cull_parser.add_argument(
+        "--gap", type=float, default=2.0, metavar="SEC",
+        help=_t('help___cull_gap'),
+    )
 
     # ── select subcommand (keeper workflow: sort by rating) ────────────────
     select_parser = subparsers.add_parser(
@@ -1994,6 +2011,25 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___blur_min'),
     )
     audit_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
+    suggest_parser = subparsers.add_parser(
+        "suggest", help=_t('cmd_suggest'),
+    )
+    suggest_parser.add_argument(
+        "paths", nargs="+", help=_t('help___paths'),
+    )
+    suggest_parser.add_argument(
+        "-r", "--recursive", action="store_true",
+        help=_t('help___recursive'),
+    )
+    suggest_parser.add_argument(
+        "--scale", type=float, default=1.0, metavar="0-1",
+        help=_t('help___scale'),
+    )
+    suggest_parser.add_argument(
         "--json", action="store_true",
         help=_t('help___json'),
     )
@@ -2805,6 +2841,34 @@ def run_cli(args: List[str] = None) -> int:
         if not files:
             return _no_files_exit(parsed)
 
+        # v2.3 ranking mode: scores rank (never reject), bursts keep one
+        if getattr(parsed, 'score', False) or getattr(parsed, 'burst', False):
+            import json as _json
+            from .cull import best_of_bursts, score_files
+            gap = max(0.1, float(parsed.gap or 2.0))
+            if getattr(parsed, 'burst', False):
+                rows = best_of_bursts(files, gap_seconds=gap)
+            else:
+                rows = score_files(files)
+            if getattr(parsed, 'list', False):
+                # --list: machine-friendly keeper candidates, one per line —
+                # burst bests when --burst, the full ranking otherwise
+                for r in rows:
+                    if getattr(parsed, 'burst', False) and not r.get("burst_best"):
+                        continue
+                    print(r["path"])
+            elif getattr(parsed, 'json', False):
+                print(_json.dumps(versioned({"count": len(rows), "results": rows}),
+                                  indent=2, ensure_ascii=False))
+            else:
+                for r in rows:
+                    star = " ★" if r.get("burst_best") else ""
+                    print(f"  {r.get('score', 0):5.1f}  {r['path']}{star}")
+                best_n = sum(1 for r in rows if r.get("burst_best"))
+                if best_n:
+                    print(f"\n{_t('msg_cull_burst_best')}: {best_n}")
+            return 0
+
         results = cull_files(
             files,
             overexposed_max=parsed.overexposed_max,
@@ -3234,6 +3298,35 @@ def run_cli(args: List[str] = None) -> int:
         # agents branch on the exit code ("termination condition" per the
         # JSON contract) — a failed audit must not exit 0
         return 0 if all(r.get("passed") for r in results) else 1
+
+    if parsed.command == "suggest":
+        import json
+        from .suggest import suggest_file
+        files = _collect_files(parsed.paths, recursive=parsed.recursive)
+        if not files:
+            return _no_files_exit(parsed)
+        scale = max(0.0, min(1.0, float(parsed.scale or 1.0)))
+        results = [suggest_file(p, scale=scale) for p in files]
+        if getattr(parsed, 'json', False):
+            print(json.dumps(versioned({
+                "count": len(results),
+                "neutral": sum(1 for r in results if r.get("neutral")),
+                "results": results}), indent=2, ensure_ascii=False))
+        else:
+            for r in results:
+                if not r.get("ok"):
+                    print(f"  ❌ {r['path']}  {r.get('error', '')}")
+                    continue
+                if r["neutral"]:
+                    print(f"  ✔ {r['path']}  {_t('suggest_neutral')}")
+                    continue
+                fields = "  ".join(
+                    "{}={}".format(k, v)
+                    for k, v in sorted(r["suggested"].items()))
+                print(f"  💡 {r['path']}  {fields}")
+                for rs in r["reasons"]:
+                    print(f"      · {rs['advice']}")
+        return 0
 
     if parsed.command == "preview":
         import json

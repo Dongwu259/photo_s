@@ -44,33 +44,44 @@
 >    keep-sharpest 藏在 dedup 里。摄影师挑片要跨三个工具拼。
 
 **P0 — 插件接线修复**：
-- [ ] engine 增 `auto_tone` provider 槽位（batch `--auto-tone [strength]` →
-      find_provider 预测 → 覆盖 9 字段；缺插件给安装提示不静默）
-- [ ] mcp_server / server 启动时发现已装插件的 `register_mcp_tools` /
-      `register_rest` 并调用（插件零改动即接线）
-- [ ] PLUGINS.md 示例修正（`--preset auto-tone` → 实际入口）
-- [ ] 插件批量路径 `batch_auto_tone` 接 engine 线程池（当前单线程逐图）
+- [x] engine 增 `auto_tone` provider 槽位（色彩管理后、手动调整前；`--auto-tone 0-1`；
+      缺插件 per-file 清晰报错 + 指向 suggest 替代；preset/REST/MCP options 零胶水继承）
+- [x] mcp_server / server 启动时发现已装插件的 `register_mcp_tools` / `register_rest`
+      并调用（hooks 协议 + base 默认 no-op 不误计；REST 类级补丁进程内 once + 插件侧
+      幂等守卫防 do_POST 层层包裹）；实测装插件后 MCP 25→30 工具、REST 自动挂
+      /v1/auto_tone* 路由
+- [x] PLUGINS.md 示例修正（`--preset auto-tone` → `--auto-tone` + MCP/REST 自动注册）
+- [x] **顺带发现并修复既有死锁**：`_job_worker` 在 `_JOBS_LOCK` 内调
+      `cancel_checker()`（非重入锁重入）→ batch job 永久持锁、所有 batch_status
+      轮询挂死（v1.7.1 起潜伏，既有测试只查工具名从未跑完 job）
 
 **P0 — `photo-s suggest`（规则型参数推荐，零模型零依赖）**：
-- [ ] 新 `photo_s/suggest.py`：`analyze_image` 统计 → 推荐参数映射
-      （过曝→ev 降 / kelvin·tint 偏→wb 反向 / 低对比→curves S / 低饱和→vibrance
-      优先 / 高光死白→highlight_recovery / 两端裁切→levels / blur 启发→clarity 轻量），
-      每项带**理由与依据指标**（可解释）；输出紧凑字符串字段可直接喂 `--preset`/CLI
-- [ ] CLI `suggest`（`--apply` 直接生成 options、`--json`）+ MCP `suggest_tool` +
+- [x] 新 `photo_s/suggest.py`：analyze 统计 → 保守建议（ev 拉回 0.5 / 过曝→
+      highlight_recovery / kelvin·tint 偏→wb_temp=估计值·wb_tint 反向 / 低对比→
+      contrast 轻乘 / 直方图两端未用满无裁切→levels[宽度≥80 防爆] / 低饱和→
+      vibrance 护肤色 / blur+低对比双信号→clarity 轻量），每条带理由+依据指标；
+      中性图 `suggested={}` + `neutral=true`；`--scale 0-1` 全幅度缩放
+- [x] CLI `suggest`（人读/`--json`/`--scale`）+ MCP `suggest` 工具 +
       REST `POST /v1/suggest`
-- [ ] 与 auto-tone 分工写入 AGENT_API.md：suggest=零依赖规则层（快速/可解释/离线
-      保底），auto-tone=个人风格 AI 层（4.6MB 权重，装了就用）
-- [ ] 回归测试：`analyze → suggest → process → audit` 全链路脚本级测试
+- [x] 分工写入 AGENT_API.md §7.1（规则层 vs auto-tone 风格层，可叠加）
+- [x] 回归测试：`analyze → suggest → process → audit` 全链路（暗图修复后过闸门）
 
 **P1 — batch 任务 audit 内建**：
-- [ ] `batch_start` options 增 `audit: bool`；完成后 result 附每图
-      `{passed, reason}` + 整体 pass 率——agent 的 stop 条件进任务生命周期
-- [ ] REST `/process` 与 CLI `batch --audit` 同步暴露
+- [x] REST `POST /process {"async":true,"audit":true}` 与 MCP
+      `batch_start(audit=True)`：完成后对**输出**逐图 audit，result 附
+      `audit {passed, reason}` + `audit_summary {pass_rate}`
 
 **P2 — 智能挑片 v2**：
-- [ ] cull 增 `--score`（亮度/对比/清晰度加权综合分，输出排序而非二分类）
-- [ ] cull 增 `--burst`（EXIF 时间戳+连拍间隔聚类分组，组内留最高分）
-- [ ] GUI Tools 卡片文案同步
+- [x] cull `--score`：加权综合分（曝光贴近 0.5×0.35 + 对比×0.25 + 清晰度×0.25 +
+      饱和×0.15 − 过曝/欠曝惩罚）0-100 排序，附各分量（可解释），只排序不淘汰
+- [x] cull `--burst [--gap S]`：EXIF DateTimeOriginal 聚类（无 EXIF 回落 mtime），
+      组内留最高分（`burst_best` 标记）；`--list` 输出保留候选供管道
+- [x] GUI Tools 卡片文案同步（评分排序 + 连拍留最佳）
+
+**测试**：`tests/test_v23_loop.py` 21 个（suggest 规则/中性/scale/不可读/全链路/REST/MCP、
+接线钩子真伪/once 幂等/engine 槽位缺失与委托、batch audit REST+MCP、cull 评分/EXIF·mtime
+分组/留最佳）；test_mcp 工具表改核心子集断言（兼容插件加工具）。
+**待发布**（版本 bump + RELEASE 流程，用户确认后执行）。
 
 ### v2.4.0 候选（GUI 一致性 + 大库性能 —— 主题：所见即所得，滚得动）
 

@@ -27,7 +27,7 @@ JSON contract (`schema_version`, additive-only — upgrades never break a consum
 
 | Path | Entry point |
 |---|---|
-| **MCP server** — 25 tools (process / select / hdr / blurfaces / dedup / …) | `claude mcp add photo-s -- photo-s mcp` |
+| **MCP server** — 26 core tools + plugin tools auto-registered (process / suggest / select / hdr / blurfaces / dedup / …) | `claude mcp add photo-s -- photo-s mcp` |
 | **Packaged SKILL.md** — skill-capable agents, zero extras | `cp -r skills/photo-s ~/.claude/skills/` |
 | **REST API** — async tasks + SSE progress | `photo-s serve --port 0 --token auto --ready-file x.json` |
 | **Python library** — no IPC overhead | `from photo_s.engine import batch_process` |
@@ -59,6 +59,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | Local masks | ✅ | ✅ | Named linear/radial/color-range masks + v1.8 AI segmentation (`subject`/`person`/`object:class`), brush strokes (subtract mode), combos (A&B / A-B); 11 scalar + 5 string local adjustments under each |
 | Lens correction | ✅ | ✅ | Manual distortion k1, vignette fix, CA fix (pure numpy); named user-maintained lens profiles |
 | Perceptual analysis | ✅ | ✅ | Histograms / channel stats / WB lean / exposure / blur (`analyze`) |
+| Param suggestions | — | ✅ | Rule-based `suggest`: analyze stats → conservative fix params with reasons (zero models, offline) |
 | Vibrance / clarity / texture | ✅ | ✅ | Natural saturation, local contrast |
 | Dehaze / vignette / grain | ✅ | ✅ | Dark-channel dehaze, radial vignette, film grain |
 | Exposure | ✅ | ✅ | Stops adjustment or normalize-to-target auto exposure |
@@ -66,7 +67,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | Highlight recovery | ✅ | ✅ | LR-style: compress flat clipped highlights back to visible gradient |
 | LOG recovery | ✅ | ✅ | SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG (1D LUT, no deps) |
 | LUT grading | ✅ | ✅ | .cube trilinear (plugin adds tetrahedral + 5 film presets) |
-| AI auto-tone | — | ✅¹ | Plugin: CLIP+MLP predicts 9-field LR params + confidence, RAG boost, optional Qwen3-VL aesthetic score & advisor (`photo-s-plugin-auto-tone[model]`) |
+| AI auto-tone | — | ✅¹ | Plugin: CLIP+MLP predicts 9-field LR params + confidence, RAG boost, optional Qwen3-VL aesthetic score & advisor (`photo-s-plugin-auto-tone[model]`); v2.3 wired into the engine slot (`--auto-tone`), MCP tools and REST routes auto-register on install |
 | Denoise | ✅ | ✅¹ | NLM (`[enhance]` extra) |
 | Auto-straighten | ✅ | ✅¹ | Level the horizon, confidence-gated (`[enhance]` extra) |
 | HDR merge | ✅ | ✅¹ | Exposure fusion, handheld alignment (`[enhance]` extra) |
@@ -81,7 +82,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | Metadata tagging | ✅ | ✅ | Rating/keywords/caption batch tag (UserComment) |
 | Metadata filter | ✅ | ✅ | Find photos by rating/keywords |
 | Metadata import | — | ✅ | Batch write from spreadsheet |
-| Culling | ✅ | ✅ | Exposure/sharpness filter (GUI keeps only matches, undoable) |
+| Culling | ✅ | ✅ | Exposure/sharpness filter (GUI keeps only matches, undoable); `--score` weighted quality ranking + `--burst` keep-best-per-burst |
 | Select (keeper) | ✅ | ✅ | Sort by rating — keep/reject thresholds (≥4 keep, ≤2 reject) |
 | Burst keep-sharpest | ✅ | ✅ | Keep the sharpest of a burst |
 | Checksum manifest | ✅ | ✅ | SHA-256 archive integrity + verify |
@@ -140,7 +141,7 @@ photo-s select ~/shoot/ -r --selects-dir picks --rejects-dir bin --dry-run
 photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 ```
 
-`photo-s --help` lists all 34 commands. Language: `--language en|zh|auto`.
+`photo-s --help` lists all 35 commands. Language: `--language en|zh|auto`.
 
 ---
 
@@ -148,7 +149,7 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 
 | Doc | Contents |
 |---|---|
-| [`docs/FEATURES.md`](docs/FEATURES.md) | Full inventory — 34 CLI commands, engine pipeline |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | Full inventory — 35 CLI commands, engine pipeline |
 | [`docs/AGENT_API.md`](docs/AGENT_API.md) | Agent contract: JSON shapes, exit codes, REST, MCP |
 | [`docs/PLUGINS.md`](docs/PLUGINS.md) | Plugin system: SCUNet denoise, LUT, write your own |
 | [`docs/GUI_CHANGES.md`](docs/GUI_CHANGES.md) | GUI behavior & interface contract |

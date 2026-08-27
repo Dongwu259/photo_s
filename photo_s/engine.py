@@ -242,6 +242,9 @@ class ProcessOptions:
     denoise: Optional[float] = None  # denoise strength; SCUNet plugin provider
     #                                # preferred when installed, else NLM
     #                                # (NLM needs opencv extra)
+    auto_tone: Optional[float] = None  # AI auto-tone strength 0-1 (auto-tone
+    #                                # plugin provider; no built-in fallback —
+    #                                # without the plugin this is an error)
     auto_straighten: bool = False  # auto-level the horizon (needs opencv extra)
     max_straighten_angle: float = 10.0  # max horizon tilt to correct (degrees)
     # Composition
@@ -1299,6 +1302,20 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
 
         # ── Color management (sRGB profile / CMYK flatten) ──────────────────
         img = apply_color_management(img, options.srgb, options.flatten_cmyk)
+
+        # ── AI auto-tone (plugin provider only, v2.3) ────────────────────────
+        # Runs before the manual tone block so explicit flags refine on top
+        # of the predicted grade. No built-in fallback — silently skipping a
+        # requested AI pass would hide a missing plugin from the user.
+        if options.auto_tone:
+            from .plugin import find_provider
+            provider = find_provider("auto_tone")
+            if provider is None:
+                raise RuntimeError(
+                    "--auto-tone needs the auto-tone plugin "
+                    "(pip install photo-s-plugin-auto-tone[model]; "
+                    "zero-model rule-based alternative: 'photo-s suggest')")
+            img = provider.auto_tone(img, options.auto_tone, ctx)
 
         # ── Tone & color ─────────────────────────────────────────────────────
         img = apply_tone_adjustments(

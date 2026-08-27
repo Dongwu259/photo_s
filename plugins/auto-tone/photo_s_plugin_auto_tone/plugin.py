@@ -20,6 +20,16 @@ class AutoTonePlugin(PhotoSPlugin):
 
     provides = ("auto_tone",)
 
+    def register_mcp_tools(self, mcp) -> None:
+        """v2.3 wiring: photo-s mcp 启动时调用（hooks.PhotoSPlugin 协议）。"""
+        from .api.mcp_tools import register_mcp_tools
+        register_mcp_tools(mcp)
+
+    def register_rest(self, handler_class) -> None:
+        """v2.3 wiring: photo-s serve 启动时调用（hooks.PhotoSPlugin 协议）。"""
+        from .api.rest import register_routes
+        register_routes(handler_class)
+
     def weight_specs(self) -> List[WeightSpec]:
         return models.weight_specs()
 

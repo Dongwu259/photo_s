@@ -34,12 +34,16 @@ def _img(path, color=(120, 100, 80), size=(32, 32)):
 class TestTools:
     def test_registered_tools(self):
         names = {t.name for t in asyncio.run(create_server().list_tools())}
-        assert names == {"process", "info", "exif", "dedup", "cull", "select", "hdr", "blurfaces", "hash",
-                         "plugin", "contact_sheet", "gallery",
-                         "watermark", "preset", "bench",
-                         "watch", "watch_status", "watch_stop", "analyze",
-                         "diff", "audit", "preview",
-                         "batch_start", "batch_status", "batch_cancel"}
+        # core surface (v2.3: +suggest). Installed plugins may add more
+        # (auto-tone registers its 4 via the register_mcp_tools hook), so
+        # assert the core set is present, not exact equality.
+        core = {"process", "info", "exif", "dedup", "cull", "select", "hdr", "blurfaces", "hash",
+                "plugin", "contact_sheet", "gallery",
+                "watermark", "preset", "bench",
+                "watch", "watch_status", "watch_stop", "analyze",
+                "suggest", "diff", "audit", "preview",
+                "batch_start", "batch_status", "batch_cancel"}
+        assert core <= names
 
     def test_server_info_version(self):
         # serverInfo must report the PhotoS version, not the mcp SDK's
@@ -436,7 +440,11 @@ class TestCliListTools:
         out = capsys.readouterr().out
         assert rc == 0
         data = json.loads(out)
-        assert len(data["tools"]) == 25
+        # v2.3: 26 core tools (suggest added); installed plugins register
+        # more (auto-tone +4), so assert a floor and the new core tool
+        names = {t["name"] for t in data["tools"]}
+        assert len(names) >= 26
+        assert "suggest" in names
         for t in data["tools"]:
             assert "input_schema" in t
             assert "properties" in t["input_schema"]
@@ -464,14 +472,15 @@ class TestStdioEndToEnd:
                     await session.initialize()
                     tools = await session.list_tools()
                     names = {t.name for t in tools.tools}
-                    assert names == {"process", "info", "exif", "dedup",
-                                     "cull", "select", "hdr", "blurfaces", "hash", "plugin",
-                                     "contact_sheet", "gallery",
-                                     "watermark", "preset", "bench",
-                                     "watch", "watch_status", "watch_stop",
-                                     "analyze", "diff", "audit", "preview",
-                                     "batch_start", "batch_status",
-                                     "batch_cancel"}
+                    # core subset — plugins may register more (v2.3)
+                    assert {"process", "info", "exif", "dedup",
+                            "cull", "select", "hdr", "blurfaces", "hash", "plugin",
+                            "contact_sheet", "gallery",
+                            "watermark", "preset", "bench",
+                            "watch", "watch_status", "watch_stop",
+                            "analyze", "suggest", "diff", "audit", "preview",
+                            "batch_start", "batch_status",
+                            "batch_cancel"} <= names
                     result = await session.call_tool(
                         "process",
                         {"paths": [img], "output_dir": str(out),

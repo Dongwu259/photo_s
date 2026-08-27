@@ -167,12 +167,19 @@ pip install photo-s-plugin-scunet
 
 ```bash
 pip install 'photo-s-plugin-auto-tone[model]'
-photo-s batch ~/burst/ --preset auto-tone     # CLIP+MLP 预测 9 项全局参数
+photo-s batch ~/burst/ --auto-tone 0.8        # v2.3 引擎槽位：预测 9 项全局参数
+photo-s mcp                                    # 自动注册 auto_tone / aesthetic_score /
+                                               # tone_advisor / batch_auto_tone 4 个 MCP 工具
+photo-s serve                                  # 自动挂载 /v1/auto_tone* REST 路由
 ```
 
 - 提供 `auto_tone` operation：CLIP 视觉特征 + 轻量 MLP 回归（v7_clean，
   ~450KB）预测曝光/对比度/饱和度/WB 等参数，RAG 检索相似照片的历史修图
-  作为先验；`--strength` 控制强度。
+  作为先验；`--auto-tone 0-1` 控制强度。缺插件时报清晰错误（不静默跳过），
+  零模型替代方案：`photo-s suggest`（规则层，见 AGENT_API.md）。
+- **v2.3 接线**：引擎槽位（色彩管理后、手动调整前——显式参数在其上继续叠加）、
+  MCP 工具注册钩子（`register_mcp_tools`，hooks 协议）、REST 路由钩子
+  （`register_rest`）——安装即全层可见，无需任何手工配置。
 - **权重许可为 CC-BY-NC 4.0（非商用）**，代码 MIT，详见插件目录
   `LICENSE-WEIGHTS.txt`；权重经 modelstore sha256 校验后缓存，且每次
   使用前重新校验。

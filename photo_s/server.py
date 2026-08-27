@@ -231,12 +231,18 @@ _MAX_RUNNING_TASKS = max(2, (os.cpu_count() or 2) * 2)
 
 
 def start_task(paths: List[str], options: ProcessOptions,
-               dry_run: bool = False) -> str:
+               dry_run: bool = False,
+               audit: bool = False) -> str:
     """Start a /process batch in the background; return the task_id.
 
     The agent polls GET /tasks/<id> for progress and result, and may
     cancel via POST /tasks/<id>/cancel. Raises RuntimeError when too many
     tasks are already running (callers translate that to 503).
+
+    ``audit=True`` (v2.3) runs the quality gate over the batch OUTPUTS when
+    processing finishes and attaches per-file ``{passed, reason}`` plus an
+    overall pass rate to the task result — the stop condition lives inside
+    the task instead of a separate /audit round-trip.
     """
     task_id = secrets.token_urlsafe(12)
     cancel = threading.Event()
@@ -254,6 +260,29 @@ def start_task(paths: List[str], options: ProcessOptions,
         state["total"] = total
         state["current_path"] = path or ""
 
+    def _audit_outputs(result_dict: dict) -> dict:
+        from .audit import audit_image
+        audited = 0
+        passed = 0
+        for row in result_dict.get("results", []):
+            out = row.get("output") or ""
+            if row.get("status") != "ok" or not out \
+                    or not os.path.exists(out):
+                continue
+            a = audit_image(out)
+            row["audit"] = {
+                "passed": bool(a.get("passed")),
+                "reason": a.get("reason", ""),
+            }
+            audited += 1
+            passed += 1 if a.get("passed") else 0
+        result_dict["audit_summary"] = {
+            "audited": audited, "passed": passed,
+            "failed": audited - passed,
+            "pass_rate": round(passed / audited, 3) if audited else None,
+        }
+        return result_dict
+
     def run():
         try:
             if dry_run:
@@ -264,7 +293,10 @@ def start_task(paths: List[str], options: ProcessOptions,
                     progress_callback=progress,
                     cancel_checker=lambda: cancel.is_set(),
                 )
-                state["result"] = result.to_dict()
+                result_dict = result.to_dict()
+                if audit and not cancel.is_set():
+                    result_dict = _audit_outputs(result_dict)
+                state["result"] = result_dict
             state["status"] = "cancelled" if cancel.is_set() else "done"
         except Exception as e:  # noqa: BLE001 — report to the polling agent
             state["result"] = {"error": type(e).__name__}
@@ -641,6 +673,27 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
                 "passed": sum(1 for r in results if r.get("passed")),
                 "results": results,
             })
+        elif self.path == "/v1/suggest":
+            # Rule-based suggestions: analyze stats → conservative params.
+            # The bridge between /analyze and /process in the grading loop.
+            from .suggest import suggest_file
+            paths = _resolve_paths(data.get("paths", []),
+                                   bool(data.get("recursive", False)))
+            if not paths:
+                self._send_json(400, {"error": "no supported image files found"})
+                return
+            try:
+                scale = float(data.get("scale", 1.0))
+            except (TypeError, ValueError):
+                scale = 1.0
+            scale = max(0.0, min(1.0, scale))
+            results = [suggest_file(p, scale=scale) for p in paths]
+            self._send_json(200, {
+                "ok": all(r.get("ok") for r in results),
+                "count": len(results),
+                "neutral": sum(1 for r in results if r.get("neutral")),
+                "results": results,
+            })
         elif self.path == "/preview":
             # Visual snapshot: downscaled JPEG + histogram PNG (base64).
             from .metrics import snapshot_image
@@ -671,7 +724,8 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
                 # Long-running batch → background task; agent polls /tasks/<id>.
                 try:
                     task_id = start_task(paths, opts,
-                                         dry_run=bool(data.get("dry_run")))
+                                         dry_run=bool(data.get("dry_run")),
+                                         audit=bool(data.get("audit")))
                 except RuntimeError as e:
                     self._send_json(503, {"ok": False, "error": str(e)})
                     return
@@ -877,7 +931,48 @@ def create_server(host: str = "127.0.0.1", port: int = 0,
     """Create (but do not start) a PhotoS API server. Used by run_server and tests."""
     _PhotoSHandler.options = options or ProcessOptions()
     _PhotoSHandler.token = token
+    _register_plugin_rest()
     return ThreadingHTTPServer((host, port), _PhotoSHandler)
+
+
+def _register_plugin_rest() -> int:
+    """Let installed plugins extend the REST surface (v2.3 wiring).
+
+    A plugin defining ``register_rest(handler_class)`` (hooks.PhotoSPlugin
+    protocol) is called with the handler class — e.g. auto-tone adds
+    /v1/auto_tone routes. Broken plugins are logged and skipped, never
+    fatal. The handler class is process-global, so registration runs ONCE:
+    re-creating servers (tests, reconnects) must not stack wrapper layers
+    on do_POST.
+    """
+    if getattr(_PhotoSHandler, "_plugin_routes_registered", False):
+        return 0
+    registered = 0
+    try:
+        from .plugin import discover_plugins
+        from .hooks import PhotoSPlugin
+        plugins = discover_plugins()
+    except Exception as e:
+        print("plugin discovery failed: {}".format(e), file=os.sys.stderr)
+        return 0
+    for plugin in plugins:
+        fn = getattr(plugin, "register_rest", None)
+        # only real overrides count (base-class default is a no-op)
+        if not callable(fn) or \
+                getattr(type(plugin), "register_rest", None) is \
+                PhotoSPlugin.register_rest:
+            continue
+        try:
+            fn(_PhotoSHandler)
+            registered += 1
+        except Exception as e:
+            print("plugin '{}' REST registration failed: {}".format(
+                getattr(plugin, "name", "?"), e), file=os.sys.stderr)
+    if registered:
+        _PhotoSHandler._plugin_routes_registered = True
+        print("plugin REST routes registered by {} plugin(s)".format(
+            registered), file=os.sys.stderr)
+    return registered
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8787,

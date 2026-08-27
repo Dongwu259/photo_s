@@ -96,6 +96,7 @@ def process_tool(
     target_size: Optional[str] = None,
     strip_gps: Optional[bool] = None,
     denoise: Optional[float] = None,
+    auto_tone: Optional[float] = None,
     ev: Optional[float] = None,
     log_curve: Optional[str] = None,
     wb_temp: Optional[int] = None,
@@ -155,7 +156,8 @@ def process_tool(
         "quality": quality, "output_format": output_format,
         "output_dir": output_dir, "scale_percent": scale,
         "suffix": suffix, "target_size": target_size,
-        "strip_gps": strip_gps, "denoise": denoise, "ev": ev,
+        "strip_gps": strip_gps, "denoise": denoise,
+        "auto_tone": auto_tone, "ev": ev,
         "log_curve": log_curve, "wb_temp": wb_temp,
         "lut_file": lut_file, "brightness": brightness,
         "contrast": contrast, "saturation": saturation,
@@ -924,6 +926,35 @@ def analyze_tool(paths: list, recursive: bool = False,
 
 
 @_versioned
+def suggest_tool(paths: list, recursive: bool = False,
+                 scale: float = 1.0) -> dict:
+    """Rule-based parameter suggestions: analyze stats → ProcessOptions fields.
+
+    The bridge half of the agent grading loop - 'analyze' tells what is off,
+    'suggest' maps it to conservative fix params (each with a reason and the
+    metric it is based on). Output 'suggested' keys are engine field names
+    (ev / wb_temp / wb_tint / contrast / vibrance / clarity /
+    highlight_recovery / levels) that 'process' accepts directly. Neutral
+    images return an empty dict - nothing objectively wrong. Zero models,
+    offline; the auto-tone plugin is the personal-style AI layer on top.
+    ``scale`` (0-1) shrinks the magnitude for gentler fixes.
+    """
+    from .cli import _collect_files
+    from .suggest import suggest_file
+
+    files = _collect_files(list(paths), recursive=recursive)
+    if not files:
+        return {"ok": False, "error": "no supported image files found",
+                "paths": list(paths)}
+    scale = max(0.0, min(1.0, float(scale or 1.0)))
+    results = [suggest_file(p, scale=scale) for p in files]
+    return {"ok": all(r.get("ok") for r in results),
+            "count": len(results),
+            "neutral": sum(1 for r in results if r.get("neutral")),
+            "results": results}
+
+
+@_versioned
 def diff_tool(path_a: str, path_b: str, sample_size: int = 256) -> dict:
     """Numeric before/after comparison: PSNR / SSIM / mean-abs-diff.
 
@@ -998,7 +1029,7 @@ def _prune_jobs() -> None:
         _JOBS.pop(k, None)
 
 
-def _job_worker(job_id: str, files: list, options):
+def _job_worker(job_id: str, files: list, options, audit: bool = False):
     from .engine import batch_process
     state = _JOBS[job_id]
 
@@ -1023,9 +1054,36 @@ def _job_worker(job_id: str, files: list, options):
             state["finished_at"] = time.time()
             _prune_jobs()
         return
+    rows = [r.to_dict() for r in result.results]
+    audit_summary = None
+    if audit and not cancel_checker():
+        # v2.3: the quality gate rides inside the job — the agent's stop
+        # condition without a separate audit round-trip
+        from .audit import audit_image
+        audited = passed = 0
+        for row in rows:
+            out = row.get("output") or ""
+            if row.get("status") != "ok" or not out \
+                    or not os.path.exists(out):
+                continue
+            a = audit_image(out)
+            row["audit"] = {"passed": bool(a.get("passed")),
+                            "reason": a.get("reason", "")}
+            audited += 1
+            passed += 1 if a.get("passed") else 0
+        audit_summary = {
+            "audited": audited, "passed": passed,
+            "failed": audited - passed,
+            "pass_rate": round(passed / audited, 3) if audited else None,
+        }
     with _JOBS_LOCK:
-        state["phase"] = "cancelled" if cancel_checker() else "done"
-        state["results"] = [r.to_dict() for r in result.results]
+        # read the flag directly — cancel_checker() re-acquires THIS lock
+        # (threading.Lock is not reentrant) and self-deadlocked the worker,
+        # hanging every batch_status poll forever (found by test_v23_loop)
+        cancelled = bool(state.get("cancelled"))
+        state["phase"] = "cancelled" if cancelled else "done"
+        state["results"] = rows
+        state["audit_summary"] = audit_summary
         state["fail_count"] = result.fail_count
         state["finished_at"] = time.time()
         _prune_jobs()
@@ -1033,11 +1091,14 @@ def _job_worker(job_id: str, files: list, options):
 
 @_versioned
 def batch_start_tool(paths: list, options: dict, recursive: bool = False,
-                     jobs: int = 4) -> dict:
+                     jobs: int = 4, audit: bool = False) -> dict:
     """Start an async directory-level batch job. Returns ``job_id`` to poll
     with ``batch_status`` / cancel with ``batch_cancel``. ``options`` uses the
     same keys as ``process``; options apply to every file (masks/point_color/
     lens_* included - shared specs work across a whole batch).
+    ``audit=True`` (v2.3) audits the outputs after processing and attaches
+    per-file ``{passed, reason}`` + an overall pass rate to the finished
+    job — the grading loop's stop condition inside the task itself.
     """
     from .cli import _collect_files
     from .engine import ProcessOptions
@@ -1061,7 +1122,7 @@ def batch_start_tool(paths: list, options: dict, recursive: bool = False,
         _JOBS[job_id] = {"job_id": job_id, "phase": "starting",
                          "total": len(files), "done": 0, "current": "",
                          "cancelled": False, "results": None, "fail_count": 0}
-    threading.Thread(target=_job_worker, args=(job_id, files, opts),
+    threading.Thread(target=_job_worker, args=(job_id, files, opts, audit),
                      daemon=True).start()
     return {"ok": True, "job_id": job_id, "total": len(files)}
 
@@ -1076,12 +1137,14 @@ def batch_status_tool(job_id: str) -> dict:
     if state is None:
         return {"ok": False, "error": f"unknown job {job_id}"}
     out = {k: state[k] for k in ("job_id", "phase", "total", "done",
-                                 "current", "fail_count")}
+                                 "fail_count", "current")}
     if state.get("error"):
         out["error"] = state["error"]
     out["ok"] = True
     if state.get("results") is not None:
         out["results"] = state["results"]
+    if state.get("audit_summary") is not None:
+        out["audit_summary"] = state["audit_summary"]
     return out
 
 
@@ -1203,7 +1266,53 @@ def create_server(config_path: Optional[str] = None):
                              "blur score. The feedback half of the "
                              "'analyze -> adjust params -> process -> "
                              "analyze' grading loop.")
+    mcp.add_tool(suggest_tool, name="suggest",
+                 description="Rule-based parameter suggestions: analyze "
+                             "stats → conservative ProcessOptions fields "
+                             "(ev/wb_temp/wb_tint/contrast/vibrance/clarity/"
+                             "highlight_recovery/levels), each with a reason "
+                             "and the metric behind it. Zero models, offline. "
+                             "The bridge between 'analyze' and 'process' in "
+                             "the grading loop; the auto-tone plugin is the "
+                             "personal-style layer on top.")
+    _register_plugin_tools(mcp)
     return mcp
+
+
+def _register_plugin_tools(mcp) -> int:
+    """Let installed plugins surface their own MCP tools (v2.3 wiring).
+
+    A plugin defining ``register_mcp_tools(mcp)`` (photo_s.hooks.PhotoSPlugin
+    hook) is called with the live FastMCP instance — e.g. auto-tone adds
+    auto_tone / aesthetic_score / tone_advisor / batch_auto_tone. A broken
+    plugin must not take the server down: failures are logged and skipped.
+    """
+    registered = 0
+    try:
+        from .plugin import discover_plugins
+        from .hooks import PhotoSPlugin
+        plugins = discover_plugins()
+    except Exception as e:
+        print("plugin discovery failed: {}".format(e), file=sys.stderr)
+        return 0
+    for plugin in plugins:
+        fn = getattr(plugin, "register_mcp_tools", None)
+        # only plugins that actually override the hook (the base class
+        # default is a no-op — counting it would report phantom wiring)
+        if not callable(fn) or \
+                getattr(type(plugin), "register_mcp_tools", None) is \
+                PhotoSPlugin.register_mcp_tools:
+            continue
+        try:
+            fn(mcp)
+            registered += 1
+        except Exception as e:
+            print("plugin '{}' MCP registration failed: {}".format(
+                getattr(plugin, "name", "?"), e), file=sys.stderr)
+    if registered:
+        print("plugin MCP tools registered by {} plugin(s)".format(
+            registered), file=sys.stderr)
+    return registered
 
 
 def run_stdio(config_path: Optional[str] = None) -> None:

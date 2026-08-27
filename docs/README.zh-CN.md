@@ -137,7 +137,7 @@ photo-s select ~/shoot/ -r --selects-dir 精选 --rejects-dir 淘汰 --dry-run
 photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 ```
 
-`photo-s --help` 列出全部 34 个子命令。语言：`--language en|zh|auto`。
+`photo-s --help` 列出全部 35 个子命令。语言：`--language en|zh|auto`。
 
 ---
 

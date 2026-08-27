@@ -3,7 +3,7 @@
 > 以代码实际为准（v2.1.0），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
-## 1. CLI 命令（34 个）
+## 1. CLI 命令（35 个）
 
 | 命令 | 作用 |
 |---|---|
@@ -16,7 +16,7 @@
 | `hdr` | **包围曝光 HDR 合并**（opencv 曝光融合）；`--align` AlignMTB 手持对齐消鬼影；需 `photo-s-tools[enhance]` |
 | `blurfaces` | **人脸检测 + 模糊/马赛克**（隐私保护，`--mode blur\|pixelate`、`--margin`）；需 `photo-s-tools[enhance]` |
 | `dedup` | 查重 + `keep-sharpest`（保留最锐） |
-| `cull` | 曝光/清晰度筛选（过曝/欠曝/亮暗范围/模糊分） |
+| `cull` | 曝光/清晰度筛选（过曝/欠曝/亮暗范围/模糊分）；**v2.3 `--score` 质量评分排序**（亮度/对比/清晰度/饱和加权 0-100，只排序不淘汰）、**`--burst [--gap S]` 连拍分组留最佳**（EXIF 时间聚类，组内留最高分） |
 | `analyze` | **感知分析**（v1.7.0）：直方图（RGB+luma 32 桶）/通道统计/对比度/饱和度/色温估计/曝光/模糊分，`--json` 输出 agent 可读 -- `analyze -> 调参 -> process -> analyze` 调色反馈闭环的眼睛 |
 | `lr-scan` | **Lightroom 数据桥接报告**（v1.7.1）：自动发现 .lrcat/.xmp（缺省扫 ~/Pictures+~/Desktop）→ 覆盖报告（参数频率/蒙版/工具轨迹/缺口）；`--export-dir` 导出训练 JSONL（path+PhotoS 参数），`--render-dir` 渲染 before 图（rawpy）——一条命令产出完整训练包 |
 | `lr-train` | **自动基调回归训练**（v1.7.1）：岭回归（纯 numpy，零 torch）9 项全局参数（曝光/对比/饱和/自然饱和/WB/清晰度/纹理/去雾），R² 报告，产出 auto_tone.npz |
@@ -27,6 +27,7 @@
 | `lr-merge` | 合并多机训练数据包（v1.9.0）：同名不同机记录按包名消歧保留（不丢数据）、before 图幂等复制、原子写出合并 lr_records.jsonl |
 | `diff` | 版本数值对比（v1.7.1）：PSNR/SSIM/平均绝对差，before/after 判定 |
 | `audit` | **出片质量闸门**（v1.7.1）：过曝/欠曝/模糊/亮度/对比/色温逐项 pass/fail + 原因——agent 终止条件 |
+| `suggest` | **规则型参数推荐**（v2.3）：analyze 统计 → 保守 ProcessOptions 建议（ev/WB/对比/vibrance/高光恢复/levels），每条附理由与依据指标；`--scale 0-1` 调幅；零模型零依赖——闭环 `analyze → suggest → process → audit` 的"算"这一环 |
 | `preview` | **视觉快照**（v1.7.1）：缩放 JPEG base64 + 直方图 PNG——多模态 agent 的像素输入 |
 | `check` | 图片完整性检查 |
 | `hash` | 校验和清单生成/校验（SHA-256 manifest） |
@@ -106,7 +107,7 @@
 - 无 token 时 CSRF Origin 防护（拒绝跨域浏览器请求）
 - **`POST /process/stream`**：text/event-stream 实时进度（每文件一条 `data:` 帧 + 结束 `done` 帧），agent 免轮询
 
-## 5. MCP server（25 工具）
+## 5. MCP server（26 核心工具 + 插件自动注册）
 
 `process` `info` `exif` `dedup` `cull` `select` `hdr` `blurfaces` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` `bench` `watch` `watch_status` `watch_stop` `analyze` `batch_start` `batch_status` `batch_cancel` `diff` `audit` `preview` — dedup 默认 dry_run 安全；`select` 双阈值分拣、`hdr` 曝光融合、`blurfaces` 人脸模糊均需对应 extra；模块级零 mcp import
 

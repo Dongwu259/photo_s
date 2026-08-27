@@ -190,6 +190,8 @@ GET  /health  带 Bearer → {"status": "ok", "version": "..."}
 | `POST /plugins` | `{"action": "install\|uninstall\|fetch", "name": "scunet", "dry_run"?: bool}` | 远程插件管理：`{"ok", "name", "action", "distribution"}`；`dry_run` → `{"ok", "dry_run", "pip_argv"}`；fetch → `{"ok", "name", "weights": [{path}]}` |
 | `POST /process` | `{"paths": [...], "options": {...}}` | `BatchResult` JSON |
 | `POST /process` (async) | 同上 + `"async": true` | `202 {"task_id", "poll", "total"}` |
+| `POST /process` (async+audit) | 同上 + `"audit": true` | 任务完成后 result 附每文件 `audit {passed, reason}` + `audit_summary {pass_rate}`（v2.3，stop 条件内建） |
+| `POST /v1/suggest` | `{"paths", "recursive"?, "scale"? (默认 1.0)}` | `{"ok", "count", "neutral", "results": [{path, suggested{}, reasons[], neutral}]}` 规则型参数推荐（v2.3，零模型） |
 | `POST /process` (dry-run) | 同上 + `"dry_run": true` | `{"dry_run", "count", "paths", "options"}`，不处理 |
 | `GET /tasks` | — | 运行/已完成任务摘要 |
 | `GET /tasks/<id>` | — | `{"status", "current", "total", "current_path", "result"?}` |
@@ -346,33 +348,60 @@ shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
 | `preview` | `path`, `max_dim` (默认 1024), `include_histogram` (默认 true) | `{"ok", "size", "jpeg_base64", "jpeg_bytes", "histogram_png_base64"?}` 视觉快照（v1.7.1）——多模态 agent 直接看图 |
 | `diff` | `path_a`, `path_b`, `sample_size` (默认 256) | `{"ok", "psnr", "ssim", "mean_abs_diff"}` 版本数值对比（v1.7.1） |
 | `audit` | `paths[]`, `recursive`, `overexposed_max`?, `underexposed_max`?, `blur_min`? | `{"ok", "count", "passed", "results": [{passed, checks[], reason}]}` 出片质量闸门（v1.7.1，终止条件） |
-| `batch_start` | `paths[]`, `options{}`（同 `process` 的键）, `recursive`, `jobs` (默认 4) | `{"ok", "job_id", "total"}` 异步目录任务（v1.7.1）——选项对整批文件统一生效（masks/lens 等共享 spec） |
+| `batch_start` | `paths[]`, `options{}`（同 `process` 的键）, `recursive`, `jobs` (默认 4), `audit` (v2.3) | `{"ok", "job_id", "total"}` 异步目录任务（v1.7.1）——选项对整批文件统一生效（masks/lens 等共享 spec）；`audit=true` 完成后结果附 `audit_summary` + 每文件 `audit`（v2.3） |
 | `batch_status` | `job_id` | `{"ok", "phase" (starting/processing/done), "done", "total", "current", "fail_count", "results"?}` 轮询 |
 | `batch_cancel` | `job_id` | `{"ok", "cancelled"}` 取消（在跑的文件跑完，未开始的跳过） |
+| `suggest` | `paths[]`, `recursive`, `scale` (默认 1.0) | `{"ok", "count", "neutral", "results": [{path, suggested{}, reasons[], neutral}]}` 规则型参数推荐（v2.3，零模型零依赖；见 §7.1） |
 
 > `watch` 会话与 MCP 会话同生命周期（daemon 线程随进程退出消亡）；`_WATCHES`
 > 上限 20，死线程自动清理。
+>
+> **插件工具（v2.3 自动注册）**：装了 `photo-s-plugin-auto-tone` 的环境自动多出
+> `auto_tone` / `aesthetic_score` / `tone_advisor` / `batch_auto_tone` 四个工具
+> （装即所见，无需配置）。
 
 **破坏性安全**：`dedup keep-sharpest` 默认 `dry_run=True`，删除需显式
 `dry_run=False`；`process` 不覆盖输入（`overwrite` 默认 False）。MCP 模式仅
 显式 `--config`（不自动发现 `photo-s.toml`）；工具显式参数优先于 config 默认值。
 
-## 7. 感知反馈闭环（v1.7.0，多模态模型调色）
+## 7. 感知反馈闭环（v1.7.0 起逐步自动化）
 
 LLM/MLLM 不会"看"图，但可以**读统计**。v1.7.0 的 `analyze`（CLI 子命令 /
-`POST /analyze` / MCP `analyze` 工具）把图像变成结构化数字，闭环由此成立：
+`POST /analyze` / MCP `analyze` 工具）把图像变成结构化数字，闭环由此成立。
+**v2.3 起闭环三环都有工具承接**——读（analyze）、算（suggest / auto-tone）、
+验（batch 内建 audit）：
 
 ```
 analyze（读：直方图/通道统计/色温/曝光/模糊）
-   ↓ 依据偏差决定参数（紧凑字符串即"模型输出词汇表"）
-process（写：curves/levels/hsl/point_color/masks/...）
-   ↓ 输出到临时目录
-analyze（再读：验证偏差是否收敛）
-   ↓ 不收敛则微调再来（2-4 轮通常足够）
-process（最终交付输出）
+   ↓
+suggest（算：规则层把偏差映射为保守参数 + 理由；或 auto-tone 插件预测个人风格）
+   ↓
+process / batch_start(audit=true)（写 + 验：结果自带 pass/fail 与 pass 率）
+   ↓ 未收敛则 scale 调幅再来（2-4 轮通常足够）
+最终交付输出
 ```
 
-**判读速查**（`analyze` 输出 -> 建议参数）：
+### 7.1 `suggest`（v2.3，零模型规则层）
+
+`photo-s suggest IMG... [--scale 0-1]` / `POST /v1/suggest` / MCP `suggest`。
+输出 `suggested`（ProcessOptions 字段名 → 建议值，`process` 直接可用）+
+`reasons`（每条 `{field, metric, value, advice}`——可解释、可转述）。
+中性图返回空 `suggested` + `neutral=true`：客观上没有可修项。
+`--scale 0.5` 整体减半幅度（温和模式）。
+
+与 auto-tone 插件的分工：**suggest = 确定性规则层**（离线、快速、修"客观偏差"：
+曝光/白平衡/对比/黑白场），**auto-tone = 个人风格 AI 层**（4.6MB 权重预测 9 字段
+"风格参数"）。无网络/无插件时 suggest 是保底；两者可叠加（先 suggest 修偏，再
+auto-tone 上风格）。
+
+### 7.2 batch 内建 audit（v2.3，stop 条件进任务）
+
+`POST /process {"async":true, "audit":true}` / MCP `batch_start(audit=True)`：
+批处理完成后自动对**输出**跑质量闸门，任务结果附每文件 `audit: {passed, reason}`
++ `audit_summary: {audited, passed, failed, pass_rate}`——agent 的终止判据
+不再需要另一次 `/audit` 往返。
+
+**判读速查**（`analyze` 输出 -> 建议参数；`suggest` 已把此表代码化）：
 
 | 观测 | 字段 | 建议 |
 |---|---|---|
