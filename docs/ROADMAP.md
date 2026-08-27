@@ -19,19 +19,9 @@
 | v1.7.1 | AI 修图基础设施（阶段 1+2 全落地） | **已发布 2026-08-21**：`photo_s/lrxmp.py` LR 数据桥接（XMP/catalog 明文快照解析 → ProcessOptions + 覆盖分类）+ `lr-scan`（自动发现 .lrcat/.xmp → 覆盖报告 + `--export-dir` 训练 JSONL + `--render-dir` rawpy before 图，一条命令产出完整训练包）+ `lr-train`/`lr-predict`（岭回归自动基调，纯 numpy；**lr-predict 自动识别 CLIP+MLP npz**）+ `lr-recipes`（KMeans 配方库）+ `lr-similar`（内容特征 kNN）+ `lr-eval`（教师评测集，PhotoS 自渲染 after）+ `diff`/`audit`/`preview`（版本对比/质量闸门/视觉快照）+ `analyze --grid` 区域反馈 + MCP `batch_start/status/cancel` 异步任务（19→25 工具）+ `batch --trace` 轨迹日志 |
 | v1.8.0 | AI 识别蒙版 + 笔刷 + 组合算子 + LR 数据管线 | **发布就绪未发版（2026-08-21）**：`photo_s/segmask.py`（U2Netp subject / PP-HumanSeg person / YOLOv8n-seg object:label，cv2.dnn + modelstore 权重下载校验，OpenCV 5 引擎自动回退）+ 笔刷蒙版 `brush:x,y,r|x,y,r`（GUI 画布绘制）+ 组合算子 `combo:A&B`/`combo:A-B` + 复杂字符串参数局部化（curves/hsl/color_grading/vignette/grain 进 mask_adjust，`{}` 包裹）+ GUI LR 式画布蒙版工作流（拖拽移动/图层排序/A/B 加减/羽化/undo/翻页/per-photo 注入）+ 调色对话框实时预览。另含 `lr-merge` 多机数据包合并 + `lr-scan --sanitize` 脱敏导出 + TRAINING.md/tools 训练管线。**1075 测试全绿**（发布前扫描修复 2 Critical + 10 Major + 33 Minor） |
 | v2.0.0 | GUI v2.0：拆包 + 活切换 + 工作区 | **发布准备（2026-08-25）**：`gui.py`（10k 行）拆为 `gui/` 包（app/theme/strings/widgets/workflows/state/bus）；语言/主题**活切换**（反向映射遍历器，不再销毁重建）；UiBus 事件总线（12 处内联 drain 统一）；Library/Develop/Export/Tools **工作区**（Develop=胶片条+真实管线防抖预览+常驻直方图+旁侧调整工具，Export=导出队列+输出设置，两页共享 tk.Variable）；缩略图 ThumbCache LRU；Linux 深色检测 + Windows DPI PMv2；GUI 测试 HOME 隔离不变量；`docs/GUI_UPGRADE_PLAN.md` 全案 |
+| v2.1.0 | 抠图 / 背景移除 | **已发布 2026-08-25**：`--cutout` 紧凑 spec 四模式（`subject`/`person`/`object:label` AI 分割复用 v1.8 segmask 权重零新增下载 + `color:R,G,B[,tol][,feather][,invert]` 硬键控解白底文字/logo）→ alpha → PNG/WebP/TIFF/AVIF/HEIC 透明输出，JPEG 按文件报错不静默拍平；`ProcessOptions.cutout` 字段使 preset/REST/MCP 零胶水继承；GUI Export 选项 Tab 抠图区块。真图冒烟通过（2026-08-27：权重真实下载路径 + sha256 校验、cv2 5.0 推理、实拍柯基主体完整抠出、白底文字键控干净、JPEG 报错路径） |
 
 ## 规划中
-
-### v2.1.0（抠图 / 背景移除 —— 主题：交付透明 PNG，2026-08-25 实施中）
-
-> **目标**：`--cutout` 蒙版 → alpha → 透明输出。AI 分割（subject/person/object:label）复用 v1.8 segmask 权重零新增下载；颜色键控（color:R,G,B,tol,feather,invert）纯 numpy 解决白底文字/logo 去底（AI 模型不含文字类）。透明输出需 PNG/WebP/TIFF/AVIF/HEIC，JPEG 按文件报错（不静默拍平白底）。
-
-- [x] `photo_s/cutout.py`：CutoutSpec/parse_cutout（四模式紧凑 spec，CutoutError(ValueError) 契约）+ cutout_mask（AI 委托 mask.render_mask；color 硬阈值欧氏距离+绝对像素羽化）+ apply_cutout（RGBA+putalpha，info 保留）
-- [x] 引擎：ProcessOptions.cutout 字段 + 管线槽位（export_sharpen 后/EXIF 提取前）+ JPEG 校验（_canonical_format）；preset/REST/MCP 自动继承（_scalar_groups）
-- [x] CLI：`--cutout`（compress/convert/batch/preset save 四 parser）+ i18n zh/en
-- [x] GUI：Export 选项 Tab `sec_cutout` 区块（模式下拉 + 参数区动态显隐，活切换兼容）
-- [ ] 真图冒烟（subject/颜色键控实拍验证）
-- [ ] 发布 v2.1.0（版本三处 bump + RELEASE.md 清单）
 
 ### v1.8.0（AI 识别蒙版 + 笔刷 -- 主题：智能局部调整，方向已定）
 

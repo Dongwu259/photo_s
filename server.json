@@ -7,12 +7,12 @@
     "url": "https://github.com/Dongwu259/photo_s",
     "source": "github"
   },
-  "version": "2.0.0",
+  "version": "2.1.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "photo-s-tools",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {
