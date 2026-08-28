@@ -1,6 +1,6 @@
 ---
 name: photo-s
-description: Batch photo processing toolbox (PhotoS). Use when the user asks to compress/convert/resize RAW or JPEG photos in batch, edit EXIF metadata (rating, keywords, camera, GPS), deduplicate similar photos, cull by exposure/sharpness, rank and move keepers by rating, merge bracketed HDR shots, blur or pixelate faces for privacy, build contact sheets or HTML galleries, generate SHA-256 manifests, rename files in batch, watch a folder and auto-process new files, benchmark processing speed, grade photos Lightroom-style (curves, levels, HSL, point color, masks, local adjustments, lens correction), or analyze images perceptually (histograms, color stats) for closed-loop grading, produce personal training packages from Lightroom data (lr-scan/lr-train/lr-recipes), or gate delivery with audit/preview/diff. 批量照片处理工具箱：压缩/转码/缩放/EXIF 编辑/去重/选片/HDR 合并/人脸模糊/联系表/画廊/校验清单/LR 方向调色（曲线·HSL·点颜色·蒙版·镜头矫正）/感知分析（调色反馈闭环）/LR 数据训练包（lr-scan 家族）/质量闸门（audit/preview/diff）。
+description: Batch photo processing toolbox (PhotoS). Use when the user asks to compress/convert/resize RAW or JPEG photos in batch, edit EXIF metadata (rating, keywords, camera, GPS), deduplicate similar photos, cull by exposure/sharpness, rank photos by quality score, keep the best of each burst, rank and move keepers by rating, merge bracketed HDR shots, blur or pixelate faces for privacy, build contact sheets or HTML galleries, generate SHA-256 manifests, rename files in batch, watch a folder and auto-process new files, benchmark processing speed, grade photos Lightroom-style (curves, levels, HSL, point color, masks, local adjustments, lens correction), analyze images perceptually (histograms, color stats) for closed-loop grading, get rule-based fix suggestions from analysis (suggest), apply AI auto-tone from a plugin, produce personal training packages from Lightroom data (lr-scan/lr-train/lr-recipes), or gate delivery with audit/preview/diff. 批量照片处理工具箱：压缩/转码/缩放/EXIF 编辑/去重/选片（阈值·评分·连拍）/HDR 合并/人脸模糊/联系表/画廊/校验清单/LR 方向调色（曲线·HSL·点颜色·蒙版·镜头矫正）/感知分析（调色反馈闭环）/规则型参数推荐（suggest）/AI 自动调色（auto-tone 插件）/LR 数据训练包（lr-scan 家族）/质量闸门（audit/preview/diff）。
 ---
 
 # PhotoS — Batch Photo Toolbox
@@ -48,7 +48,9 @@ pip install "photo-s-tools[mcp]"     # + MCP server (Python 3.10+)
 | RAW → JPEG/TIFF batch | `photo-s batch 'RAW/*.ARW' --format jpeg` | rawpy built-in, no extra dep |
 | EXIF read / write / filter | `photo-s exif PATHS... [--rating N] [--keywords ...] [--gps "lat,lon"] [--make --model] [--from-csv meta.csv]` | `--rating-min N` filters |
 | Deduplicate | `photo-s dedup PATHS... [--action keep-sharpest] [--dry-run]` | perceptual hash; actions: report/move/delete/keep-sharpest |
-| Cull by exposure/sharpness | `photo-s cull PATHS... [--overexposed-max ...] [--sharpness-min ...]` | |
+| Cull by exposure/sharpness | `photo-s cull PATHS... [--overexposed-max ...] [--sharpness-min ...]` | threshold pass rejects |
+| Quality-score ranking | `photo-s cull PATHS... --score [--json]` | weighted 0-100 (exposure/contrast/sharpness/saturation) - ranks, never rejects |
+| Burst keep-best | `photo-s cull PATHS... --burst [--gap 2] --list` | clusters frames by EXIF time, keeps the top score per burst |
 | Rank & move by rating | `photo-s select PATHS... [--keep-min 4] [--reject-max 2] [--selects-dir DIR] [--rejects-dir DIR] [--copy] [--dry-run]` | reads EXIF rating |
 | HDR merge (exposure brackets) | `photo-s hdr IMG1 IMG2 IMG3... -o out.jpg [--align]` | needs `[enhance]` |
 | Face blur / pixelate | `photo-s blurfaces PATHS... [--mode pixelate] [--margin 20] [-o DIR]` | privacy; needs `[enhance]` |
@@ -64,6 +66,8 @@ pip install "photo-s-tools[mcp]"     # + MCP server (Python 3.10+)
 | Local masks + adjustments | `photo-s batch PATHS... --masks "sky:linear:0.5,0,0.5,1,feather=0.3" --mask-adjust "sky:exposure=-0.7"` | named linear/radial/color/brush masks + AI masks (`subject` / `person` / `object:car`) + combos (`combo:A&B`); mask_adjust also takes curves/hsl/vignette strings `{...}` |
 | Lens correction | `photo-s batch PATHS... --lens-distort 0.15 [--lens-vignette "0.3,0.4" --lens-ca "0.999,1.001"]` | manual distortion / vignette / CA fix |
 | Perceptual analysis | `photo-s analyze PATHS... --json` | histograms, channel stats, WB lean, exposure, blur - the feedback half of closed-loop grading |
+| Rule-based suggestions | `photo-s suggest PATHS... [--scale 1.0] [--json]` | analyze stats → conservative fix params (ev/wb_temp/wb_tint/contrast/vibrance/highlight_recovery/levels) each with a reason + the metric behind it; neutral images return an empty dict; zero models, offline - the "decide params" step made automatic |
+| AI auto-tone (plugin) | `photo-s batch PATHS... --auto-tone 0.8` | personal-style 9-param prediction (`pip install 'photo-s-plugin-auto-tone[model]'`); its MCP tools/REST routes register automatically once installed; zero-model alternative: `suggest` |
 | Visual snapshot | `photo-s preview IMG [--max-dim 1024] [--json]` | downscaled JPEG + histogram PNG (base64) - pixels for multimodal agents |
 | Regional feedback | `photo-s analyze PATHS... --grid 4 --json` | per-cell luma/color + sky/skin ratios + over/underexposed boxes |
 | Quality gate | `photo-s audit PATHS... [--over-max 2 --blur-min 0.05] [--json]` | pass/fail + reasons - the agent's stop condition |
@@ -106,14 +110,18 @@ photo-s hash deliver/ -o deliver/manifest.csv --verify deliver/manifest.csv
 photo-s bench --dir "RAW/" -j 1,2,4,8 --evaluate
 ```
 
-### 5. Closed-loop grading (v1.7.0)
+### 5. Closed-loop grading (v1.7.0; v2.3 adds the compute + gate steps)
 ```bash
 # 1. read stats: exposure.luminance / stats.contrast / white_balance.kelvin_estimate ...
 photo-s analyze "picked/*.jpg" --json
-# 2. decide params from the numbers, process to a scratch dir
-photo-s batch "picked/*.jpg" -o scratch/ --curves "0,0;128,140;255,255"     --vibrance 0.3 --wb-tint -8
-# 3. verify the deviation converged; iterate 2-4 rounds if not
-photo-s analyze "scratch/*.jpg" --json
+# 2. rule-based suggestions with reasons (zero models) — or decide params yourself
+photo-s suggest "picked/*.jpg" --json
+# 3. apply the suggested fields, process to a scratch dir
+photo-s batch "picked/*.jpg" -o scratch/ --ev -0.3 --wb-temp 5900 --vibrance 0.2
+# 4. verify with the quality gate; iterate 2-4 rounds if not passed
+photo-s audit "scratch/*.jpg" --json
+# async variant: the gate rides inside the task (MCP batch_start audit=true /
+# REST POST /process {"async":true,"audit":true}) — result carries pass_rate
 ```
 
 ## Errors & recovery
@@ -133,9 +141,11 @@ photo-s analyze "scratch/*.jpg" --json
 - **Python host**: `from photo_s.engine import ProcessOptions, batch_process` — no IPC overhead.
 - **MCP (deep, tool-level)**: install `photo-s-tools[mcp]` (Python 3.10+), then
   `claude mcp add photo-s -- photo-s mcp` and call tools (`process`, `select`,
-  `hdr`, `blurfaces`, `dedup`, `analyze`, `preview`, `audit`, `diff`,
-  `batch_start/status/cancel`, …) directly. 25 tools, schemas via
-  `photo-s mcp --list-tools`.
+  `hdr`, `blurfaces`, `dedup`, `analyze`, `suggest`, `preview`, `audit`,
+  `diff`, `batch_start/status/cancel`, …) directly. 26 core tools, schemas
+  via `photo-s mcp --list-tools`; installed plugins register their own tools
+  automatically (auto-tone adds `auto_tone` / `aesthetic_score` /
+  `tone_advisor` / `batch_auto_tone`).
 - **REST**: `photo-s serve --port 0 --token auto --ready-file x.json` — poll the
   file for `{port, token}`, then HTTP with bearer token.
 - Full contract (JSON shapes, exit codes, `serve` endpoints, config precedence):

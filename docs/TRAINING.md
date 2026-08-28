@@ -133,4 +133,4 @@ photo-s lr-recipes --help       # 配方库（风格签名）
 photo-s lr-eval --help          # 评测集
 photo-s audit --help            # 出片质量闸门
 ```
-技能包 `skills/photo-s/SKILL.md` 已含上述工作流；MCP 25 工具覆盖全部端点。
+技能包 `skills/photo-s/SKILL.md` 已含上述工作流；MCP 26 核心工具覆盖全部端点。

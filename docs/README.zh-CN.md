@@ -22,7 +22,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 
 | 通道 | 接入方式 |
 |---|---|
-| **MCP server** — 25 个工具（process / select / hdr / blurfaces / dedup …） | `claude mcp add photo-s -- photo-s mcp` |
+| **MCP server** — 26 核心工具 + 插件自动注册（process / suggest / select / hdr / blurfaces / dedup …） | `claude mcp add photo-s -- photo-s mcp` |
 | **现成 SKILL.md** — 支持 skill 的 agent 即取即用，零额外依赖 | `cp -r skills/photo-s ~/.claude/skills/` |
 | **REST API** — 异步任务 + SSE 进度 | `photo-s serve --port 0 --token auto --ready-file x.json` |
 | **Python 库直调** — 无 IPC 开销 | `from photo_s.engine import batch_process` |
@@ -53,6 +53,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | 局部蒙版 | ✅ | ✅ | 命名线性/径向/颜色范围蒙版，蒙版内 11 项局部调整 |
 | 镜头矫正 | ✅ | ✅ | 手动畸变 k1 / 去暗角 / 消色差（纯 numpy）；用户维护的命名镜头档案 |
 | 感知分析 | ✅ | ✅ | 直方图/通道统计/色温倾向/曝光/模糊（`analyze`） |
+| 参数推荐 | — | ✅ | 规则型 `suggest`：分析统计 → 保守修复参数 + 理由（零模型离线） |
 | 自然饱和度 / 清晰度 / 纹理 | ✅ | ✅ | 反向加权饱和，局部对比 |
 | 去雾 / 暗角 / 颗粒 | ✅ | ✅ | 暗通道去雾，径向暗角，胶片颗粒 |
 | 曝光 | ✅ | ✅ | 曝光档位调整，或自动归一化到目标 |
@@ -73,7 +74,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | 元数据打标 | ✅ | ✅ | 评分/关键词/标题批量打标（UserComment） |
 | 元数据筛选 | ✅ | ✅ | 按评分/关键词筛出照片 |
 | 元数据导入 | — | ✅ | 从表格批量写入 |
-| 选片（筛选） | ✅ | ✅ | 曝光/清晰度筛选（GUI 仅保留符合项，可撤销） |
+| 选片（筛选） | ✅ | ✅ | 曝光/清晰度筛选（GUI 仅保留符合项，可撤销）；`--score` 质量评分排序 + `--burst` 连拍组留最佳 |
 | 选片归档（评分） | ✅ | ✅ | 按评分分拣——精选/淘汰双阈值（≥4 精选、≤2 淘汰） |
 | 连拍选图 | ✅ | ✅ | 每组保留最清晰 |
 | 校验和清单 | ✅ | ✅ | SHA-256 归档完整性 + 校验 |
@@ -99,11 +100,11 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | REST API | — | ✅ | 供 agent 使用的 HTTP 服务（异步任务 + SSE 进度） |
 | 插件系统 | — | ✅ | 第三方插件支持 |
 | 官方插件管理 | — | ✅ | list/install/info/fetch + pip 安装 |
-| MCP server | — | ✅ | 向 MCP 客户端（Claude Desktop / Claude Code / 任意客户端）暴露 25 个工具 |
+| MCP server | — | ✅ | 向 MCP 客户端（Claude Desktop / Claude Code / 任意客户端）暴露 26 个核心工具（插件自动追加） |
 | 批量基准 | — | ✅ | 并发扩展实测 |
 | AI 识别蒙版 | ✅ | ✅¹ | 主体/人物/物体（80 类）一键生成蒙版，U2Netp/HumanSeg/YOLOv8n-seg（v1.8，onnx 权重自动下载校验） |
 | 笔刷 + 组合蒙版 | ✅ | ✅ | 笔刷涂抹蒙版；A&B / A-B 组合引用已命名蒙版（v1.8） |
-| AI 自动调色 | — | ✅ | auto-tone 官方插件：CLIP+MLP 预测 9 项全局参数 + RAG 检索历史修图（权重 CC-BY-NC 4.0，非商用） |
+| AI 自动调色 | — | ✅ | auto-tone 官方插件：CLIP+MLP 预测 9 项全局参数 + RAG 检索历史修图（权重 CC-BY-NC 4.0，非商用）；v2.3 引擎槽位接线（`--auto-tone`），装后 MCP/REST 工具自动注册 |
 | LR 数据桥 | — | ✅ | `lr-scan` 扫描 Lightroom 目录/XMP → 训练数据；`lr-train`/`lr-predict` 岭回归基调模型；`lr-merge` 合并多机数据包（v1.9） |
 | 出片审计 | — | ✅ | `audit` 质量闸门（pass/fail + 原因，agent 终止条件）；`diff` 前后对比；`preview` base64 快照（v1.9） |
 | GPS 地理标记 | — | ✅ | GPX 轨迹插值写 GPS EXIF（时区偏移自动换算，跨日期变更线正确插值） |

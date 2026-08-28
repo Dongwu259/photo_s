@@ -108,7 +108,7 @@ Full contract: [`docs/AGENT_API.md`](docs/AGENT_API.md).
 | REST API | — | ✅ | HTTP server for agents (async tasks + SSE progress) |
 | Plugin system | — | ✅ | Third-party plugin support |
 | Official plugin manager | — | ✅ | list/install/info/fetch + pip install |
-| MCP server | — | ✅ | 25 tools to MCP clients (Claude Desktop / Claude Code / any MCP client) |
+| MCP server | — | ✅ | 26 core tools (+plugin tools auto-register) for MCP clients (Claude Desktop / Claude Code / any MCP client) |
 | Batch benchmark | — | ✅ | Worker-scaling measurement |
 
 > ¹ Denoise / auto-straighten / HDR / face blur need an optional dependency:

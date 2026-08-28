@@ -13,7 +13,7 @@
 | Python 直调 | 宿主是 Python | `from photo_s.engine import ProcessOptions, batch_process` |
 | `photo-s ... --json` | 一次性脚本 / CI | 每次调用有 ~200-300ms 解释器启动开销 |
 | `photo-s serve` | 跨进程 / 长任务 / 需进度与取消 | stdlib HTTP，同步 + 异步任务两种模式 |
-| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，25 个工具（需 py3.10+ 与 `photo-s-tools[mcp]`） |
+| `photo-s mcp` | Claude Desktop / MCP 客户端 | stdio MCP server，26 核心工具 + 插件自动注册（需 py3.10+ 与 `photo-s-tools[mcp]`） |
 
 ---
 
@@ -296,7 +296,7 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 }
 ```
 
-`photo-s mcp --list-tools` 返回 25 个工具及 inputSchema（JSON，不启动服务器）。
+`photo-s mcp --list-tools` 返回全部工具及 inputSchema（JSON，不启动服务器；26 核心 + 已装插件的工具）。
 
 零安装变体（uvx 自动解析 PyPI 依赖，与官方 MCP Registry
 `io.github.Dongwu259/photo-s` 发布的调用一致）：

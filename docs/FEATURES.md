@@ -39,7 +39,7 @@
 | `config` | TOML 配置文件管理 |
 | `info` | 格式/环境探测（`--json`） |
 | `serve` | REST API（AI agent 集成，含 `/process/stream` SSE 进度） |
-| `mcp` | MCP server（stdio，25 工具，py3.10+） |
+| `mcp` | MCP server（stdio，26 核心工具 + 插件自动注册，py3.10+） |
 | `plugin` | 插件管理 install/list/info/fetch/**scaffold** |
 | `bench` | 批量基准：`--dir -j 1,2,4,8 --denoise` 实测各并发耗时/加速比；每阶段计时（load/process/save）；`--evaluate` 输出质量（PSNR/SSIM 对比源图）；输出写临时目录跑完自动清理，不污染源目录 |
 
