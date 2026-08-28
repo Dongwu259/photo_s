@@ -136,6 +136,7 @@ class _FakePlugin:
 
 class TestPluginWiring:
     def test_mcp_hook_registers_overriding_plugin(self, monkeypatch):
+        pytest.importorskip("mcp")  # py3.9 CI leg has no mcp extra
         import photo_s.plugin as plugin_mod
         from photo_s.mcp_server import create_server
 
@@ -151,6 +152,7 @@ class TestPluginWiring:
         assert fake.called is mcp
 
     def test_mcp_hook_skips_base_noop(self, monkeypatch):
+        pytest.importorskip("mcp")  # py3.9 CI leg has no mcp extra
         import photo_s.plugin as plugin_mod
         from photo_s.hooks import PhotoSPlugin
         from photo_s.mcp_server import create_server, list_tools_json
