@@ -21,11 +21,12 @@
 | v2.0.0 | GUI v2.0：拆包 + 活切换 + 工作区 | **发布准备（2026-08-25）**：`gui.py`（10k 行）拆为 `gui/` 包（app/theme/strings/widgets/workflows/state/bus）；语言/主题**活切换**（反向映射遍历器，不再销毁重建）；UiBus 事件总线（12 处内联 drain 统一）；Library/Develop/Export/Tools **工作区**（Develop=胶片条+真实管线防抖预览+常驻直方图+旁侧调整工具，Export=导出队列+输出设置，两页共享 tk.Variable）；缩略图 ThumbCache LRU；Linux 深色检测 + Windows DPI PMv2；GUI 测试 HOME 隔离不变量；`docs/GUI_UPGRADE_PLAN.md` 全案 |
 | v2.1.0 | 抠图 / 背景移除 | **已发布 2026-08-25**：`--cutout` 紧凑 spec 四模式（`subject`/`person`/`object:label` AI 分割复用 v1.8 segmask 权重零新增下载 + `color:R,G,B[,tol][,feather][,invert]` 硬键控解白底文字/logo）→ alpha → PNG/WebP/TIFF/AVIF/HEIC 透明输出，JPEG 按文件报错不静默拍平；`ProcessOptions.cutout` 字段使 preset/REST/MCP 零胶水继承；GUI Export 选项 Tab 抠图区块。真图冒烟通过（2026-08-27：权重真实下载路径 + sha256 校验、cv2 5.0 推理、实拍柯基主体完整抠出、白底文字键控干净、JPEG 报错路径） |
 | v2.1.1 | patch：慢网络下载加固 + CI 转正 | modelstore 断点续传（HTTP Range 收养死进程 `.part`，完整未改名 part 离线采纳）+ 3 次重试 + 读超时 30→60s + 成功后清扫全部 `.part` 残片（v2.1.0 真图冒烟实证的慢网络首用失败）；CI Linux xvfb GUI job 去掉 `continue-on-error` 转正 + actions checkout@v5/setup-python@v6（Node 20 弃用警告） |
+| v2.3.0 | Agent 自动化闭环收口 | **已发布 2026-08-28**：`photo-s suggest` 规则型参数推荐（analyze→保守参数+理由，`--scale` 调幅，CLI/MCP/REST 三面，零模型）；**auto-tone 插件三线接线修复**（engine `auto_tone` 槽位 + MCP/REST 启动注册钩子，装后 MCP 25→30 工具）+ 修复 v1.7.1 潜伏的 `_job_worker` 锁重入死锁（batch_status 永久挂死）；batch 任务内建 audit（`audit:true` 附 pass_rate）；cull `--score` 加权评分 + `--burst` 连拍留最佳。SKILL.md/全仓文档同步；1277 测试绿 |
 | v2.2.0 | GUI 编辑效率 | **已发布 2026-08-27**：LR 式**复制/粘贴设置**（`_DEV_FIELDS` 42 字段快照，Develop 按钮 + Export 队列「粘贴到勾选」+「已调」徽标；per-photo 覆盖层 `_photo_adjust` 经 `_per_file_overlay` 与蒙版合并注入批处理）；**逐照片撤销/重做**（上限 50、首次编辑记基线、沉降入栈、切照片 flush/加载、Cmd+Z 在 Develop 优先逐照片历史）；**导出配方**（22 输出字段规范值快照，gui_state 持久化，套用/存/删）。agent 面零改动；新增 `test_gui_v22.py` 15 测，全量 1256 绿 |
 
 ## 规划中
 
-### v2.3.0（Agent 自动化闭环收口 —— 主题：装了插件 agent 就该看得见；2026-08-27 立项研究完成）
+### v2.3.0（已发布 2026-08-28 —— 保留立项研究结论；速览见下方「已发布」表）
 
 > **立项研究结论（2026-08-27 全面盘点）**，四项不足按优先级：
 >
