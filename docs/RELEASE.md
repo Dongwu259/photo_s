@@ -127,6 +127,26 @@ python -c "from photo_s_plugin_auto_tone import auto_tone; print(auto_tone('x.jp
 > 拉取，不在 Release assets 中；Qwen3-VL-2B 基座（约 4.3GB）需用户自备
 > （`PHOTOS_AUTO_TONE_QWEN_BASE`）。
 
+### v2.1 风格化权重（2026-08）
+
+v2.1 新增 SigLIP 风格化主模型，托管在独立 release tag `auto-tone-v2.1.0`
+（老 tag 不动，用户已缓存的权重不受影响）。checkpoint 需重存为纯
+tensor/Python 类型（`val_mae_per_field` 的 numpy 标量 → float），否则
+`torch.load(weights_only=True)` 拒载：
+
+```bash
+# 训练机侧导出干净 checkpoint 后：
+gh release create auto-tone-v2.1.0 --target main \
+  -t "auto-tone plugin v2.1.0 (style + scene)" \
+  -n "Style auto-tone: SigLIP h192 d=0.3 (PSNR 32.21). Weights CC-BY-NC 4.0, code MIT." \
+  /tmp/auto_tone_siglip_h192_d03.pt
+
+git tag auto-tone-v2.1.0 && git push origin auto-tone-v2.1.0   # 触发 PyPI 2.1.0
+```
+
+SigLIP 视觉塔（ViT-L-16-SigLIP-384，约 2.6GB）同样由 open_clip 运行时从
+HuggingFace 拉取，不在 assets 中。
+
 ## 常见问题
 
 - **publish.yml 没触发**：确认 tag 是 `vX.Y.Z` 格式（以 `v` 开头）、已 push、

@@ -169,7 +169,9 @@ pip install photo-s-plugin-scunet
 pip install 'photo-s-plugin-auto-tone[model]'
 photo-s batch ~/burst/ --auto-tone 0.8        # v2.3 引擎槽位：预测 9 项全局参数
 photo-s mcp                                    # 自动注册 auto_tone / aesthetic_score /
-                                               # tone_advisor / batch_auto_tone 4 个 MCP 工具
+                                               # tone_advisor / batch_auto_tone /
+                                               # auto_tone_with_style /
+                                               # analyze_visual_style 6 个 MCP 工具
 photo-s serve                                  # 自动挂载 /v1/auto_tone* REST 路由
 ```
 
@@ -177,6 +179,12 @@ photo-s serve                                  # 自动挂载 /v1/auto_tone* RES
   ~450KB）预测曝光/对比度/饱和度/WB 等参数，RAG 检索相似照片的历史修图
   作为先验；`--auto-tone 0-1` 控制强度。缺插件时报清晰错误（不静默跳过），
   零模型替代方案：`photo-s suggest`（规则层，见 AGENT_API.md）。
+- **v2.1 风格化/场景**：`auto_tone_with_style`（SigLIP 视觉分析 + Qwen3-VL
+  风格解析 → 偏置叠加，支持任意自然语言描述如"忧郁蓝调"）与
+  `analyze_visual_style`（16 风格 top-K）；Python API 另有
+  `auto_tone_with_scene`（552 张 LR 目录统计的 7 场景数据驱动偏置）。
+  风格化走独立 SigLIP 主模型（`auto_tone_siglip_h192_d03.pt`，~850KB，
+  PSNR 32.21，比 v7_clean 高 2.93 dB）。
 - **v2.3 接线**：引擎槽位（色彩管理后、手动调整前——显式参数在其上继续叠加）、
   MCP 工具注册钩子（`register_mcp_tools`，hooks 协议）、REST 路由钩子
   （`register_rest`）——安装即全层可见，无需任何手工配置。

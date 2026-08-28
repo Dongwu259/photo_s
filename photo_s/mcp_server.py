@@ -1284,7 +1284,8 @@ def _register_plugin_tools(mcp) -> int:
 
     A plugin defining ``register_mcp_tools(mcp)`` (photo_s.hooks.PhotoSPlugin
     hook) is called with the live FastMCP instance — e.g. auto-tone adds
-    auto_tone / aesthetic_score / tone_advisor / batch_auto_tone. A broken
+    auto_tone / aesthetic_score / tone_advisor / batch_auto_tone /
+    auto_tone_with_style / analyze_visual_style. A broken
     plugin must not take the server down: failures are logged and skipped.
     """
     registered = 0

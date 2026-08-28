@@ -14,11 +14,15 @@ class AutoTonePlugin(PhotoSPlugin):
     注册方式（pyproject.toml）：
         [project.entry-points."photo_s.plugins"]
         auto_tone = "photo_s_plugin_auto_tone:AutoTonePlugin"
+
+    提供 2 个操作：
+        - auto_tone: 普通调色
+        - auto_tone_with_style: 风格化调色（v2.1）
     """
 
     name = "auto_tone"
 
-    provides = ("auto_tone",)
+    provides = ("auto_tone", "auto_tone_with_style")
 
     def register_mcp_tools(self, mcp) -> None:
         """v2.3 wiring: photo-s mcp 启动时调用（hooks.PhotoSPlugin 协议）。"""
@@ -72,6 +76,61 @@ class AutoTonePlugin(PhotoSPlugin):
         # into a PIL Image (the engine re-saves in the target format). A RAW
         # input suffix (.cr2/.nef/...) used to be kept and PIL cannot WRITE
         # RAW — every RAW input died with "unknown file extension".
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            tmp_path = f.name
+        try:
+            render_options(img, options, tmp_path, strength=1.0)
+            return Image.open(tmp_path).copy()
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    def auto_tone_with_style(
+        self,
+        img,
+        style_desc: Optional[str] = None,
+        strength: float = 1.0,
+        use_qwen: bool = True,
+        ctx: Optional[PluginContext] = None,
+    ):
+        """v2.1: 风格化调色（在 photo_s 引擎 batch_process 中调用）
+
+        Args:
+            img: PIL.Image
+            style_desc: 风格描述（None=SigLIP 自动视觉分析）
+            strength: 风格强度 0-1
+            use_qwen: 是否用 Qwen 解析（False=手工预设）
+            ctx: PluginContext
+
+        Returns:
+            修改后的 PIL.Image
+        """
+        from PIL import Image
+
+        from .core.render import render_options
+        from .core.style import auto_tone_with_style as _style_tone
+
+        input_path = ctx.input_path if ctx else None
+        if not input_path:
+            return img
+
+        # strength 已在偏置叠加阶段生效，渲染时不再重复施加
+        result = _style_tone(
+            image_path=input_path,
+            style_desc=style_desc,
+            strength=strength,
+            use_qwen=use_qwen,
+            render=False,  # 渲染由本方法完成并返回 PIL Image
+        )
+
+        options = result.get("options", {})
+        if not options:
+            return img
+
+        import tempfile
+        # 同 auto_tone：恒走 JPEG 中转（PIL 写不了 RAW 后缀）
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
             tmp_path = f.name
         try:

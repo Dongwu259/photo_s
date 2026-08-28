@@ -23,6 +23,9 @@ from typing import Dict, List, Optional
 GITHUB_REPO = "Dongwu259/photo_s"
 RELEASE_TAG = "auto-tone-v0.1.0"
 URL_BASE = f"https://github.com/{GITHUB_REPO}/releases/download/{RELEASE_TAG}"
+# v2.1 风格化权重托管在独立 release tag（老 tag 不动，已有缓存不受影响）
+STYLE_RELEASE_TAG = "auto-tone-v2.1.0"
+STYLE_URL_BASE = f"https://github.com/{GITHUB_REPO}/releases/download/{STYLE_RELEASE_TAG}"
 
 QWEN_BASE_MODEL = os.environ.get("PHOTOS_AUTO_TONE_QWEN_BASE",
                                  "Qwen/Qwen3-VL-2B-Instruct")
@@ -41,9 +44,20 @@ WEIGHTS: Dict[str, dict] = {
         "required": True,
     },
     "hand_features.npz": {
+        # v0.1.0 起此值多打了一个字符（db21d4→db1d4），导致线上资产校验
+        # 必败——2026-08-28 以 GitHub release 资产实测 sha 修正
         "sha256": "de29659dd0a5668f2689fe5d83ead27e1449d9d1d0ae6b1db1d421aa3a616c37",
         "size": 593_590,
         "required": True,
+    },
+    # ── v2.1 风格化（auto_tone_with_style / analyze_visual_style）──
+    # SigLIP+MLP h192 d=0.3（PSNR 32.21，比 v7_clean 高 2.93 dB）。
+    # 重存为纯 tensor/Python 类型，兼容 torch.load(weights_only=True)。
+    "auto_tone_siglip_h192_d03.pt": {
+        "sha256": "d64d2ea67cc725ffb61663c50239e1d9be95c6a559abaed37aedfcb0d2b68c92",
+        "size": 871_277,
+        "required": False,
+        "url_base": STYLE_URL_BASE,
     },
     # ── 可选（Qwen3-VL LoRA，仅 aesthetic / advisor 需要）──────
     "lora_aesthetic.safetensors": {
@@ -77,13 +91,18 @@ def weight_specs(names: Optional[List[str]] = None) -> "List":
     """构建 WeightSpec 列表（带环境变量覆盖）。"""
     from photo_s.modelstore import WeightSpec
 
-    base = os.environ.get("PHOTOS_AUTO_TONE_URL_BASE", URL_BASE)
+    # PHOTOS_AUTO_TONE_URL_BASE 覆盖所有条目的前缀（离线/镜像/测试），
+    # 优先级高于条目各自的 url_base；未覆盖时 v2.1 条目用 STYLE_URL_BASE
+    env_base = os.environ.get("PHOTOS_AUTO_TONE_URL_BASE")
+    base = env_base or URL_BASE
     specs = []
     for name, meta in WEIGHTS.items():
         if names is not None and name not in names:
             continue
-        url = os.environ.get(f"PHOTOS_AUTO_TONE_{_env_suffix(name)}_URL",
-                             f"{base}/{name}")
+        entry_base = env_base or meta.get("url_base", base)
+        url = os.environ.get(
+            f"PHOTOS_AUTO_TONE_{_env_suffix(name)}_URL",
+            f"{entry_base}/{name}")
         sha = os.environ.get(f"PHOTOS_AUTO_TONE_{_env_suffix(name)}_SHA256",
                              meta["sha256"])
         specs.append(WeightSpec(name=name, url=url, sha256=sha, size=meta["size"]))

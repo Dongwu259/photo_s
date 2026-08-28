@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "photo-s-plugin-auto-tone"
-version = "0.1.0"
-description = "PhotoS official AI auto-tone plugin (CLIP+MLP → 9-field Lightroom params, optional RAG / Qwen3-VL advisor)"
+version = "2.1.0"
+description = "PhotoS official AI auto-tone plugin (CLIP/SigLIP+MLP → 9-field Lightroom params, optional RAG / Qwen3-VL advisor / style & scene biases)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"  # SPDX expression (setuptools>=77)；代码 MIT，
@@ -28,3 +28,7 @@ auto_tone = "photo_s_plugin_auto_tone:AutoTonePlugin"
 
 [tool.setuptools.packages.find]
 include = ["photo_s_plugin_auto_tone*"]
+
+[tool.setuptools.package-data]
+# 场景偏置表（SceneClassifier 默认数据源）必须随包分发
+photo_s_plugin_auto_tone = ["data/*.json"]

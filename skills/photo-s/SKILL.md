@@ -145,7 +145,8 @@ photo-s audit "scratch/*.jpg" --json
   `diff`, `batch_start/status/cancel`, …) directly. 26 core tools, schemas
   via `photo-s mcp --list-tools`; installed plugins register their own tools
   automatically (auto-tone adds `auto_tone` / `aesthetic_score` /
-  `tone_advisor` / `batch_auto_tone`).
+  `tone_advisor` / `batch_auto_tone` / `auto_tone_with_style` /
+  `analyze_visual_style`).
 - **REST**: `photo-s serve --port 0 --token auto --ready-file x.json` — poll the
   file for `{port, token}`, then HTTP with bearer token.
 - Full contract (JSON shapes, exit codes, `serve` endpoints, config precedence):

@@ -357,8 +357,10 @@ shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
 > 上限 20，死线程自动清理。
 >
 > **插件工具（v2.3 自动注册）**：装了 `photo-s-plugin-auto-tone` 的环境自动多出
-> `auto_tone` / `aesthetic_score` / `tone_advisor` / `batch_auto_tone` 四个工具
-> （装即所见，无需配置）。
+> `auto_tone` / `aesthetic_score` / `tone_advisor` / `batch_auto_tone` /
+> `auto_tone_with_style`（v2.1，任意自然语言风格描述 → 9 字段参数 + 风格偏置）/
+> `analyze_visual_style`（v2.1，SigLIP 视觉风格 top-K）六个工具
+> （装即所见，无需配置）；`batch_auto_tone` 新增 `style_desc` 参数走风格化分支。
 
 **破坏性安全**：`dedup keep-sharpest` 默认 `dry_run=True`，删除需显式
 `dry_run=False`；`process` 不覆盖输入（`overwrite` 默认 False）。MCP 模式仅
