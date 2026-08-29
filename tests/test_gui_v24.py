@@ -526,6 +526,122 @@ class TestDevelopCompare:
         assert app._dev_compare_canvas.winfo_manager() == ""
 
 
+class TestSettingsSearch:
+    def test_search_highlights_and_clears(self, app_with_photos):
+        root, app, paths = app_with_photos
+        app._settings_search_var.set("白平衡")
+        app._settings_search()
+        assert app._settings_search_hits, "白平衡 labels must be found"
+        assert app._settings_search_marked
+        app._settings_search_var.set("")
+        app._settings_search()
+        assert not app._settings_search_hits
+        assert not app._settings_search_marked
+
+    def test_search_develop_tab_jumps_module(self, app_with_photos):
+        root, app, paths = app_with_photos
+        app._show_module("export")
+        # 自然饱和度 lives in the Develop adjust panel
+        app._settings_search_var.set("自然饱和度")
+        app._settings_search()
+        assert app._settings_search_hits
+        assert app._active_module == "develop"
+
+    def test_search_no_match(self, app_with_photos):
+        root, app, paths = app_with_photos
+        app._settings_search_var.set("zzz不存在的设置项")
+        app._settings_search()
+        assert not app._settings_search_hits
+
+
+class TestPresetBrowser:
+    def test_hover_preview_and_leave(self, app_with_photos, tmp_path,
+                                     monkeypatch):
+        root, app, paths = app_with_photos
+        from dataclasses import replace
+        from photo_s.engine import ProcessOptions
+        from photo_s.gui import app as app_mod
+        fake = replace(ProcessOptions(), brightness=1.9,
+                       contrast=1.0, saturation=1.0)
+
+        class _FakePresets:
+            @staticmethod
+            def list_presets():
+                return ["demo"]
+
+            @staticmethod
+            def load_preset(name):
+                return fake if name == "demo" else None
+
+        patch_presets(monkeypatch, _FakePresets)
+        app._dev_refresh_presets()
+        assert app._dev_preset_list.get(0, "end") == ("demo",)
+
+        class _Ev:
+            y = 5
+        app._dev_preset_hover(_Ev())
+        assert app._dev_preset_preview is fake
+        # the sig now renders the preset, not the live sliders
+        sig_opts, _p = app._dev_current_sig()
+        assert sig_opts is fake
+        app._dev_preset_leave()
+        assert app._dev_preset_preview is None
+        sig_opts, _p = app._dev_current_sig()
+        assert sig_opts is not fake
+
+    def test_apply_writes_vars(self, app_with_photos, monkeypatch):
+        root, app, paths = app_with_photos
+        from dataclasses import replace
+        from photo_s.engine import ProcessOptions
+
+        class _FakePresets:
+            @staticmethod
+            def list_presets():
+                return ["demo"]
+
+            @staticmethod
+            def load_preset(name):
+                return replace(ProcessOptions(), brightness=1.7)
+
+        patch_presets(monkeypatch, _FakePresets)
+        app._dev_refresh_presets()
+        app._dev_preset_list.selection_set(0)
+        app._dev_preset_apply()
+        assert float(app.brightness.get()) == pytest.approx(1.7)
+        assert app._dev_preset_preview is None
+
+
+class TestFirstRunGuide:
+    def test_guide_shows_once_and_persists(self, app_with_photos):
+        import tkinter as tk
+        root, app, paths = app_with_photos
+        assert not app._first_run_done
+        app._show_first_run_guide()
+        tops = [w for w in root.winfo_children()
+                if isinstance(w, tk.Toplevel)]
+        assert tops, "guide card must open"
+        # dismiss via protocol (the documented path) sets the flag
+        tops[0].tk.call(tops[0].wm_protocol("WM_DELETE_WINDOW"))
+        assert app._first_run_done
+        app._show_first_run_guide()  # second call is a no-op
+        tops2 = [w for w in root.winfo_children()
+                 if isinstance(w, tk.Toplevel)]
+        assert len(tops2) == len(tops) - 1
+        # persisted for next boot
+        from photo_s.gui.state import load_state
+        assert load_state().get("first_run_done") is True
+
+
+
+def patch_presets(monkeypatch, fake):
+    """Point BOTH sys.modules and the photo_s.presets package attribute
+    at the fake — `from .. import presets` resolves the parent attribute
+    first when the submodule was already imported."""
+    import photo_s as photo_s_pkg
+    monkeypatch.setitem(sys.modules, "photo_s.presets", fake)
+    monkeypatch.setattr(photo_s_pkg, "presets", fake)
+
+
 def root_update(app):
     try:
         app.root.update_idletasks()

@@ -43,7 +43,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | 格式转换 | ✅ | ✅ | JPEG / PNG / WebP / TIFF / BMP / HEIC / AVIF |
 | RAW 解码 | ✅ | ✅ | 22+ 种相机 RAW 格式，内置支持（rawpy/libraw）；去马赛克算法可选、色彩空间（sRGB/AdobeRGB/ProPhotoRGB）、16-bit TIFF 输出、自动打 sRGB ICC |
 | 缩放 / 比例 | ✅ | ✅ | 最大尺寸、百分比或最长边上限 |
-| 视觉预览 | ✅ | — | 原图↔处理后实时并排预览（经真实管线渲染） |
+| 视觉预览 | ✅ | — | 原图↔处理后实时并排预览（经真实管线渲染，v2.4 含逐照片调整注入） |
 | 影调与色彩 | ✅ | ✅ | 亮度/对比度/饱和度/伽马/锐化，黑白、复古 |
 | 导出锐化 | ✅ | ✅ | LR 式输出级 USM，半径随输出分辨率缩放 |
 | 白平衡 | ✅ | ✅ | 色温 K，或灰卡采样 |
@@ -107,7 +107,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | 批量基准 | — | ✅ | 并发扩展实测 |
 | AI 识别蒙版 | ✅ | ✅¹ | 主体/人物/物体（80 类）一键生成蒙版，U2Netp/HumanSeg/YOLOv8n-seg（v1.8，onnx 权重自动下载校验） |
 | 笔刷 + 组合蒙版 | ✅ | ✅ | 笔刷涂抹蒙版；A&B / A-B 组合引用已命名蒙版（v1.8） |
-| AI 自动调色 | — | ✅ | auto-tone 官方插件：CLIP+MLP 预测 9 项全局参数 + RAG 检索历史修图（权重 CC-BY-NC 4.0，非商用）；v2.3 引擎槽位接线（`--auto-tone`），装后 MCP/REST 工具自动注册 |
+| AI 自动调色 | ✅ | ✅ | auto-tone 官方插件：CLIP+MLP 预测 9 项全局参数 + RAG 检索历史修图（权重 CC-BY-NC 4.0，非商用）；v2.3 引擎槽位接线（`--auto-tone`），装后 MCP/REST 工具自动注册；v2.4 Develop「AI 调色」按钮——参数写入逐照片覆盖层，可微调/可撤销 |
 | LR 数据桥 | — | ✅ | `lr-scan` 扫描 Lightroom 目录/XMP → 训练数据；`lr-train`/`lr-predict` 岭回归基调模型；`lr-merge` 合并多机数据包（v1.9） |
 | 出片审计 | — | ✅ | `audit` 质量闸门（pass/fail + 原因，agent 终止条件）；`diff` 前后对比；`preview` base64 快照（v1.9） |
 | GPS 地理标记 | — | ✅ | GPX 轨迹插值写 GPS EXIF（时区偏移自动换算，跨日期变更线正确插值） |

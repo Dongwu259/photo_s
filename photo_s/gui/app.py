@@ -345,12 +345,26 @@ class PhotoSApp:
         self._dev_compare_mode = "off"
         self._dev_split_frac = 0.5
         self._dev_compare_photo = None   # PhotoImage ref for the canvas
+        # v2.4: preset hover-preview override — when set, the dev preview
+        # renders THESE options instead of the live sliders (no var is
+        # touched, so leaving the list restores the edit state for free)
+        self._dev_preset_preview = None
+        self._dev_preset_hovered = ""
+        # v2.4: settings search highlights (label, bg, fg) to restore
+        self._settings_search_marked = []
+        self._settings_search_hits = []
 
         self._configure_ttk_styles()
 
         # Build UI
         self._build_ui()
         self._bind_global_shortcuts()
+
+        # v2.4: first-run quick-start card (skipped once dismissed —
+        # every GUI test boots with a fresh HOME, hence the late after()
+        # instead of a synchronous show)
+        if not getattr(self, "_first_run_done", False):
+            self.root.after(900, self._show_first_run_guide)
 
         # System-appearance follower (v2.0): a manual toggle pins the
         # choice until restart (see _recheck_system_theme).
@@ -673,10 +687,10 @@ class PhotoSApp:
                 self._thumb_size = 96
         except Exception:
             pass
+        self._first_run_done = bool(state.get("first_run_done", False))
         recipes = state.get("export_recipes")
         if isinstance(recipes, dict):
-            # consumed in __init__ after _export_recipes is initialized
-            # (_load_gui_state runs earlier in startup than that block)
+            # consumed in __init__ after _export_recipes is initialized            # (_load_gui_state runs earlier in startup than that block)
             self._pending_export_recipes = {
                 str(k): dict(v) for k, v in recipes.items()
                 if isinstance(v, dict)}
@@ -689,6 +703,7 @@ class PhotoSApp:
             "thumb_size": self._thumb_size,
             "module": self._active_module,
             "export_recipes": self._export_recipes,
+            "first_run_done": bool(getattr(self, "_first_run_done", False)),
         })
 
     def _on_main_close(self):
@@ -1293,6 +1308,31 @@ class PhotoSApp:
                                         bg=COLORS["card"], anchor="w")
         self._dev_kelvin_lbl.pack(fill="x", padx=10, pady=(0, 10))
 
+        # v2.4: preset browser — hover previews live through the dev
+        # pipeline (a render-options override; sliders are untouched),
+        # click applies the preset for real
+        preset_card = tk.Frame(side, bg=COLORS["card"], bd=0,
+                               highlightthickness=0)
+        preset_card.pack(fill="x", pady=(8, 0))
+        tk.Label(preset_card, text=self._t("preset_browser"),
+                 font=FONT_SMALL, fg=COLORS["text"], bg=COLORS["card"],
+                 anchor="w").pack(fill="x", padx=10, pady=(8, 2))
+        self._dev_preset_list = tk.Listbox(
+            preset_card, height=4, font=FONT_SMALL,
+            exportselection=False, bg=COLORS["bg"], fg=COLORS["text"],
+            relief="flat", highlightthickness=1,
+            highlightbackground=COLORS["border"])
+        self._dev_preset_list.pack(fill="x", padx=10, pady=(0, 2))
+        tk.Label(preset_card, text=self._t("preset_hover_hint"),
+                 font=FONT_TINY, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"], anchor="w").pack(
+            fill="x", padx=10, pady=(0, 6))
+        self._dev_preset_list.bind("<Motion>", self._dev_preset_hover)
+        self._dev_preset_list.bind("<Leave>", self._dev_preset_leave)
+        self._dev_preset_list.bind("<<ListboxSelect>>",
+                                   self._dev_preset_apply)
+        self._dev_refresh_presets()
+
         # Edit tools host: _build_settings_panel fills this with the
         # ADJUST tab (tone / grading / correction) below the histogram.
         self._dev_settings_host = tk.Frame(side, bg=COLORS["card"], bd=0,
@@ -1320,7 +1360,8 @@ class PhotoSApp:
                     # seeds the undo history with the pre-edit baseline.
                     prev = st["sig"]
                     if (prev is not None and prev[1] == cur[1]
-                            and isinstance(prev[0], ProcessOptions)):
+                            and isinstance(prev[0], ProcessOptions)
+                            and self._dev_preset_preview is None):
                         if cur[1] not in self._photo_adjust:
                             self._dev_history_push(
                                 cur[1], self._dev_fields_of(prev[0]))
@@ -1338,6 +1379,10 @@ class PhotoSApp:
             pass  # root gone — loop dies with it
 
     def _dev_current_sig(self):
+        # v2.4: a hovered preset owns the preview render — its options
+        # replace the live ones without touching a single variable
+        if self._dev_preset_preview is not None:
+            return (self._dev_preset_preview, self._dev_selected)
         return (self._build_options(), self._dev_selected)
 
     def _dev_render(self, sig):
@@ -1353,7 +1398,8 @@ class PhotoSApp:
         # edit — snapshot it into the undo history (deduped inside; first
         # selections / photo switches never reach this branch)
         prev = st["rendered"]
-        if prev is not None and prev[1] == path:
+        if (prev is not None and prev[1] == path
+                and self._dev_preset_preview is None):
             self._dev_history_push(path, self._dev_fields_of(opts))
         render_opts = workflows.preview_options(opts, st["tempdir"])
         self._dev_status_lbl.configure(text=self._t("dev_rendering"),
@@ -1396,6 +1442,70 @@ class PhotoSApp:
             analysis = {}
         self._dev_draw_analysis(analysis)
         self._dev_display_current()
+
+    # ── v2.4: preset browser (hover = live preview, click = apply) ────────
+
+    def _dev_refresh_presets(self):
+        """Reload the preset list (names only; bodies load on hover)."""
+        from .. import presets as presets_mod
+        try:
+            names = presets_mod.list_presets()
+        except Exception:
+            names = []
+        lb = getattr(self, "_dev_preset_list", None)
+        if lb is None:
+            return
+        try:
+            lb.delete(0, tk.END)
+            for n in names:
+                lb.insert(tk.END, n)
+        except tk.TclError:
+            pass
+
+    def _dev_preset_hover(self, event):
+        """Hovering a preset swaps the preview's render options — the
+        sliders, overlays and undo history are never touched."""
+        lb = self._dev_preset_list
+        idx = lb.nearest(event.y)
+        if idx < 0 or idx >= lb.size():
+            return
+        name = lb.get(idx)
+        if name == self._dev_preset_hovered:
+            return
+        self._dev_preset_hovered = name
+        from .. import presets as presets_mod
+        try:
+            self._dev_preset_preview = presets_mod.load_preset(name)
+        except Exception:
+            self._dev_preset_preview = None
+
+    def _dev_preset_leave(self, _event=None):
+        self._dev_preset_hovered = ""
+        self._dev_preset_preview = None
+
+    def _dev_preset_apply(self, _event=None):
+        """Click: apply the selected preset to the UI (the same path the
+        preset dialog uses), then clear the hover preview."""
+        lb = self._dev_preset_list
+        try:
+            sel = lb.curselection()
+        except tk.TclError:
+            sel = ()
+        if not sel:
+            return
+        name = lb.get(sel[0])
+        from .. import presets as presets_mod
+        try:
+            opts = presets_mod.load_preset(name)
+        except Exception:
+            opts = None
+        self._dev_preset_leave()
+        try:
+            lb.selection_clear(0, tk.END)
+        except tk.TclError:
+            pass
+        if opts is not None:
+            self._apply_options_to_ui(opts)
 
     def _dev_fit_photo(self, img):
         """Fit a PIL image into the viewer label (LANCZOS thumbnail) and
@@ -2309,9 +2419,26 @@ class PhotoSApp:
         card = tk.Frame(parent, bg=COLORS["card"], bd=0, highlightthickness=0)
         card.pack(fill="both", expand=True)
 
+        # v2.4: settings search — find a control by its label across tabs,
+        # switch to the owning tab and highlight every hit
+        search_row = tk.Frame(card, bg=COLORS["card"])
+        search_row.pack(fill="x", padx=14, pady=(12, 0))
+        tk.Label(search_row, text=self._t("settings_search_lbl"),
+                 font=FONT_SMALL, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).pack(side="left")
+        self._settings_search_var = tk.StringVar()
+        search_entry = ttk.Entry(search_row,
+                                textvariable=self._settings_search_var,
+                                font=FONT_SMALL)
+        search_entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        search_entry.bind("<KeyRelease>",
+                          lambda e: self._settings_search())
+
         # Category tabs (Lightroom-style): each tab is its own scroll area.
         nb = ttk.Notebook(card)
         nb.pack(fill="both", expand=True)
+        self._settings_nb = nb
+        self._settings_tabs = []   # (tab_widget_or_None, inner, module)
 
         def _make_tab_scroll(tab):
             """Scrollable canvas+inner-frame for one category tab."""
@@ -2371,7 +2498,9 @@ class PhotoSApp:
         def _add_tab(key):
             tab = ttk.Frame(nb)
             nb.add(tab, text=self._t(key))
-            return _make_tab_scroll(tab)
+            self._settings_tabs.append((tab, _make_tab_scroll(tab),
+                                        "export"))
+            return self._settings_tabs[-1][1]
 
         OUT = _add_tab("tab_output")      # format/mode/resize/output/sizes/naming/subfolder
         FX = _add_tab("tab_fx")           # watermark
@@ -2383,6 +2512,7 @@ class PhotoSApp:
                             highlightthickness=0)
         adj_host.pack(fill="both", expand=True)
         ADJ = _make_tab_scroll(adj_host)
+        self._settings_tabs.append((None, ADJ, "develop"))
 
         pad = {"padx": 18, "pady": 4}
 
@@ -7756,6 +7886,105 @@ class PhotoSApp:
 
         def _close():
             self._after_file_dialog()
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _close)
+        win.bind("<Escape>", lambda e: _close())
+
+    def _settings_search(self):
+        """v2.4: find settings by label text across the tabs — switch to
+        the owning tab, highlight every hit, scroll the first one into
+        view. An empty query restores the normal look."""
+        marked = getattr(self, "_settings_search_marked", None) or []
+        for lbl, bg, fg in marked:
+            try:
+                lbl.configure(bg=bg, fg=fg)
+            except tk.TclError:
+                pass  # panel rebuilt (theme/language) since highlighting
+        self._settings_search_marked = []
+        self._settings_search_hits = []
+        q = (getattr(self, "_settings_search_var", None) or
+             tk.StringVar()).get().strip().lower()
+        if not q or not getattr(self, "_settings_tabs", None):
+            return
+        first_hit = None
+        for tab, inner, module in self._settings_tabs:
+            hits = []
+            self._collect_label_hits(inner, q, hits)
+            if not hits:
+                continue
+            if first_hit is None:
+                first_hit = (tab, inner, module, hits[0])
+            for lbl, bg, fg in hits:
+                self._settings_search_marked.append((lbl, bg, fg))
+                self._settings_search_hits.append(lbl.cget("text") or "")
+        if first_hit is None:
+            return
+        tab, inner, module, lbl = first_hit
+        if module == "develop":
+            self._show_module("develop")
+        elif tab is not None:
+            self._settings_nb.select(tab)
+        # scroll the first hit into view (inner's master is the canvas)
+        try:
+            canvas = inner.master
+            total = canvas.bbox("all")[3] or 1
+            canvas.yview_moveto(max(0.0, min(0.99, lbl.winfo_y() / total)))
+        except (tk.TclError, AttributeError, IndexError):
+            pass
+
+    def _collect_label_hits(self, widget, q, out):
+        """Recursive label matcher: collect (label, bg, fg) for labels
+        whose visible text contains the query."""
+        import tkinter as _tk
+        for c in widget.winfo_children():
+            if isinstance(c, _tk.Label):
+                try:
+                    t = (c.cget("text") or "").strip()
+                except tk.TclError:
+                    t = ""
+                if t and q in t.lower() and t != "×":
+                    out.append((c, c.cget("bg"), c.cget("fg")))
+            self._collect_label_hits(c, q, out)
+
+    # ── v2.4: first-run guide card ────────────────────────────────────────
+
+    def _show_first_run_guide(self):
+        """One-time quick-start card (persisted flag in gui_state)."""
+        if getattr(self, "_first_run_done", False):
+            return
+        try:
+            if not self.root.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        win = tk.Toplevel(self.root)
+        win.title(self._t("guide_title"))
+        win.configure(bg=COLORS["card"])
+        win.transient(self.root)
+        try:
+            win.geometry("+%d+%d" % (self.root.winfo_rootx() + 120,
+                                     self.root.winfo_rooty() + 120))
+        except tk.TclError:
+            pass
+        body = tk.Frame(win, bg=COLORS["card"])
+        body.pack(fill="both", expand=True, padx=22, pady=18)
+        tk.Label(body, text=self._t("guide_title"), font=FONT_SECTION,
+                 fg=COLORS["text"], bg=COLORS["card"]).pack(anchor="w",
+                                                            pady=(0, 10))
+        tk.Label(body, text=self._t("guide_text"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["card"],
+                 justify="left", anchor="w").pack(anchor="w")
+        FlatButton(
+            body, text=self._t("guide_start"), command=lambda: _close(),
+            bg=COLORS["accent"], fg="white",
+            hover_bg=COLORS["accent_hover"], border_color=COLORS["accent"],
+            font=FONT_SMALL, padx=16, pady=5).pack(anchor="e",
+                                                   pady=(14, 0))
+
+        def _close():
+            self._first_run_done = True
+            self._save_gui_state()
             win.destroy()
 
         win.protocol("WM_DELETE_WINDOW", _close)

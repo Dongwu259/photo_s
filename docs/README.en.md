@@ -47,7 +47,7 @@ Full contract: [`docs/AGENT_API.md`](AGENT_API.md).
 | Format convert | ✅ | ✅ | JPEG / PNG / WebP / TIFF / BMP / HEIC / AVIF |
 | RAW decode | ✅ | ✅ | 22+ camera RAW formats, built-in (rawpy/libraw); demosaic algorithm choice, color space (sRGB/AdobeRGB/ProPhotoRGB), 16-bit TIFF output, auto sRGB ICC tagging |
 | Resize / Scale | ✅ | ✅ | Max dimensions, percentage, or longest-side cap |
-| Visual preview | ✅ | — | Live original↔processed preview rendered through the real pipeline |
+| Visual preview | ✅ | — | Live original↔processed preview rendered through the real pipeline (v2.4: per-photo adjustments injected) |
 | Tone & color | ✅ | ✅ | Brightness/contrast/saturation/gamma/sharpen, B&W, sepia |
 | Export sharpen | ✅ | ✅ | LR-style output-stage USM, radius scales with output resolution |
 | White balance | ✅ | ✅ | Kelvin temperature or gray-card sampling |
@@ -67,7 +67,7 @@ Full contract: [`docs/AGENT_API.md`](AGENT_API.md).
 | Highlight recovery | ✅ | ✅ | LR-style: compress flat clipped highlights back to visible gradient |
 | LOG recovery | ✅ | ✅ | SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG (1D LUT, no deps) |
 | LUT grading | ✅ | ✅ | .cube trilinear (plugin adds tetrahedral + 5 film presets) |
-| AI auto-tone | — | ✅¹ | Plugin: CLIP+MLP predicts 9-field LR params + confidence, RAG boost, optional Qwen3-VL aesthetic score & advisor (`photo-s-plugin-auto-tone[model]`); v2.3 wired into the engine slot (`--auto-tone`), MCP tools and REST routes auto-register on install |
+| AI auto-tone | ✅ | ✅¹ | Plugin: CLIP+MLP predicts 9-field LR params + confidence, RAG boost, optional Qwen3-VL aesthetic score & advisor (`photo-s-plugin-auto-tone[model]`); v2.3 wired into the engine slot (`--auto-tone`), MCP tools and REST routes auto-register on install; v2.4 Develop "AI tone" button writes the params into the per-photo overlay — tweakable, undoable |
 | Denoise | ✅ | ✅¹ | NLM (`[enhance]` extra) |
 | Auto-straighten | ✅ | ✅¹ | Level the horizon, confidence-gated (`[enhance]` extra) |
 | HDR merge | ✅ | ✅¹ | Exposure fusion, handheld alignment (`[enhance]` extra) |

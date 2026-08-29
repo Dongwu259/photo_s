@@ -730,6 +730,17 @@ STRINGS = {
         "dev_compare_split": "分割对比",
         "dev_compare_side": "并排对比",
         "dev_compare_exit": "退出对比",
+        # ── v2.4 settings search / preset browser / first-run ──
+        "settings_search_lbl": "搜索设置",
+        "preset_browser": "预设",
+        "preset_hover_hint": "悬停实时预览 · 点击应用",
+        "guide_title": "欢迎使用 PhotoS",
+        "guide_text": (
+            "三步上手：\n"
+            "① ⌘O 添加照片（图库：勾选、1-5 评级、P 拒绝、? 看快捷键）\n"
+            "② ⌘2 修图——滑杆实时预览 · 「AI 调色」一键调参 · ⌘Z 逐照片撤销\n"
+            "③ ⌘3 导出——输出设置与配方 · ⌘P 任意时刻前后对比"),
+        "guide_start": "开始使用",
     },
     "en": {
         "window_title": "PhotoS — Batch Image Compression & Conversion",
@@ -1451,5 +1462,16 @@ STRINGS = {
         "dev_compare_split": "Split Compare",
         "dev_compare_side": "Side by Side",
         "dev_compare_exit": "Exit Compare",
+        # ── v2.4 settings search / preset browser / first-run ──
+        "settings_search_lbl": "Search settings",
+        "preset_browser": "Presets",
+        "preset_hover_hint": "Hover to preview live · click to apply",
+        "guide_title": "Welcome to PhotoS",
+        "guide_text": (
+            "Three steps to get going:\n"
+            "① ⌘O add photos (Library: check, rate 1-5, P reject, ? for shortcuts)\n"
+            "② ⌘2 Develop — live sliders · \"AI tone\" one-click · ⌘Z per-photo undo\n"
+            "③ ⌘3 Export — output settings & recipes · ⌘P before/after anytime"),
+        "guide_start": "Get Started",
     },
 }
