@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "photo-s-tools"
 version = "2.3.0"
 description = "批量照片处理工具箱：压缩/转换/调色/EXIF/RAW/去重/选片/REST+MCP — Batch photo toolkit: compress, convert, grade, EXIF, RAW, dedup, cull (CLI + GUI + REST + MCP)"
-readme = "README.md"
+readme = "docs/README.en.md"  # README.md 是中文（GitHub 优先展示）；PyPI 保持英文
 requires-python = ">=3.9"
 license = "MIT"  # SPDX expression (setuptools>=77)
 authors = [
