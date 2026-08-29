@@ -302,8 +302,13 @@ class PhotoSApp:
         self._thumb_cache = ThumbCache()
         self._thumb_decoding: set = set()  # cache keys with a RAW decode in flight
         self._thumb_size = 96          # file-list thumbnail edge px
-        self._pending_thumbs: list = []   # (label, path, cache_key) queue
-        self._thumbs_after = None      # pending after() id for the queue
+        # v2.4 VirtualGrid: the Library list is a fixed-row-height canvas
+        # that materializes only the visible window — a 5k-photo folder
+        # never creates 35k widgets. _lib_model is the row data; drawing
+        # reads it plus _checked / _selected_rows live.
+        self._lib_model: list = []     # [{path,name,size,fmt,dims,cache_key}]
+        self._lib_photos: list = []    # PhotoImage refs kept alive per draw
+        self._lib_visible = (0, 0)     # index range [first, last) last drawn
         self.filter_var = tk.StringVar(value="")  # file-list filter box
         self.rename_pattern = tk.StringVar(value="")
         self.folder_pattern = tk.StringVar(value="")
@@ -331,6 +336,9 @@ class PhotoSApp:
             del self._pending_export_recipes
         except AttributeError:
             pass
+        # v2.4: AI auto-tone (official plugin) runs in a worker thread; the
+        # busy flag re-entry-guards the button until the result lands
+        self._dev_ai_busy = False
 
         self._configure_ttk_styles()
 
@@ -529,6 +537,21 @@ class PhotoSApp:
         for seq, fn, allow in binds:
             self.root.bind(seq, wrap(fn, allow))
         self.root.bind("<Escape>", self._on_global_escape)
+        # v2.4: Library keyboard rating (1-5 / P) + Enter-to-viewer +
+        # row removal keys, and the ? shortcut table. Canvas widgets
+        # don't take keyboard focus, so these live on the root with a
+        # focus guard — typing in an entry never triggers them.
+        for n in range(1, 6):
+            self.root.bind(
+                str(n), lambda e, n=n: self._lib_key_rate(n))
+        self.root.bind("p", lambda e: self._lib_key_rate(0))
+        self.root.bind("<Return>", lambda e: self._lib_key_open())
+        self.root.bind("<Delete>", lambda e: self._lib_key_remove())
+        self.root.bind("<BackSpace>", lambda e: self._lib_key_remove())
+        self.root.bind("<KeyPress-question>",
+                       lambda e: self._lib_key_shortcuts())
+        self.root.bind("<Command-question>",
+                       lambda e: self._lib_key_shortcuts())
 
     def _on_global_escape(self, event=None):
         """Esc cancels a running batch from the main window. Events in
@@ -1209,6 +1232,22 @@ class PhotoSApp:
             font=FONT_SMALL, padx=12, pady=4)
         self._dev_redo_btn.configure(state=tk.DISABLED)
         self._dev_redo_btn.pack(side="left", padx=(8, 0))
+        # v2.4: AI auto-tone (official plugin) — predicted params land in the
+        # per-photo overlay, so they stay editable / undoable / previewed
+        self._dev_ai_btn = FlatButton(
+            bottom_bar, text=self._t("dev_ai_tone"),
+            command=self._dev_ai_tone, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=12, pady=4)
+        self._dev_ai_btn.pack(side="left", padx=(12, 0))
+        self._dev_ai_strength = tk.StringVar(value="0.8")
+        tk.Label(bottom_bar, text=self._t("dev_ai_strength"), font=FONT_TINY,
+                 fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).pack(side="left", padx=(6, 2))
+        self._dev_ai_strength_box = ttk.Combobox(
+            bottom_bar, textvariable=self._dev_ai_strength, width=4,
+            values=("1.0", "0.8", "0.6", "0.4", "0.2"), state="readonly")
+        self._dev_ai_strength_box.pack(side="left")
         tk.Label(bottom_bar, text=self._t("dev_hint"), font=FONT_TINY,
                  fg=COLORS["text_secondary"],
                  bg=COLORS["card"]).pack(side="right")
@@ -1489,6 +1528,108 @@ class PhotoSApp:
         self._paste_settings_to([self._dev_selected])
         self._dev_status_lbl.configure(
             text=self._t("paste_done", n=1), fg=COLORS["text_secondary"])
+
+    # ── v2.4: AI auto-tone (official plugin) ─────────────────────────────
+
+    # plugin target name → ProcessOptions field. The plugin predicts LR-style
+    # values; every target except exposure maps 1:1 onto a develop field
+    # (exposure is linear EV stops = ProcessOptions.ev, contrast/saturation
+    # are factors with 1.0 neutral, wb_temp is the light-source kelvin).
+    _AI_TONE_FIELDS = (
+        ("exposure", "ev"), ("contrast", "contrast"),
+        ("saturation", "saturation"), ("vibrance", "vibrance"),
+        ("wb_temp", "wb_temp"), ("wb_tint", "wb_tint"),
+        ("clarity", "clarity"), ("texture", "texture"),
+        ("dehaze", "dehaze"),
+    )
+
+    def _dev_ai_tone(self):
+        """Predict the 9 global params for the selected photo with the
+        official auto-tone plugin and write them into its develop overlay.
+        Runs in a worker thread (first use downloads weights + towers);
+        the result is marshalled back through the dev bus."""
+        if self._dev_ai_busy:
+            return
+        path = self._dev_selected
+        if not path:
+            self._dev_status_lbl.configure(
+                text=self._t("dev_ai_need_photo"), fg=COLORS["warning"])
+            return
+        try:
+            strength = float(self._dev_ai_strength.get())
+        except (ValueError, tk.TclError):
+            strength = 0.8
+        self._dev_ai_busy = True
+        self._dev_ai_btn.configure(state=tk.DISABLED)
+        self._dev_status_lbl.configure(
+            text=self._t("dev_ai_running"), fg=COLORS["text_secondary"])
+
+        def work():
+            res, err = None, None
+            try:
+                from photo_s_plugin_auto_tone import auto_tone
+                res = auto_tone(path, strength=strength, render=False)
+            except ImportError as e:
+                err = ("plugin", str(e))
+            except Exception as e:  # model load / inference errors carry
+                err = ("failed", str(e) or e.__class__.__name__)  # their own hint
+            self._dev_bus.schedule(
+                lambda: self._dev_ai_apply(path, res, err))
+
+        threading.Thread(target=work, daemon=True,
+                         name="photos-ai-tone").start()
+
+    def _dev_ai_apply(self, path, res, err):
+        """Bus-delivered completion: merge the predicted params into the
+        photo's overlay + undo history, reflect them in the sliders."""
+        self._dev_ai_busy = False
+        try:
+            self._dev_ai_btn.configure(state=tk.NORMAL)
+        except tk.TclError:
+            pass  # panel torn down mid-flight
+        if err is not None:
+            kind, msg = err
+            if kind == "plugin":
+                self._dev_status_lbl.configure(
+                    text=self._t("dev_ai_need_plugin"),
+                    fg=COLORS["warning"])
+                messagebox.showwarning(
+                    self._t("dev_ai_tone"),
+                    self._t("dev_ai_install_hint"))
+            else:
+                self._dev_status_lbl.configure(
+                    text=self._t("dev_ai_failed", err=msg[:140]),
+                    fg=COLORS["warning"])
+            return
+        predicted = (res or {}).get("options") or {}
+        base = dict(self._photo_adjust.get(path)
+                   or self._dev_fields_of(self._build_options()))
+        applied = 0
+        for src, dst in self._AI_TONE_FIELDS:
+            v = predicted.get(src)
+            if v is not None:
+                base[dst] = v
+                applied += 1
+        if not applied:
+            self._dev_status_lbl.configure(
+                text=self._t("dev_ai_no_params"), fg=COLORS["warning"])
+            return
+        if path not in self._photo_adjust:
+            self._dev_history_push(
+                path, self._dev_fields_of(self._build_options()))
+        self._photo_adjust[path] = base
+        self._dev_history_push(path, base)
+        if self._dev_selected == path:
+            self._apply_dev_fields(base)
+        conf = (res or {}).get("confidence")
+        text = (self._t("dev_ai_done", conf=conf)
+                if isinstance(conf, (int, float))
+                else self._t("dev_ai_done", conf=0.0).split(" · ")[0])
+        self._dev_status_lbl.configure(text=text,
+                                       fg=COLORS["text_secondary"])
+        self._dev_update_undo_buttons()
+        self._refresh_export_queue()
+
 
     def _paste_settings_to(self, paths) -> None:
         """Write the clipboard onto photos: per-photo overlay + history
@@ -1953,32 +2094,25 @@ class PhotoSApp:
         list_frame = tk.Frame(card, bg=COLORS["card"])
         list_frame.pack(fill="both", expand=True, padx=14, pady=12)
 
+        # v2.4 VirtualGrid: rows are drawn directly on the canvas at a
+        # fixed row height — only the visible window is materialized, so
+        # huge libraries scroll smoothly (the old all-widget rows froze
+        # the UI past a few thousand photos).
         self.file_list_canvas = tk.Canvas(
             list_frame, bg=COLORS["card"], highlightthickness=0,
             borderwidth=0)
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical",
                                   command=self.file_list_canvas.yview)
-        self.file_list_canvas.configure(yscrollcommand=scrollbar.set)
+        self.file_list_canvas.configure(
+            yscrollcommand=self._lib_yscroll)
         scrollbar.pack(side="right", fill="y")
+        self._lib_scrollbar = scrollbar
         self.file_list_canvas.pack(side="left", fill="both", expand=True)
+        self.file_list_canvas.bind("<Configure>",
+                                   lambda e: self._lib_draw())
 
-        self.file_rows_frame = tk.Frame(self.file_list_canvas,
-                                        bg=COLORS["card"])
-        self._rows_win = self.file_list_canvas.create_window(
-            (0, 0), window=self.file_rows_frame, anchor="nw")
-
-        def _sync_width(event=None):
-            self.file_list_canvas.itemconfigure(
-                self._rows_win,
-                width=self.file_list_canvas.winfo_width())
-
-        self.file_list_canvas.bind("<Configure>", _sync_width)
-
-        def _sync_scroll(event=None):
-            self.file_list_canvas.configure(
-                scrollregion=self.file_list_canvas.bbox("all"))
-
-        self.file_rows_frame.bind("<Configure>", _sync_scroll)
+        self.file_list_canvas.bind("<Button-1>", self._lib_click)
+        self.file_list_canvas.bind("<Double-1>", self._lib_double_click)
 
         # Mousewheel: same pattern as the settings panel (card-scoped
         # bind_all + boundary snapping + momentum debounce)
@@ -2023,8 +2157,7 @@ class PhotoSApp:
         # tkdnd Tcl commands aren't loaded, so degrade gracefully)
         if DND_AVAILABLE:
             try:
-                for widget in (card, self.file_list_canvas,
-                               self.file_rows_frame):
+                for widget in (card, self.file_list_canvas):
                     widget.drop_target_register(DND_FILES)
                     widget.dnd_bind("<<Drop>>", self._on_drop)
             except Exception:
@@ -4101,6 +4234,9 @@ class PhotoSApp:
         # is slow, so overlay redraws reuse it instead of re-segmenting.
         ai_cache = {}
         ai_skip_warned = [False]  # AI 叠加层渲染失败只警告一次
+        # v2.4 WYSIWYG: per-photo develop-rendered base (tone adjustments,
+        # no masks — the canvas blends its own live mask overlays)
+        adj_cache = {}
 
         def _draw_image():
             """Fit the current photo into the canvas, with overlay."""
@@ -4114,10 +4250,28 @@ class PhotoSApp:
             try:
                 # _open_image_safe：RAW 回退引擎加载器（rawpy），
                 # 摄影师工作流主力格式在画布上正常显示
-                base = _open_image_safe(path).convert("RGB")
+                base = adj_cache.get(path) or _open_image_safe(path)
+                base = base.convert("RGB")
                 base.thumbnail((700, 460), PILImage.LANCZOS)
             except Exception:
                 base = PILImage.new("RGB", (700, 460), (40, 40, 40))
+            if path not in adj_cache and path in self._photo_adjust:
+
+                def _deliver(result, err, _p=path):
+                    if not win.winfo_exists() or files[idx[0]] != _p:
+                        return
+                    if not result:
+                        return  # original stays on failure
+                    try:
+                        img = _open_image_safe(result.output_path)
+                        adj_cache[_p] = img
+                        if files[idx[0]] == _p:
+                            _draw_image()
+                    except Exception:
+                        pass
+
+                self._render_adjusted_async(
+                    path, _deliver, include_masks=False)
             cw, ch = canvas.winfo_width(), canvas.winfo_height()
             if cw < 50 or ch < 50:  # canvas not laid out yet
                 cw, ch = 700, 460
@@ -6560,6 +6714,13 @@ class PhotoSApp:
                 parts.append("ISO " + str(m["iso"]))
             if m.get("focal"):
                 parts.append(str(m["focal"]))
+            # v2.4 WYSIWYG: photos with a develop overlay / masks render
+            # through the same pipeline export uses — the lightbox shows
+            # what will actually come out, never a bare original
+            has_adj = (p in self._photo_adjust
+                       or p in (self._photo_masks or {}))
+            if has_adj:
+                parts.append(self._t("export_adjusted_badge"))
             info_lbl.configure(text="  |  ".join(parts))
             prev_btn.configure(
                 state="normal" if idx > 0 else "disabled")
@@ -6578,6 +6739,26 @@ class PhotoSApp:
             except Exception as e:
                 img_lbl.configure(image="",
                                   text=os.path.basename(p) + "\n" + str(e))
+            if has_adj:
+                state["adj"] = (state.get("adj", 0) + 1)
+
+                def _deliver(result, err, _tok=state["adj"]):
+                    if not win.winfo_exists() or _tok != state.get("adj"):
+                        return  # dialog closed / navigated away
+                    if not result:
+                        return  # keep the original on render failure
+                    try:
+                        from PIL import Image, ImageTk
+                        img = _open_image_safe(result.output_path)
+                        img = img.convert("RGB")
+                        img.thumbnail((900, 540), Image.LANCZOS)
+                        photo = ImageTk.PhotoImage(img, master=img_lbl)
+                        img_lbl.configure(image=photo, text="")
+                        state["photo"] = photo
+                    except Exception:
+                        pass  # rendered file unreadable — original stays
+
+                self._render_adjusted_async(p, _deliver)
 
         def set_rating(n):
             if not state["seq"]:
@@ -6786,29 +6967,25 @@ class PhotoSApp:
                 text=self._t("files_count", n=len(self.files)))
 
     def _make_check_cb(self, path):
-        """Checkbutton command: keep self._checked in sync with the
-        clicked checkbox (Tk flips the variable before the command)."""
+        """Deprecated seam kept for compatibility — checkboxes are canvas
+        items in the v2.4 VirtualGrid; state toggles go through
+        _toggle_check, which redraws the affected window."""
 
         def on_toggle():
-            if self._row_vars[path].get():
-                self._checked.add(path)
-            else:
-                self._checked.discard(path)
-            self._update_count_label()
+            self._toggle_check(path)
 
         return on_toggle
 
     def _toggle_check(self, path):
-        """Toggle the checkbox for one row (programmatic / test seam).
-        Syncs the row's variable in place — no full re-render."""
+        """Toggle one row's checkbox (programmatic / test seam).
+        v2.4 VirtualGrid: state lives in _checked; the canvas redraw
+        reflects it — no per-row widget to sync."""
         if path in self._checked:
             self._checked.discard(path)
         else:
             self._checked.add(path)
-        var = self._row_vars.get(path)
-        if var is not None:
-            var.set(path in self._checked)
         self._update_count_label()
+        self._lib_draw()
 
     def _push_undo(self, label, run, redo=None):
         """Record a reversible action (label for display, run restores
@@ -6899,6 +7076,38 @@ class PhotoSApp:
             kw["mask_adjust"] = pm.get("mask_adjust", opts.mask_adjust)
         return replace(opts, **kw)
 
+    def _render_adjusted_async(self, path, deliver, include_masks=True):
+        """v2.4 WYSIWYG: render ``path`` through its per-photo overlay
+        (+ masks) — the same injection batch export uses — in a worker
+        thread. ``deliver(result_or_None, err_text)`` runs on the Tk
+        thread via the dev bus. ``include_masks=False`` renders the tone
+        adjustments only (mask editors blend their own live overlays on
+        top, so baking masks into the base would double-apply and go
+        stale while dragging)."""
+        base_opts = self._build_options()   # reads tk vars — Tk thread only
+        tempdir = tempfile.mkdtemp(prefix="photos_wysiwyg_")
+        self._preview_tempdirs.add(tempdir)
+
+        def work():
+            result, err = None, None
+            try:
+                opts = self._per_file_overlay(path, base_opts)
+                if not include_masks:
+                    from dataclasses import replace as _replace
+                    opts = _replace(opts, masks="", mask_adjust="")
+                result = workflows.preview_render(
+                    path, workflows.preview_options(opts, tempdir))
+                if not (result and getattr(result, "success", False)
+                        and result.output_path):
+                    err = getattr(result, "error", None) or "render failed"
+                    result = None
+            except Exception as e:
+                result, err = None, str(e)
+            self._dev_bus.schedule(lambda: deliver(result, err))
+
+        threading.Thread(target=work, daemon=True,
+                         name="photos-wysiwyg").start()
+
     def _sync_redo_btn(self):
         btn = getattr(self, "redo_btn", None)
         if btn is None:
@@ -6959,15 +7168,9 @@ class PhotoSApp:
         self._highlight_row(path)
 
     def _highlight_row(self, path):
-        """Apply/clear the selection highlight for one row."""
-        w = self._row_widgets.get(path)
-        if not w:
-            return
-        on = path in self._selected_rows
-        bg = COLORS["accent"] if on else w["base_bg"]
-        w["row"].configure(bg=bg)
-        for lbl, base_fg in w["labels"]:
-            lbl.configure(bg=bg, fg="white" if on else base_fg)
+        """Apply/clear the selection highlight (v2.4: the canvas draws the
+        selection outline from _selected_rows — one redraw, no widgets)."""
+        self._lib_draw()
 
     def _remove_selected(self):
         """Remove the selected rows from the list (exact by full path,
@@ -7077,20 +7280,18 @@ class PhotoSApp:
             self._refresh_file_list()
             self._update_stats()
 
-    def _refresh_file_list(self):
-        """Refresh the file list (rebuilds all rows from self.files).
-        Checkbox state comes from self._checked — the tk.Variables are
-        recreated per build, so language/theme rebuilds keep the checks.
-        """
-        # Clear existing rows (and the pending thumbnail queue — the old
-        # labels are destroyed with their rows)
-        for w in self.file_rows_frame.winfo_children():
-            w.destroy()
-        self._pending_thumbs = []
-        self._row_vars = {}
-        self._row_widgets = {}
+    # ── v2.4 Library VirtualGrid: fixed-row-height canvas list ─────────────
 
-        for i, path in enumerate(self._visible_files()):
+    def _lib_row_h(self) -> int:
+        return self._thumb_size + 8
+
+    def _refresh_file_list(self):
+        """Rebuild the list MODEL, then draw only the visible window
+        (v2.4 VirtualGrid). Checkbox/selection state lives in
+        self._checked / self._selected_rows and is read at draw time, so
+        toggles redraw one pass instead of rebuilding rows of widgets."""
+        self._lib_model = []
+        for path in self._visible_files():
             name = os.path.basename(path)
             try:
                 st = os.stat(path)
@@ -7110,54 +7311,336 @@ class PhotoSApp:
                         with Image.open(path) as img:
                             dims = f"{img.width}×{img.height}"
                     self._dims_cache[cache_key] = dims
-            except OSError:
+            except (OSError, Exception):
                 size, dims = "N/A", "—"
-            except Exception:
-                size, dims = "N/A", "—"
+                # stat failed (file vanished mid-listing): a stable key
+                # keeps the row drawable — it just never gets a thumbnail
+                cache_key = (path, 0, 0.0)
             fmt = Path(path).suffix.upper().lstrip(".")
-            base_bg = COLORS["row_alt"] if i % 2 else COLORS["card"]
-
-            row = tk.Frame(self.file_rows_frame, bg=base_bg, bd=0,
-                           highlightthickness=0)
-            row.pack(fill="x")
-            row.pack_propagate(True)
-
-            var = tk.BooleanVar(value=path in self._checked)
-            cb = ttk.Checkbutton(row, variable=var,
-                                 command=self._make_check_cb(path))
-            cb.pack(side="left", padx=(10, 8), pady=3)
-
-            thumb = self._make_thumbnail(path, cache_key, base_bg, row)
-            if thumb is not None:
-                thumb.pack(side="left", padx=(0, 8))
-
-            name_lbl = tk.Label(row, text=name, anchor="w", font=FONT_BODY,
-                                fg=COLORS["text"], bg=base_bg)
-            name_lbl.pack(side="left", fill="x", expand=True)
-            labels = [(name_lbl, COLORS["text"])]
-            for text, width in ((size, 10), (fmt, 6), (dims, 12)):
-                lbl = tk.Label(row, text=text, width=width, anchor="e",
-                               font=FONT_SMALL,
-                               fg=COLORS["text_secondary"], bg=base_bg)
-                lbl.pack(side="left", padx=(8, 0))
-                labels.append((lbl, COLORS["text_secondary"]))
-
-            # interactions: click selects, double-click compares,
-            # BackSpace/Delete removes the selected rows
-            for w in (row, name_lbl):
-                w.bind("<Button-1>", lambda e, p=path: self._select_row(p))
-                w.bind("<Double-1>", lambda e, p=path: self._open_compare(p))
-                w.bind("<BackSpace>", lambda e: self._remove_selected())
-                w.bind("<Delete>", lambda e: self._remove_selected())
-
-            self._row_vars[path] = var
-            self._row_widgets[path] = {"row": row, "labels": labels,
-                                       "base_bg": base_bg}
-
+            self._lib_model.append({
+                "path": path, "name": name, "size": size, "fmt": fmt,
+                "dims": dims, "cache_key": cache_key,
+            })
+        self._selected_rows &= set(self.files)  # drop gone paths
+        self._lib_draw()
         self._update_count_label()
-        self._schedule_thumbnails()
         self._dev_refresh_filmstrip()
         self._refresh_export_queue()
+
+    def _lib_yscroll(self, first, last):
+        """yscrollcommand shim: update the scrollbar always; redraw only
+        when a DIFFERENT window of rows must materialize. Rows are drawn
+        at absolute y coordinates, so the canvas scrolls them natively —
+        and an unconditional draw here would ping-pong forever, because
+        Tk re-fires yscrollcommand after every scrollregion update (the
+        draw sets scrollregion)."""
+        sb = getattr(self, "_lib_scrollbar", None)
+        if sb is not None:
+            try:
+                sb.set(first, last)
+            except tk.TclError:
+                pass
+        if not self._lib_model:
+            return
+        try:
+            top = float(first)
+        except (TypeError, ValueError):
+            return
+        n = len(self._lib_model)
+        first_idx = max(0, int(top * n) - 2)  # same margin as _lib_draw
+        if first_idx != self._lib_visible[0]:
+            self._lib_draw()
+
+    def _lib_draw(self):
+        """Materialize the visible rows as canvas items (culling: only
+        rows intersecting the viewport are drawn; the data model above is
+        the full list). Re-entrant-safe — scrollregion updates during a
+        draw would recurse through yscrollcommand otherwise."""
+        if getattr(self, "_lib_drawing", False):
+            return
+        canvas = getattr(self, "file_list_canvas", None)
+        if canvas is None or not canvas.winfo_exists():
+            return
+        self._lib_drawing = True
+        try:
+            self._lib_draw_inner()
+        finally:
+            self._lib_drawing = False
+
+    def _lib_draw_inner(self):
+        from PIL import Image, ImageTk
+        canvas = self.file_list_canvas
+        canvas.delete("all")
+        self._lib_photos = []
+        n = len(self._lib_model)
+        rh = self._lib_row_h()
+        w = max(canvas.winfo_width(), 200)
+        total = n * rh
+        canvas.configure(scrollregion=(0, 0, w, max(total, 1)))
+        if not n:
+            return
+        top_frac = canvas.yview()[0]
+        y0 = top_frac * total
+        ch = max(canvas.winfo_height(), rh)
+        first = max(0, int(y0 // rh) - 2)
+        last = min(n, int((y0 + ch) // rh) + 3)
+        self._lib_visible = (first, last)
+        thumb = self._thumb_size
+        todo = []
+        for i in range(first, last):
+            row = self._lib_model[i]
+            path = row["path"]
+            y = i * rh
+            bg = COLORS["row_alt"] if i % 2 else COLORS["card"]
+            canvas.create_rectangle(0, y, w, y + rh, fill=bg,
+                                    width=0, tags=("row:%d" % i,))
+            if path in self._selected_rows:
+                canvas.create_rectangle(
+                    1, y + 1, w - 1, y + rh - 1, outline=COLORS["accent"],
+                    width=1, tags=("row:%d" % i,))
+            # checkbox (drawn; state read live from _checked)
+            cy = y + rh // 2
+            checked = path in self._checked
+            canvas.create_rectangle(
+                12, cy - 7, 26, cy + 7, fill=COLORS["card"],
+                outline=(COLORS["accent"] if checked
+                         else COLORS["border"]),
+                width=1, tags=("cb:%d" % i,))
+            if checked:
+                canvas.create_text(19, cy, text="✓",
+                                   fill=COLORS["accent"], font=FONT_SMALL)
+            # thumbnail from the LRU cache (decode queued when missing)
+            img = self._thumb_cache.get(row["cache_key"])
+            if isinstance(img, Image.Image) and not isinstance(img, bool):
+                photo = ImageTk.PhotoImage(img, master=canvas)
+                self._lib_photos.append(photo)
+                canvas.create_image(36, cy, image=photo, anchor="w")
+            else:
+                tx = 36 + thumb // 2
+                canvas.create_rectangle(
+                    36, cy - thumb // 2, 36 + thumb, cy + thumb // 2,
+                    fill=COLORS["bg"], outline=COLORS["border"],
+                    tags=("thumbph:%d" % i,))
+                canvas.create_text(tx, cy, text="▦",
+                                   fill=COLORS["text_secondary"])
+                if img is None:
+                    todo.append((i, row))
+            # name (+ adjusted badge dot) — clips at the right columns
+            nx = 36 + thumb + 10
+            if path in self._photo_adjust:
+                canvas.create_oval(nx, cy - 3, nx + 6, cy + 3,
+                                   fill=COLORS["accent"], outline="")
+                nx += 12
+            canvas.create_text(
+                nx, cy, text=row["name"], anchor="w", font=FONT_BODY,
+                fill=COLORS["text"], width=max(80, w - nx - 340))
+            # right-aligned columns: rating stars / dims / fmt / size
+            rating = self._lib_rating(path)
+            if rating:
+                canvas.create_text(
+                    w - 320, cy, text="★" * rating, anchor="e",
+                    font=FONT_SMALL, fill=COLORS["accent"])
+            canvas.create_text(w - 200, cy, text=row["dims"], anchor="e",
+                               font=FONT_SMALL,
+                               fill=COLORS["text_secondary"])
+            canvas.create_text(w - 100, cy, text=row["fmt"], anchor="e",
+                               font=FONT_SMALL,
+                               fill=COLORS["text_secondary"])
+            canvas.create_text(w - 14, cy, text=row["size"], anchor="e",
+                               font=FONT_SMALL,
+                               fill=COLORS["text_secondary"])
+        if todo:
+            self._lib_queue_thumbs(todo)
+
+    def _lib_rating(self, path) -> int:
+        """Rating for the row badge, cached (EXIF parsed once per path)."""
+        cache = getattr(self, "_lib_rating_cache", None)
+        if cache is None:
+            cache = self._lib_rating_cache = {}
+        if path not in cache:
+            try:
+                from ..engine import read_exif_metadata
+                m = read_exif_metadata(path)
+                cache[path] = int(m.get("rating") or 0)
+            except Exception:
+                cache[path] = 0
+        return cache[path]
+
+    def _lib_queue_thumbs(self, todo):
+        """Queue visible-but-undecoded thumbnails, then pump a few per
+        tick (RAW decodes run off the UI thread, like the old rows)."""
+        q = getattr(self, "_lib_thumb_queue", None)
+        if q is None:
+            q = self._lib_thumb_queue = []
+        have = {t[1]["cache_key"] for t in q}
+        for item in todo:
+            if item[1]["cache_key"] not in have:
+                q.append(item)
+        if q and not getattr(self, "_lib_thumb_after", None):
+            self._lib_thumb_after = self.root.after(
+                30, lambda: self._lib_pump_thumbs(3))
+
+    def _lib_pump_thumbs(self, batch):
+        self._lib_thumb_after = None
+        q = getattr(self, "_lib_thumb_queue", None) or []
+        done = 0
+        while q and done < batch:
+            i, row = q.pop(0)
+            key = row["cache_key"]
+            path = row["path"]
+            if self._thumb_cache.get(key) is not None:
+                continue  # already decoded meanwhile
+            if key in self._thumb_decoding:
+                q.append((i, row))  # RAW worker in flight — retry later
+                continue
+            if Path(path).suffix.lower() in RAW_EXTENSIONS:
+                self._thumb_decoding.add(key)
+
+                def _decode(p=path, k=key, s=self._thumb_size):
+                    try:
+                        self._thumb_cache[k] = self._decode_thumb_source(p, s)
+                    except Exception:
+                        self._thumb_cache[k] = False
+                    finally:
+                        self._thumb_decoding.discard(k)
+                        try:
+                            self.root.after(
+                                0, lambda: self._lib_pump_thumbs(batch))
+                        except tk.TclError:
+                            pass  # window gone
+
+                threading.Thread(target=_decode, daemon=True).start()
+                continue
+            try:
+                self._thumb_cache[key] = self._decode_thumb_source(
+                    path, self._thumb_size)
+                done += 1
+            except Exception:
+                self._thumb_cache[key] = False
+                done += 1
+        if q:
+            self._lib_thumb_after = self.root.after(
+                30, lambda: self._lib_pump_thumbs(batch))
+        else:
+            self._lib_draw()  # land the last decoded batch
+
+    def _lib_row_at(self, y) -> int:
+        """Model index for a canvas y coordinate, or -1."""
+        rh = self._lib_row_h()
+        idx = int(y // rh)
+        if 0 <= idx < len(self._lib_model):
+            return idx
+        return -1
+
+    def _lib_click(self, event):
+        idx = self._lib_row_at(event.y)
+        if idx < 0:
+            return
+        path = self._lib_model[idx]["path"]
+        if event.x <= 34:  # checkbox zone
+            self._toggle_check(path)
+            return
+        self._select_row(path)
+
+    def _lib_double_click(self, event):
+        idx = self._lib_row_at(event.y)
+        if idx >= 0:
+            self._open_compare(self._lib_model[idx]["path"])
+
+    def _lib_rate(self, n):
+        """Keyboard rating on the selected rows (1-5 stars; P clears —
+        the reject gesture, aligned with the review lightbox keys)."""
+        if not self._selected_rows:
+            return
+        for path in list(self._selected_rows):
+            try:
+                self._review_save(path, rating=n)
+            except Exception:
+                pass  # read-only file / EXIF host without write support
+        self._lib_rating_cache = {}
+        self._lib_draw()
+
+    def _lib_open_in_viewer(self):
+        """Enter: send the first selected photo to the Develop viewer."""
+        for path in self._selected_rows:
+            self._show_module("develop")
+            self._dev_select(path)
+            return
+
+    # ── v2.4: Library keyboard commands (root-bound, focus-guarded) ──────
+
+    def _lib_keys_active(self) -> bool:
+        """Keyboard commands fire only in the Library module and only
+        while the focus is not in a text-ish widget (typing "3" into the
+        filter box must never rate a photo)."""
+        if getattr(self, "_active_module", "") != "library":
+            return False
+        w = None
+        try:
+            w = self.root.focus_get()
+        except tk.TclError:
+            pass
+        if isinstance(w, (tk.Entry, ttk.Entry, tk.Text, ttk.Combobox,
+                          tk.Listbox, tk.Spinbox, ttk.Spinbox)):
+            return False
+        return True
+
+    def _lib_key_rate(self, n):
+        if self._lib_keys_active():
+            self._lib_rate(n)
+
+    def _lib_key_open(self):
+        if self._lib_keys_active():
+            self._lib_open_in_viewer()
+
+    def _lib_key_remove(self):
+        if self._lib_keys_active() and self._selected_rows:
+            self._remove_selected()
+
+    def _lib_key_shortcuts(self, event=None):
+        """? opens the shortcut table (any module; entries are guarded)."""
+        w = None
+        try:
+            w = self.root.focus_get()
+        except tk.TclError:
+            pass
+        if isinstance(w, (tk.Entry, ttk.Entry, tk.Text, ttk.Combobox,
+                          tk.Listbox, tk.Spinbox, ttk.Spinbox)):
+            return
+        self._show_shortcuts()
+
+    def _show_shortcuts(self):
+        """The keyboard shortcut table (v2.4)."""
+        if self._dlg_cooldown_active():
+            return
+        win = tk.Toplevel(self.root)
+        win.title(self._t("shortcuts_title"))
+        win.configure(bg=COLORS["bg"])
+        win.transient(self.root)
+        win.geometry("+%d+%d" % (self.root.winfo_rootx() + 80,
+                                 self.root.winfo_rooty() + 80))
+        body = tk.Frame(win, bg=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=16, pady=14)
+        tk.Label(body, text=self._t("shortcuts_title"),
+                 font=FONT_BODY, fg=COLORS["text"],
+                 bg=COLORS["bg"]).pack(anchor="w", pady=(0, 8))
+        tk.Label(body, text=self._t("shortcuts_text"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"],
+                 justify="left", anchor="w").pack(anchor="w")
+        FlatButton(
+            body, text=self._t("close"),
+            command=lambda: _close(), bg=COLORS["card"],
+            fg=COLORS["text"], hover_bg=COLORS["bg"],
+            border_color=COLORS["border"], font=FONT_SMALL,
+            padx=14, pady=4).pack(anchor="e", pady=(12, 0))
+
+        def _close():
+            self._after_file_dialog()
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _close)
+        win.bind("<Escape>", lambda e: _close())
+
 
     def _visible_files(self):
         """Files matching the filter box (display-only view over self.files)."""
@@ -7175,28 +7658,6 @@ class PhotoSApp:
     def _clear_filter(self):
         self.filter_var.set("")
         self._refresh_file_list()
-
-    def _make_thumbnail(self, path, cache_key, bg, row):
-        """A row thumbnail Label (cached by path+size+mtime). Decoding is
-        deferred to the event loop (_schedule_thumbnails) so refresh never
-        blocks on image loads — large folders stay responsive and slow CI
-        render-polls aren't starved. A neutral placeholder shows meanwhile;
-        RAW files use a half-size decode."""
-        size = self._thumb_size
-        # No fixed char width/height: the Label sizes itself to the
-        # PhotoImage (v1.8: larger thumbnails previously got squished into
-        # a ~40px char-unit box).
-        lbl = tk.Label(row, text="", bg=bg,
-                       fg=COLORS["text_secondary"],
-                       font=(PLATFORM_FONTS["body"], 18))
-        self._pending_thumbs.append((lbl, path, cache_key))
-        return lbl
-
-    def _schedule_thumbnails(self, batch=4):
-        """Generate queued thumbnails a few per event-loop tick."""
-        if self._pending_thumbs and not self._thumbs_after:
-            self._thumbs_after = self.root.after(30, self._drain_thumbnails,
-                                                 batch)
 
     def _decode_thumb_source(self, path: str, size: int):
         """Decode + downscale one thumbnail source (no Tk objects created).
@@ -7217,68 +7678,6 @@ class PhotoSApp:
                 img = im.convert("RGB").copy()
         img.thumbnail((size, size), Image.LANCZOS)
         return img
-
-    def _drain_thumbnails(self, batch):
-        self._thumbs_after = None
-        size = self._thumb_size
-        done = 0
-        deferred = False
-        while self._pending_thumbs and done < batch and not deferred:
-            lbl, path, cache_key = self._pending_thumbs.pop(0)
-            try:
-                img = self._thumb_cache.get(cache_key)
-                if img is None:
-                    if cache_key in self._thumb_decoding:
-                        # worker still decoding this RAW — retry later
-                        self._pending_thumbs.append((lbl, path, cache_key))
-                        deferred = True
-                        continue
-                    if Path(path).suffix.lower() in RAW_EXTENSIONS:
-                        # decode RAW off the UI thread; this label re-queues
-                        self._thumb_decoding.add(cache_key)
-
-                        def _decode(p=path, k=cache_key, s=size):
-                            try:
-                                self._thumb_cache[k] = self._decode_thumb_source(p, s)
-                            except Exception:
-                                self._thumb_cache[k] = False  # failed marker
-                            finally:
-                                self._thumb_decoding.discard(k)
-                                try:
-                                    self.root.after(0, lambda: self._drain_thumbnails(batch))
-                                except tk.TclError:
-                                    pass  # window already gone
-
-                        threading.Thread(target=_decode, daemon=True).start()
-                        self._pending_thumbs.append((lbl, path, cache_key))
-                        deferred = True
-                        continue
-                    try:
-                        img = self._decode_thumb_source(path, size)
-                        self._thumb_cache[cache_key] = img
-                    except Exception:
-                        self._thumb_cache[cache_key] = False
-                if not img:
-                    lbl.configure(text="▦")
-                    done += 1
-                    continue
-                from PIL import ImageTk
-                photo = ImageTk.PhotoImage(img, master=lbl)
-                lbl.configure(image=photo)
-                lbl._photo_ref = photo
-                lbl.configure(text="")
-            except Exception:
-                # The label itself may be destroyed (row cleared mid-drain):
-                # a TclError from the fallback used to kill the whole drain
-                # loop and strand every remaining thumbnail.
-                try:
-                    lbl.configure(text="▦")
-                except tk.TclError:
-                    pass
-            done += 1
-        if self._pending_thumbs:
-            self._thumbs_after = self.root.after(
-                50 if deferred else 30, self._drain_thumbnails, batch)
 
     def _browse_output_dir(self):
         """Browse for output directory."""
@@ -8741,12 +9140,20 @@ class PhotoSApp:
         nav_lbl = tk.Label(nav, text="", font=FONT_SMALL,
                            fg=COLORS["text_secondary"], bg=COLORS["bg"])
         nav_lbl.pack(side="left", padx=(0, 12))
-        if self._photo_masks:
-            # 预览走全局 options，不含 per-photo 蒙版（工作流保存的逐照片
-            # 蒙版只在批量处理时经 per_file_options 注入）——点明状态差异
-            tk.Label(nav, text=self._t("preview_per_photo_hint"),
-                     font=FONT_TINY, fg=COLORS["accent"],
-                     bg=COLORS["bg"]).pack(side="left")
+        # v2.4 WYSIWYG: the preview now renders the CURRENT file through its
+        # per-photo overlay + masks (same injection as batch export) — the
+        # badge makes that visible instead of a silent difference
+        adj_lbl = tk.Label(nav, text="", font=FONT_TINY,
+                           fg=COLORS["accent"], bg=COLORS["bg"])
+
+        def _sync_adj_badge():
+            p = state["files"][state["idx"]]
+            if p in self._photo_adjust or p in (self._photo_masks or {}):
+                adj_lbl.configure(text=self._t("export_adjusted_badge"))
+                adj_lbl.pack(side="left", padx=(0, 12))
+            else:
+                adj_lbl.pack_forget()
+        _sync_adj_badge()
         FlatButton(nav, text="‹", command=lambda: _nav(-1),
                    bg=COLORS["card"], fg=COLORS["text"],
                    hover_bg=COLORS["bg"], border_color=COLORS["border"],
@@ -8799,6 +9206,7 @@ class PhotoSApp:
             state["render_sig"] = None
             nav_lbl.configure(text=f"{state['idx'] + 1}/{n} · "
                               f"{os.path.basename(state['files'][state['idx']])}")
+            _sync_adj_badge()
             _render_image(orig_lbl, state["files"][state["idx"]])
             proc_lbl.configure(image="", text=self._t("preview_render"))
             status.configure(text="")
@@ -8869,9 +9277,15 @@ class PhotoSApp:
             else:
                 state["stable"] += 1
             cur_path = state["files"][state["idx"]]
+            # v2.4 WYSIWYG: render through the current file's overlay +
+            # masks (the same _per_file_overlay injection batch export
+            # uses). Keying staleness on the EFFECTIVE options also means
+            # an overlay change (paste / AI tone landing) re-renders.
+            eff = workflows.preview_options(
+                self._per_file_overlay(cur_path, cur), tempdir)
             if (state["stable"] >= 5 and not state["inflight"]
-                    and (cur, cur_path) != state["rendered"]):
-                launch(cur, cur_path, self._preview_options(tempdir))
+                    and (eff, cur_path) != state["rendered"]):
+                launch(eff, cur_path, eff)
             self.root.after(80, drain)
 
         nav_lbl.configure(text=f"1/{len(state['files'])} · "
@@ -9477,8 +9891,8 @@ class PhotoSApp:
         except Exception:
             pass
         for child in widget.winfo_children():
-            if child in (self.file_rows_frame, self.file_list_canvas,
-                         self.progress_bar, self.progress_label):
+            if child in (self.file_list_canvas, self.progress_bar,
+                         self.progress_label):
                 continue
             self._set_state_recursive(child, state)
 

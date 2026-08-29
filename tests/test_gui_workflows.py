@@ -373,7 +373,7 @@ class TestDedupHelpers:
         app.files = [f for f in app.files if os.path.exists(f)]
         app._refresh_file_list()
         assert app.files == [a]
-        assert list(app._row_widgets) == [a]
+        assert [r["path"] for r in app._lib_model] == [a]
         root.destroy()
 
 
@@ -840,14 +840,11 @@ class TestCheckList:
         b = _img(tmp_path / "b.jpg", seed=2)
         app._append_files([a, b])
         app._toggle_check(b)
-        # one real ttk.Checkbutton per row, state from self._checked
-        assert len(app._row_vars) == 2
-        assert app._row_vars[a].get() is True
-        assert app._row_vars[b].get() is False
-        row = app._row_widgets[a]["row"]
-        assert any(isinstance(c, ttk.Checkbutton)
-                   for c in row.winfo_children()), \
-            "rows must host real ttk.Checkbuttons (settings-panel look)"
+        # v2.4 VirtualGrid: one model row per file, checkbox state drawn
+        # from self._checked (b toggled OFF by the seam call above)
+        assert [r["path"] for r in app._lib_model] == [a, b]
+        assert a in app._checked
+        assert b not in app._checked
         assert "已勾选 1" in app.file_count_label.cget("text")
         root.destroy()
 

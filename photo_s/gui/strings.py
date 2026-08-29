@@ -418,8 +418,6 @@ STRINGS = {
         "mask_bad_segment_warn":
             "蒙版字符串含无法解析的段，已跳过损坏段、保留其余蒙版。"
             "（原先会把整串蒙版全部清空）",
-        "preview_per_photo_hint":
-            "注：预览不含逐照片蒙版（批量处理时才注入）",
         "mask_tool": "蒙版工具",
         "mask_tool_linear": "线性渐变",
         "mask_tool_radial": "径向椭圆",
@@ -699,6 +697,35 @@ STRINGS = {
         "recipe_saved": "配方已保存：{name}",
         "recipe_applied": "已套用配方：{name}",
         "recipe_deleted": "配方已删除：{name}",
+        # ── v2.4 AI auto-tone (develop) ──
+        "dev_ai_tone": "AI 调色",
+        "dev_ai_strength": "强度",
+        "dev_ai_need_photo": "先在胶片条选择一张照片",
+        "dev_ai_running": "AI 调色中…（首次使用需下载模型权重，可能较慢）",
+        "dev_ai_need_plugin": "未安装 auto-tone 插件",
+        "dev_ai_install_hint": (
+            "AI 调色需要官方 auto-tone 插件：\n\n"
+            "pip install 'photo-s-plugin-auto-tone[model]'\n\n"
+            "安装后重启 PhotoS。无需模型的规则版推荐可用命令行："
+            "photo-s suggest"),
+        "dev_ai_failed": "AI 调色失败：{err}",
+        "dev_ai_no_params": "AI 未返回任何参数",
+        "dev_ai_done": "AI 调色完成 · 置信度 {conf:.2f} · 参数已写入滑杆，可微调或 ⌘Z 撤销",
+        # ── v2.4 shortcut table ──
+        "shortcuts_title": "键盘快捷键",
+        "shortcuts_text": (
+            "全局\n"
+            "  ⌘O 打开文件 · ⌘⇧O 打开文件夹 · ⌘R 开始处理\n"
+            "  ⌘P 视觉预览 · ⌘E 审查灯箱 · ⌘D 去重 · ⌘G 画廊\n"
+            "  ⌘1-4 切换 图库/修图/导出/工具 · Esc 取消批处理\n"
+            "  ⌘Z 撤销 · ⌘⇧Z 重做 · ? 本表\n"
+            "图库（列表）\n"
+            "  1-5 评级 · P 清除评级 · Enter 在修图中打开\n"
+            "  ⌫/Delete 移除所选 · 双击 前后对比 · 点击复选框列 勾选\n"
+            "修图（Develop）\n"
+            "  ⌘Z/⌘⇧Z 逐照片撤销/重做 · 「显示原图」切换前后\n"
+            "审查灯箱\n"
+            "  ←/→ 导航 · 0-5 评级 · Esc 关闭 · ⌘Z 撤销评级"),
     },
     "en": {
         "window_title": "PhotoS — Batch Image Compression & Conversion",
@@ -1108,8 +1135,6 @@ STRINGS = {
             "Some mask segments could not be parsed: the broken ones were "
             "dropped and the rest kept (previously the whole list was "
             "silently cleared).",
-        "preview_per_photo_hint":
-            "Note: preview excludes per-photo masks (injected at batch)",
         "mask_tool": "Tool",
         "mask_tool_linear": "Linear gradient",
         "mask_tool_radial": "Radial ellipse",
@@ -1389,5 +1414,34 @@ STRINGS = {
         "recipe_saved": "Recipe saved: {name}",
         "recipe_applied": "Recipe applied: {name}",
         "recipe_deleted": "Recipe deleted: {name}",
+        # ── v2.4 AI auto-tone (develop) ──
+        "dev_ai_tone": "AI Tone",
+        "dev_ai_strength": "Strength",
+        "dev_ai_need_photo": "Select a photo in the filmstrip first",
+        "dev_ai_running": "AI tone running… (first use downloads model weights)",
+        "dev_ai_need_plugin": "auto-tone plugin not installed",
+        "dev_ai_install_hint": (
+            "AI tone needs the official auto-tone plugin:\n\n"
+            "pip install 'photo-s-plugin-auto-tone[model]'\n\n"
+            "Restart PhotoS after installing. For a zero-model rule-based "
+            "alternative use the CLI: photo-s suggest"),
+        "dev_ai_failed": "AI tone failed: {err}",
+        "dev_ai_no_params": "AI returned no parameters",
+        "dev_ai_done": "AI tone done · confidence {conf:.2f} · params applied to sliders — tweak or ⌘Z to undo",
+        # ── v2.4 shortcut table ──
+        "shortcuts_title": "Keyboard Shortcuts",
+        "shortcuts_text": (
+            "Global\n"
+            "  ⌘O open files · ⌘⇧O open folder · ⌘R start batch\n"
+            "  ⌘P visual preview · ⌘E review lightbox · ⌘D dedup · ⌘G gallery\n"
+            "  ⌘1-4 switch Library/Develop/Export/Tools · Esc cancel batch\n"
+            "  ⌘Z undo · ⌘⇧Z redo · ? this table\n"
+            "Library (list)\n"
+            "  1-5 rate · P clear rating · Enter open in Develop\n"
+            "  ⌫/Delete remove selected · double-click compare · checkbox column to check\n"
+            "Develop\n"
+            "  ⌘Z/⌘⇧Z per-photo undo/redo · \"Show original\" toggles before/after\n"
+            "Review lightbox\n"
+            "  ←/→ navigate · 0-5 rate · Esc close · ⌘Z undo rating"),
     },
 }
