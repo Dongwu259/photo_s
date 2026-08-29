@@ -726,6 +726,10 @@ STRINGS = {
             "  ⌘Z/⌘⇧Z 逐照片撤销/重做 · 「显示原图」切换前后\n"
             "审查灯箱\n"
             "  ←/→ 导航 · 0-5 评级 · Esc 关闭 · ⌘Z 撤销评级"),
+        # ── v2.4 develop compare ──
+        "dev_compare_split": "分割对比",
+        "dev_compare_side": "并排对比",
+        "dev_compare_exit": "退出对比",
     },
     "en": {
         "window_title": "PhotoS — Batch Image Compression & Conversion",
@@ -1443,5 +1447,9 @@ STRINGS = {
             "  ⌘Z/⌘⇧Z per-photo undo/redo · \"Show original\" toggles before/after\n"
             "Review lightbox\n"
             "  ←/→ navigate · 0-5 rate · Esc close · ⌘Z undo rating"),
+        # ── v2.4 develop compare ──
+        "dev_compare_split": "Split Compare",
+        "dev_compare_side": "Side by Side",
+        "dev_compare_exit": "Exit Compare",
     },
 }

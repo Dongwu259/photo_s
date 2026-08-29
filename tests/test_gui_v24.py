@@ -465,4 +465,74 @@ class TestKeyboardGuards:
                     pass
 
 
+class TestDevelopCompare:
+    def _pair_ready(self, app, paths):
+        """Drive a real render so before_pil/after_pil both exist."""
+        app._dev_select(paths[0])
+        st = app._dev_render_state
+        deadline = time.time() + 6.0
+        while time.time() < deadline:
+            app._dev_bus.drain_pending()
+            root_update(app)
+            if st.get("after_pil") is not None and \
+                    st.get("before_pil") is not None:
+                return True
+            time.sleep(0.03)
+        return False
+
+    def test_cycle_and_compose(self, app_with_photos):
+        root, app, paths = app_with_photos
+        assert self._pair_ready(app, paths)
+        # off → split: canvas placed, divider at the default midpoint
+        app._dev_compare_toggle()
+        assert app._dev_compare_mode == "split"
+        app._dev_compare_render()
+        root_update(app)
+        assert app._dev_compare_canvas.winfo_manager() == "place"
+        items = app._dev_compare_canvas.find_all()
+        assert len(items) >= 3  # image + divider line + handle
+        # split → side → off
+        app._dev_compare_toggle()
+        assert app._dev_compare_mode == "side"
+        app._dev_compare_render()
+        root_update(app)
+        assert app._dev_compare_canvas.find_all()
+        app._dev_compare_toggle()
+        assert app._dev_compare_mode == "off"
+        assert app._dev_compare_canvas.winfo_manager() == ""
+
+    def test_drag_moves_divider(self, app_with_photos):
+        root, app, paths = app_with_photos
+        assert self._pair_ready(app, paths)
+        app._dev_compare_toggle()          # split
+        app._dev_compare_render()
+        root_update(app)
+
+        class _Ev:
+            pass
+        ev = _Ev()
+        ev.x = 30                            # near the left edge
+        app._dev_compare_drag(ev)
+        assert app._dev_split_frac < 0.2
+        ev.x = 900                           # far right
+        app._dev_compare_drag(ev)
+        assert app._dev_split_frac > 0.5
+
+    def test_no_pair_falls_back_to_label(self, app_with_photos):
+        root, app, paths = app_with_photos
+        app._dev_compare_mode = "split"      # no PIL pair loaded yet
+        app._dev_display_current()
+        root_update(app)
+        assert app._dev_compare_canvas.winfo_manager() == ""
+
+
+def root_update(app):
+    try:
+        app.root.update_idletasks()
+        app.root.update()
+    except Exception:
+        pass
+
+
+
 

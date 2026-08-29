@@ -321,6 +321,7 @@ class PhotoSApp:
         self._dev_render_state = {"sig": None, "stable": 0,
                                   "inflight": False, "rendered": None,
                                   "before_photo": None, "after_photo": None,
+                                  "before_pil": None, "after_pil": None,
                                   "tempdir": None}
         self._dev_img_cache = ThumbCache(max_bytes=64 * 1024 * 1024)
         self._dev_show_before = tk.BooleanVar(value=False)
@@ -339,6 +340,11 @@ class PhotoSApp:
         # v2.4: AI auto-tone (official plugin) runs in a worker thread; the
         # busy flag re-entry-guards the button until the result lands
         self._dev_ai_busy = False
+        # v2.4: before/after compare mode — "off" | "split" | "side";
+        # the split divider position is a 0-1 fraction of the viewer
+        self._dev_compare_mode = "off"
+        self._dev_split_frac = 0.5
+        self._dev_compare_photo = None   # PhotoImage ref for the canvas
 
         self._configure_ttk_styles()
 
@@ -1195,6 +1201,13 @@ class PhotoSApp:
                                        fg=COLORS["text_secondary"],
                                        font=FONT_BODY)
         self._dev_image_lbl.pack(expand=True, fill="both", pady=8)
+        # v2.4: compare overlay (split / side-by-side) — placed over the
+        # plain label only while a compare mode is active
+        self._dev_compare_canvas = tk.Canvas(
+            viewer_card, bg=COLORS["card"], highlightthickness=0)
+        self._dev_compare_canvas.bind("<Button-1>", self._dev_compare_drag)
+        self._dev_compare_canvas.bind("<B1-Motion>",
+                                      self._dev_compare_drag)
 
         bottom_bar = tk.Frame(viewer_card, bg=COLORS["card"])
         bottom_bar.pack(fill="x", padx=12, pady=(0, 10))
@@ -1248,6 +1261,14 @@ class PhotoSApp:
             bottom_bar, textvariable=self._dev_ai_strength, width=4,
             values=("1.0", "0.8", "0.6", "0.4", "0.2"), state="readonly")
         self._dev_ai_strength_box.pack(side="left")
+        # v2.4: before/after compare — split (draggable divider) and
+        # side-by-side, composed from the pipeline-rendered pair
+        self._dev_compare_btn = FlatButton(
+            bottom_bar, text=self._t("dev_compare_split"),
+            command=self._dev_compare_toggle, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=12, pady=4)
+        self._dev_compare_btn.pack(side="left", padx=(12, 0))
         tk.Label(bottom_bar, text=self._t("dev_hint"), font=FONT_TINY,
                  fg=COLORS["text_secondary"],
                  bg=COLORS["card"]).pack(side="right")
@@ -1363,6 +1384,7 @@ class PhotoSApp:
             from PIL import Image
             img = Image.open(result.output_path)
             img.load()
+            st["after_pil"] = img
             st["after_photo"] = self._dev_fit_photo(img)
         except Exception:
             return
@@ -1756,6 +1778,15 @@ class PhotoSApp:
 
 
     def _dev_display_current(self):
+        # compare modes own the viewer: the overlay canvas composes from
+        # the PIL pair; the plain label path stays for off/no-pair cases
+        if self._dev_compare_mode != "off":
+            self._dev_compare_render()
+            return
+        try:
+            self._dev_compare_canvas.place_forget()
+        except (AttributeError, tk.TclError):
+            pass  # viewer not built yet (early startup)
         st = self._dev_render_state
         photo = st["before_photo"] if self._dev_show_before.get() \
             else (st["after_photo"] or st["before_photo"])
@@ -1766,6 +1797,94 @@ class PhotoSApp:
             self._dev_image_lbl.configure(image="")
             self._dev_image_lbl.configure(
                 text=self._t("dev_no_selection"))
+
+    # ── v2.4: before/after compare (split divider + side-by-side) ─────────
+
+    def _dev_compare_toggle(self):
+        """Cycle off → split (draggable divider) → side-by-side → off."""
+        mode = {"off": "split", "split": "side", "side": "off"}[
+            self._dev_compare_mode]
+        self._dev_compare_mode = mode
+        self._dev_compare_btn.configure(text=self._t(
+            {"off": "dev_compare_split", "split": "dev_compare_side",
+             "side": "dev_compare_exit"}[mode]))
+        self._dev_display_current()
+
+    def _dev_compare_drag(self, event):
+        """Move the split divider (click + drag on the compare canvas)."""
+        if self._dev_compare_mode != "split":
+            return
+        w = self._dev_compare_canvas.winfo_width()
+        if w > 4:
+            frac = min(0.98, max(0.02, event.x / w))
+            if abs(frac - self._dev_split_frac) > 0.005:
+                self._dev_split_frac = frac
+                self._dev_compare_render()
+
+    def _dev_compare_render(self):
+        """Compose the before/after pair onto the compare canvas. Split
+        mode crops the pair at the divider; side mode scales both to a
+        common height and lays them out with a gap. Runs on the UI thread
+        (PIL crops at preview size are ~ms)."""
+        from PIL import Image, ImageTk
+        st = self._dev_render_state
+        canvas = self._dev_compare_canvas
+        before, after = st.get("before_pil"), st.get("after_pil")
+        if (self._dev_compare_mode == "off" or before is None
+                or after is None):
+            canvas.place_forget()
+            return
+        try:
+            canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
+            canvas.delete("all")
+            w = max(200, canvas.winfo_width() - 16)
+            h = max(150, canvas.winfo_height() - 16)
+            b = before.convert("RGB")
+            a = after.convert("RGB")
+            if self._dev_compare_mode == "side":
+                # common height, both halves share the width budget
+                half = max(60, (w - 12) // 2)
+                bs = min(half / b.width, h / b.height)
+                as_ = min(half / a.width, h / a.height)
+                s = min(bs, as_)
+                bw, aw = max(1, int(b.width * s)), max(1, int(a.width * s))
+                bh = ah = max(1, int(b.height * s))
+                b2 = b.resize((bw, bh), Image.LANCZOS)
+                a2 = a.resize((aw, ah), Image.LANCZOS)
+                comp = Image.new("RGB", (bw + 12 + aw, bh), (0, 0, 0))
+                comp.paste(b2, (0, 0))
+                comp.paste(a2, (bw + 12, 0))
+            else:  # split — crop the pair at the divider fraction
+                s = min(w / b.width, h / b.height, w / a.width,
+                        h / a.height)
+                bw = aw = max(1, int(min(b.width, a.width) * s))
+                bh = ah = max(1, int(min(b.height, a.height) * s))
+                b2 = b.resize((bw, bh), Image.LANCZOS)
+                a2 = a.resize((aw, ah), Image.LANCZOS)
+                split_x = max(1, min(bw - 1,
+                                     int(self._dev_split_frac * bw)))
+                comp = a2.copy()
+                comp.paste(b2.crop((0, 0, split_x, bh)), (0, 0))
+            photo = ImageTk.PhotoImage(comp, master=canvas)
+            self._dev_compare_photo = photo
+            ox = (max(200, canvas.winfo_width()) - comp.width) // 2
+            oy = (max(150, canvas.winfo_height()) - comp.height) // 2
+            canvas.create_image(ox, oy, image=photo, anchor="nw")
+            if self._dev_compare_mode == "split":
+                canvas.create_line(
+                    ox + split_x, oy, ox + split_x, oy + bh,
+                    fill=COLORS["accent"], width=2)
+                canvas.create_oval(
+                    ox + split_x - 5, oy + bh // 2 - 10,
+                    ox + split_x + 5, oy + bh // 2 + 10,
+                    fill=COLORS["accent"], outline="")
+            else:
+                canvas.create_line(
+                    ox + bw + 6, oy, ox + bw + 6, oy + bh,
+                    fill=COLORS["divider"], width=1)
+        except tk.TclError:
+            pass  # viewer torn down mid-compose
+
 
     def _dev_select(self, path):
         """Pick a photo for the viewer: reset the debounce, decode the
@@ -1784,7 +1903,7 @@ class PhotoSApp:
             self._apply_dev_fields(overlay)
         st = self._dev_render_state
         st.update(sig=None, stable=0, rendered=None, after_photo=None,
-                  before_photo=None)
+                  before_photo=None, before_pil=None, after_pil=None)
         self._dev_update_undo_buttons()
         try:
             idx = self.files.index(path) + 1
@@ -1809,6 +1928,7 @@ class PhotoSApp:
         if path != self._dev_selected or img is None:
             return
         st = self._dev_render_state
+        st["before_pil"] = img
         st["before_photo"] = self._dev_fit_photo(img)
         if st["after_photo"] is None or self._dev_show_before.get():
             self._dev_display_current()
@@ -1847,7 +1967,7 @@ class PhotoSApp:
             self._dev_selected = ""
             self._dev_render_state.update(
                 sig=None, rendered=None, before_photo=None,
-                after_photo=None)
+                after_photo=None, before_pil=None, after_pil=None)
             self._dev_nav_lbl.configure(text="")
             self._dev_display_current()
 
