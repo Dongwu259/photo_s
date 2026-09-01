@@ -2011,6 +2011,10 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___blur_min'),
     )
     audit_parser.add_argument(
+        "--aesthetic", type=float, default=None, metavar="1-10",
+        help=_t('help___aesthetic'),
+    )
+    audit_parser.add_argument(
         "--json", action="store_true",
         help=_t('help___json'),
     )
@@ -3281,9 +3285,15 @@ def run_cli(args: List[str] = None) -> int:
         files = _collect_files(parsed.paths, recursive=parsed.recursive)
         if not files:
             return _no_files_exit(parsed)
+        verifier = None
+        if parsed.aesthetic is not None:
+            from .plugin import find_provider
+            verifier = find_provider("verify")
         results = [audit_image(p, overexposed_max=parsed.over_max,
                                underexposed_max=parsed.under_max,
-                               blur_min=parsed.blur_min)
+                               blur_min=parsed.blur_min,
+                               aesthetic=parsed.aesthetic,
+                               verifier=verifier)
                    for p in files]
         if getattr(parsed, 'json', False):
             print(json.dumps(versioned({"count": len(results),

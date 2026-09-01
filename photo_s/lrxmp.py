@@ -643,7 +643,7 @@ def coverage(settings: Dict[str, Any], *,
 _SCAN_SQL = """
     SELECT s.id_local, s.image, s.text, s.hasMasks, s.hasAIMasks,
            s.hasPointColor, s.whiteBalance, im.fileWidth, im.fileHeight,
-           f.baseName, f.extension, fo.pathFromRoot, rf.absolutePath
+           im.rating, f.baseName, f.extension, fo.pathFromRoot, rf.absolutePath
     FROM Adobe_imageDevelopSettings s
     JOIN Adobe_images im ON s.image = im.id_local
     LEFT JOIN AgLibraryFile f ON im.rootFile = f.id_local
@@ -685,7 +685,7 @@ def scan_catalog(db_path: str, *, with_history: bool = True,
     records: List[Dict[str, Any]] = []
     for row in rows:
         (sid, image, text, has_masks, has_ai, has_pc, white_balance,
-         fw, fh, base, ext, path_from_root, root_path) = row
+         fw, fh, rating, base, ext, path_from_root, root_path) = row
         path = ""
         if base and root_path:
             path = os.path.join(root_path, path_from_root or "",
@@ -695,6 +695,7 @@ def scan_catalog(db_path: str, *, with_history: bool = True,
             "image_id": image,  # Adobe_images.id_local —— 与历史步骤 image 同空间
             "image_size": (fw, fh) if fw and fh else None,
             "white_balance": white_balance,
+            "rating": int(rating or 0),  # 0-5 星（0=未评）——美学标注源
             "has_masks": bool(has_masks),
             "has_ai_masks": bool(has_ai),
             "has_point_color": bool(has_pc),
@@ -773,6 +774,7 @@ def _export_record(r: Dict[str, Any], source: str) -> Dict[str, Any]:
         "source": source,
         "catalog": r.get("catalog"),
         "path": r["path"],
+        "rating": r.get("rating", 0),
         "edited": bool(c["edited"]),
         "options": o,
         "image_size": list(r["image_size"]) if r.get("image_size") else None,

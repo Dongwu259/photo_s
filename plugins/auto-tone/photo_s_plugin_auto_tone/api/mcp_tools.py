@@ -24,6 +24,9 @@ def register_mcp_tools(mcp):
                  description="AI 自动调色：预测 9 字段 Lightroom 参数并渲染")
     mcp.add_tool(aesthetic_score_tool, name="aesthetic_score",
                  description="美学评分 1-10（需 qwen extra）")
+    mcp.add_tool(verify_aesthetic_tool, name="verify_aesthetic",
+                 description="美学验证（v2.4）：SigLIP 回归头快速评分，"
+                             "缺席时回落 Qwen VLM——audit 闸门/候选排序用")
     mcp.add_tool(tone_advisor_tool, name="tone_advisor",
                  description="修图建议（需 qwen extra）")
     mcp.add_tool(batch_auto_tone_tool, name="batch_auto_tone",
@@ -72,6 +75,24 @@ def aesthetic_score_tool(image_path: str) -> str:
 
     result = AestheticScorer().score(image_path)
     return json.dumps({"schema_version": 1, **result}, ensure_ascii=False)
+
+
+def verify_aesthetic_tool(image_path: str, prefer: str = "auto") -> str:
+    """美学验证工具（v2.4 —— 全自动闭环的 stop 条件）。
+
+    Args:
+        image_path: 图像绝对路径
+        prefer: auto（SigLIP 头优先，缺席回落 Qwen）| head | qwen
+
+    Returns:
+        JSON 字符串（score 1-10, bucket, source, confidence, loaded；
+        无可用 verifier 时 score=null + raw 指引）
+    """
+    from photo_s_plugin_auto_tone.core.verifier import verify_aesthetic
+
+    result = verify_aesthetic(image_path, prefer=prefer)
+    return json.dumps({"schema_version": 1, "image_path": image_path,
+                       **result}, ensure_ascii=False)
 
 
 def tone_advisor_tool(image_path: str, current_options: Optional[str] = None) -> str:
@@ -220,6 +241,8 @@ def batch_auto_tone_tool(
                 "warnings": r_warnings,
                 "options": r.get("options"),
             }
+            if r.get("local"):
+                row["local"] = r["local"]
             if style_desc:
                 row["style_desc"] = r.get("style_desc")
                 row["bias_source"] = r.get("bias_source")

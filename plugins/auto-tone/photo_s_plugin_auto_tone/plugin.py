@@ -9,20 +9,22 @@ from . import models
 
 
 class AutoTonePlugin(PhotoSPlugin):
-    """photo-s 插件：AI 自动调色
+    """photo-s 插件：AI 自动调色 + 美学验证
 
     注册方式（pyproject.toml）：
         [project.entry-points."photo_s.plugins"]
         auto_tone = "photo_s_plugin_auto_tone:AutoTonePlugin"
 
-    提供 2 个操作：
-        - auto_tone: 普通调色
+    提供操作：
+        - auto_tone_params: 参数协议（v2.4——引擎真实管线应用 9 字段 + local）
+        - auto_tone: 像素协议（兼容旧宿主）
         - auto_tone_with_style: 风格化调色（v2.1）
+        - verify: 美学验证（v2.4——audit 的 reward 闸门）
     """
 
     name = "auto_tone"
 
-    provides = ("auto_tone", "auto_tone_with_style")
+    provides = ("auto_tone", "auto_tone_with_style", "verify")
 
     def register_mcp_tools(self, mcp) -> None:
         """v2.3 wiring: photo-s mcp 启动时调用（hooks.PhotoSPlugin 协议）。"""
@@ -34,8 +36,56 @@ class AutoTonePlugin(PhotoSPlugin):
         from .api.rest import register_routes
         register_routes(handler_class)
 
+    def verify(self, image, ctx: Optional[PluginContext] = None) -> dict:
+        """provider 槽位 ``verify``（v2.4）：美学验证，audit 的 reward 闸门。
+
+        Args:
+            image: 图像路径（str）或 PIL.Image
+            ctx: PluginContext（未用，协议对齐）
+
+        Returns:
+            ``{score 1-10, bucket, source, confidence, loaded}``；
+            无可用 verifier 时 ``score=None`` + 指引（不静默给分）。
+        """
+        from .core.verifier import verify_aesthetic
+
+        return verify_aesthetic(image)
+
     def weight_specs(self) -> List[WeightSpec]:
         return models.weight_specs()
+
+    def auto_tone_params(
+        self,
+        strength: float = 1.0,
+        ctx: Optional[PluginContext] = None,
+    ) -> dict:
+        """v2.4 参数协议：返回预测参数（不渲染），由引擎真实管线应用。
+
+        旧 auto_tone() 像素协议经插件 numpy 简化渲染，9 个预测字段只落
+        3 个；本方法把 {options, local, confidence} 交回引擎，经
+        photo_s.autotone.apply_auto_tone_params 全字段应用，局部调整过
+        蒙版管线。options 已施加 strength。
+        """
+        from .core.pipeline import run_auto_tone
+
+        input_path = ctx.input_path if ctx else None
+        if not input_path:
+            return {"options": {}, "local": [], "confidence": 0.0,
+                    "warnings": ["no input_path in plugin context"]}
+
+        result = run_auto_tone(
+            image_path=input_path,
+            strength=strength,
+            render=False,
+            use_rag=True,
+            use_advisor=False,
+        )
+        return {
+            "options": result.get("options", {}),
+            "local": result.get("local", []),
+            "confidence": result.get("confidence", 0.0),
+            "warnings": result.get("warnings", []),
+        }
 
     def auto_tone(
         self,
@@ -44,6 +94,9 @@ class AutoTonePlugin(PhotoSPlugin):
         ctx: Optional[PluginContext] = None,
     ):
         """在 photo_s 引擎中调用：返回调整后的 PIL.Image
+
+        v2.4 起引擎优先走 auto_tone_params（真实管线）；本方法保留给
+        未升级的宿主（像素协议），内部同样委托真实管线渲染。
 
         Args:
             img: PIL.Image
@@ -79,7 +132,8 @@ class AutoTonePlugin(PhotoSPlugin):
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
             tmp_path = f.name
         try:
-            render_options(img, options, tmp_path, strength=1.0)
+            render_options(img, options, tmp_path, strength=1.0,
+                           local=result.get("local"))
             return Image.open(tmp_path).copy()
         finally:
             try:

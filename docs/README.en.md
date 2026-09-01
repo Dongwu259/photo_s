@@ -67,7 +67,7 @@ Full contract: [`docs/AGENT_API.md`](AGENT_API.md).
 | Highlight recovery | ✅ | ✅ | LR-style: compress flat clipped highlights back to visible gradient |
 | LOG recovery | ✅ | ✅ | SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG (1D LUT, no deps) |
 | LUT grading | ✅ | ✅ | .cube trilinear (plugin adds tetrahedral + 5 film presets) |
-| AI auto-tone | ✅ | ✅¹ | Plugin: CLIP+MLP predicts 9-field LR params + confidence, RAG boost, optional Qwen3-VL aesthetic score & advisor (`photo-s-plugin-auto-tone[model]`); v2.3 wired into the engine slot (`--auto-tone`), MCP tools and REST routes auto-register on install; v2.4 Develop "AI tone" button writes the params into the per-photo overlay — tweakable, undoable |
+| AI auto-tone | ✅ | ✅¹ | Plugin: CLIP+MLP predicts 9-field LR params + confidence, RAG boost, optional Qwen3-VL aesthetic score & advisor (`photo-s-plugin-auto-tone[model]`); v2.3 wired into the engine slot (`--auto-tone`), MCP tools and REST routes auto-register on install; v2.4 Develop "AI tone" button writes the params into the per-photo overlay — tweakable, undoable; v2.4 local-adjustment vocabulary (model predicts subject/person/object mask adjustments through the mask pipeline) + aesthetic verifier (`audit --aesthetic`, SigLIP head / Qwen final review) |
 | Denoise | ✅ | ✅¹ | NLM (`[enhance]` extra) |
 | Auto-straighten | ✅ | ✅¹ | Level the horizon, confidence-gated (`[enhance]` extra) |
 | HDR merge | ✅ | ✅¹ | Exposure fusion, handheld alignment (`[enhance]` extra) |

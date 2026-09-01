@@ -107,9 +107,9 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | 批量基准 | — | ✅ | 并发扩展实测 |
 | AI 识别蒙版 | ✅ | ✅¹ | 主体/人物/物体（80 类）一键生成蒙版，U2Netp/HumanSeg/YOLOv8n-seg（v1.8，onnx 权重自动下载校验） |
 | 笔刷 + 组合蒙版 | ✅ | ✅ | 笔刷涂抹蒙版；A&B / A-B 组合引用已命名蒙版（v1.8） |
-| AI 自动调色 | ✅ | ✅ | auto-tone 官方插件：CLIP+MLP 预测 9 项全局参数 + RAG 检索历史修图（权重 CC-BY-NC 4.0，非商用）；v2.3 引擎槽位接线（`--auto-tone`），装后 MCP/REST 工具自动注册；v2.4 Develop「AI 调色」按钮——参数写入逐照片覆盖层，可微调/可撤销 |
+| AI 自动调色 | ✅ | ✅ | auto-tone 官方插件：CLIP+MLP 预测 9 项全局参数 + RAG 检索历史修图（权重 CC-BY-NC 4.0，非商用）；v2.3 引擎槽位接线（`--auto-tone`），装后 MCP/REST 工具自动注册；v2.4 Develop「AI 调色」按钮——参数写入逐照片覆盖层，可微调/可撤销；v2.4 局部调整词汇表（模型预测 subject/person/object 蒙版内调整，经蒙版管线应用） + 美学 verifier（`audit --aesthetic`，SigLIP 头/Qwen 终审）|
 | LR 数据桥 | — | ✅ | `lr-scan` 扫描 Lightroom 目录/XMP → 训练数据；`lr-train`/`lr-predict` 岭回归基调模型；`lr-merge` 合并多机数据包（v1.9） |
-| 出片审计 | — | ✅ | `audit` 质量闸门（pass/fail + 原因，agent 终止条件）；`diff` 前后对比；`preview` base64 快照（v1.9） |
+| 出片审计 | — | ✅ | `audit` 质量闸门（pass/fail + 原因，agent 终止条件）；`--aesthetic 1-10` 模型美学闸门（v2.4，auto-tone 插件：SigLIP 头/Qwen 终审）；`diff` 前后对比；`preview` base64 快照（v1.9） |
 | GPS 地理标记 | — | ✅ | GPX 轨迹插值写 GPS EXIF（时区偏移自动换算，跨日期变更线正确插值） |
 | SCUNet 强降噪 | — | ✅ | 官方插件（ONNX）：强度感知混合 + 分块推理，大图不 OOM |
 

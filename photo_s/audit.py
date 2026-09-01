@@ -25,12 +25,22 @@ DEFAULT_THRESHOLDS: Dict[str, float] = {
 
 
 def audit_image(path: str, *, sample_size: int = 256,
+                aesthetic: Optional[float] = None,
+                verifier: Optional[Any] = None,
                 **thresholds: float) -> Dict[str, Any]:
     """单图出片审计 → ``{ok, passed, checks, reason}``。
 
     ``checks``：每项 ``{name, ok, value, threshold, direction}``；
     ``reason``：失败项摘要（agent 可直接读）；不可读图返回 ``ok=False``。
     阈值经 ``DEFAULT_THRESHOLDS`` 合并，可逐项覆盖。
+
+    v2.4 美学闸门：``aesthetic``（1-10 阈值）非 None 时追加一项
+    ``aesthetic`` 检查——分数来自 ``verifier``（``find_provider("verify")``
+    注入的 auto-tone 插件；返回 ``{score, ...}`` 的可调用）。**stop 条件
+    语义**：请求了美学闸门但插件缺席时抛
+    :class:`RuntimeError`（装插件/训头），静默放行会让 agent 在错误
+    的"通过"上停机；verifier 给不出分数（未训头且无 qwen extra）记
+    该项 fail（value=None，原因在 reason）。
     """
     from .metrics import analyze_image
     a = analyze_image(path, sample_size=sample_size)
@@ -38,6 +48,13 @@ def audit_image(path: str, *, sample_size: int = 256,
         return {"ok": False, "path": path, "error": a.get("error",
                                                           "unreadable image"),
                 "passed": False, "checks": [], "reason": "unreadable image"}
+    if aesthetic is not None:
+        if verifier is None:
+            raise RuntimeError(
+                "aesthetic gate requested but no verifier plugin: "
+                "pip install 'photo-s-plugin-auto-tone[model]' "
+                "(head via tools/train_verifier.py, or the [qwen] extra); "
+                "or drop --aesthetic to audit technical quality only")
     overrides = {}
     for k, v in thresholds.items():
         if v is None:
@@ -77,9 +94,29 @@ def audit_image(path: str, *, sample_size: int = 256,
     check("white_balance", th["kelvin_min"] <= kelvin <= th["kelvin_max"],
           kelvin, f"{th['kelvin_min']:.0f}-{th['kelvin_max']:.0f}", "range")
 
+    if aesthetic is not None:
+        try:
+            v = verifier(path) if callable(verifier) else verifier.verify(path)
+            score = v.get("score") if isinstance(v, dict) else None
+        except Exception as e:  # verifier 内部失败 → 该项 fail，不炸整批
+            score, v = None, {"raw": str(e)}
+        if score is None:
+            checks.append({
+                "name": "aesthetic", "ok": False, "value": None,
+                "threshold": round(float(aesthetic), 3), "direction": ">=",
+                "error": (v.get("raw") or "verifier returned no score"),
+            })
+        else:
+            check("aesthetic", float(score) >= float(aesthetic), score,
+                  aesthetic, ">=")
+
     failed = [c for c in checks if not c["ok"]]
-    reason = "ok" if not failed else "; ".join(
-        f"{c['name']}={c['value']}{c['direction']}{c['threshold']}"
-        for c in failed)
+
+    def _fmt(c):
+        s = f"{c['name']}={c['value']}{c['direction']}{c['threshold']}"
+        err = c.get("error")
+        return f"{s} ({str(err)[:120]})" if err else s
+
+    reason = "ok" if not failed else "; ".join(_fmt(c) for c in failed)
     return {"ok": True, "path": path, "passed": not failed,
             "checks": checks, "reason": reason}

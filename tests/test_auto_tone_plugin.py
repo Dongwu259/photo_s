@@ -358,7 +358,9 @@ def test_render_options_changes_image(tiny_img, tmp_path):
 def test_render_failure_raises(tmp_path):
     from photo_s_plugin_auto_tone.core.render import render_options
 
-    with pytest.raises(TypeError):
+    # v2.4 起委托引擎真实管线，垃圾值在参数解析处抛 ValueError
+    #（旧 numpy 路径是 TypeError）——语义不变：失败必须抛，不静默存原图
+    with pytest.raises((TypeError, ValueError)):
         render_options(Image.new("RGB", (4, 4)), {"exposure": "not-a-number"},
                        str(tmp_path / "out.jpg"))
 

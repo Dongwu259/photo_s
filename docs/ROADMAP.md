@@ -117,6 +117,41 @@
 
 测试：`test_gui_v24.py` 32 项；全量 1308 通过。
 
+### 全自动闭环批①：词汇表扩展 + 美学 verifier + ModelScope 塔源（实施 2026-09-02）
+
+> 立项来源：v1.9 阶段 3 模型层差距分析的前两项（输出词汇表太窄、无 verifier
+> 即无 stop 条件）。随 v2.4.0 一同发布或作 v2.4.1（发版时定）。
+
+- [x] **局部调整词汇表（#1）**：auto-tone 输出新增加性键 `local:
+      [{region, params}]`（region = v1.8 AI 蒙版词汇表 subject/person/
+      object:label，params = mask_adjust 标量子集）；引擎新 `photo_s/autotone.py`
+      把 9 全局字段按引擎调色顺序 + 局部调整过蒙版管线应用——**顺带修复
+      v2.3 潜伏缺口：旧像素协议经插件 numpy 简化渲染，9 个预测字段只落
+      exposure/contrast/saturation 3 个**；GUI「AI 调色」局部预测写 per-photo
+      蒙版（与手动蒙版同通道，编辑器可改可删）；predictor 支持局部头
+      checkpoint（local_state_dict/local_regions/local_params/local_ranges）
+- [x] **训练侧**：lr-scan 导出 rating（Adobe_images.rating 0-5 星 = 个人美学
+      标注）；`tools/prep_local_labels.py`（LR 几何蒙版 × AI 分割 IoU → 语义
+      region 局部标签）；TRAINING.md §5.1/§5.2 契约文档
+- [x] **美学 verifier（#2）**：插件 `core/verifier.py`——SigLIP 嵌入 + MLP
+      回归头（单次前向 1-10 分，循环 reward/候选排序级）+ Qwen VLM LoRA 终审
+      组合（`verify_aesthetic(prefer=auto|head|qwen)`，两者皆缺显式不可用，
+      不静默给分）；`tools/train_verifier.py`（星级×2 或显式 score 训练头）
+- [x] **audit 美学闸门接线（四面）**：`audit_image(aesthetic, verifier)`
+      （闸门请求但插件缺席 → RuntimeError；verifier 无分数 → 该项 fail +
+      原因进 reason）；CLI `--aesthetic`；MCP `audit(aesthetic=)` +
+      `batch_start(aesthetic=)`（无插件 → job error 态非挂死）；REST
+      `/audit` + `/process {async, audit, aesthetic}`；新 MCP 工具
+      `verify_aesthetic` + REST `/v1/aesthetic/verify`
+- [x] **SigLIP/CLIP 塔下载源切 ModelScope（用户追加）**：塔注册表
+      （repo → sha256/size/modelscope 镜像，SigLIP sha 为 2.61GB 真实下载
+      实测）；`PHOTOS_AUTO_TONE_TOWER_SOURCE=auto|hf|modelscope` 来源链
+      （auto = HF 失败回落 MS）；HF hub 缓存命中零重复下载；复用 modelstore
+      断点续传/重试/校验，镜像与上游 sha 不一致即报错。实测 MS 下载
+      2.61GB @ ~21MB/s + SigLIP 编码验证通过
+
+测试：`test_vocab_verifier.py` 25 + `test_vocab_plugin.py` 29；全量回归见提交。
+
 ### v2.5.0 候选（平台收尾 —— GUI_UPGRADE_PLAN §6 原案）
 
 - [ ] macOS：PyInstaller windowed `.app` + dmg（codesign ad-hoc、Tk 8.6 pin）；

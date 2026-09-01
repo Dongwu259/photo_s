@@ -25,11 +25,23 @@ pip install 'photo-s-plugin-auto-tone[qwen]'  # + transformers / peft（美学�
 `auto_tone_siglip_h192_d03.pt`（~850KB）在 tag `auto-tone-v2.1.0`。
 可选 Qwen LoRA 共约 400MB，基座 Qwen3-VL-2B（约 4.3GB）需自备，
 通过 `PHOTOS_AUTO_TONE_QWEN_BASE` 指向本地快照或 HF model id；
-SigLIP 视觉塔由 open_clip 从 HuggingFace 自动拉取（首次约 2.6GB，
-离线可用 `PHOTOS_AUTO_TONE_SIGLIP_TOKENIZER` 等变量指向本地，见
-`models.py` 文档字符串）。
+SigLIP 视觉塔（约 2.6GB）/ CLIP 塔（约 1.7GB）经 modelstore 下载校验：
+默认 HuggingFace，国内推荐 `PHOTOS_AUTO_TONE_TOWER_SOURCE=modelscope`
+走 ModelScope 镜像（`auto` = 先 HF 失败自动回落镜像；镜像按上游 sha256
+校验，不一致即报错；HF hub 缓存已命中则零重复下载）。离线可用
+`PHOTOS_AUTO_TONE_TOWER_URL` / `_SHA256` 指向自备文件，其余权重变量见
+`models.py` 文档字符串。
 
-离线 / 镜像场景可用环境变量覆盖下载地址（见 `models.py` 文档字符串）。
+## v2.4 新增
+
+- **局部调整词汇表**：`auto_tone` 输出可选 `local: [{region, params}]`
+  （region ∈ subject/person/object:label）。引擎经真实管线应用全部
+  9 个全局字段 + 蒙版局部调整（旧接线只落 3 个字段）。checkpoint 携带
+  局部头即可启用（`local_state_dict` 等键，训练侧见主仓 TRAINING.md §5.1）。
+- **美学验证（verify operation）**：`verify_aesthetic(image, prefer)` =
+  SigLIP 回归头（毫秒级，`aesthetic_head.pt` 由主仓
+  `tools/train_verifier.py` 用 LR 星级评分训练）+ Qwen VLM LoRA 终审。
+  `photo-s audit IMG --aesthetic 6` 即美学闸门。
 
 ## 用法
 
@@ -53,9 +65,9 @@ scene = auto_tone_with_scene("/path/to/photo.jpg", "portrait", strength=0.5)
 （自然语言 → 9 字段偏置；`use_qwen=False` 或 Qwen 不可用时回退 8 种手工
 预设，无需任何额外下载）。`analyze_visual_style(path)` 单独返回视觉风格。
 
-MCP 工具（`auto_tone` / `aesthetic_score` / `tone_advisor` /
-`batch_auto_tone` / `auto_tone_with_style` / `analyze_visual_style`，
-`batch_auto_tone` 支持 `style_desc` 参数）通过
+MCP 工具（`auto_tone` / `aesthetic_score` / `verify_aesthetic`（v2.4）/
+`tone_advisor` / `batch_auto_tone` / `auto_tone_with_style` /
+`analyze_visual_style`，`batch_auto_tone` 支持 `style_desc` 参数）通过
 `api/mcp_tools.register_mcp_tools(mcp)` 注册；REST 路由通过
 `api/rest.register_routes(handler_class)` 挂到 `photo-s serve`。
 LangChain 封装见 `api/langchain.py`（`get_style_tool()` /

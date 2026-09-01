@@ -51,8 +51,9 @@ def run_auto_tone(
     # 1. 异常检测
     anomaly_score, anomaly_info = anomaly_detector.score(img)
 
-    def _result(options, confidence, warnings, rendered_path, extra_meta=None):
-        return {
+    def _result(options, confidence, warnings, rendered_path, extra_meta=None,
+                local=None):
+        out = {
             "schema_version": 1,
             "options": options,
             "confidence": confidence,
@@ -65,6 +66,10 @@ def run_auto_tone(
                 **(extra_meta or {}),
             },
         }
+        # 词汇表扩展（加性键）：局部调整仅在预测到非空时携带
+        if local:
+            out["local"] = local
+        return out
 
     # 高异常图直接跳过（无需预测）
     if anomaly_score > 0.7:
@@ -133,11 +138,25 @@ def run_auto_tone(
                     lo, hi = predictor.ranges[f]
                     options[f] = float(options[f] + d * (hi - lo) / 2)
 
-    # 7. 应用 strength（向中性值插值；渲染时不再重复缩放）
+    # 7. 局部调整预测（checkpoint 携带局部头时；全中性 → 空列表）。
+    #    hasattr 守卫：注入的旧式/测试桩 predictor 无此方法时保持空局部
+    local = (predictor.predict_local(img)
+             if hasattr(predictor, "predict_local") else [])
+
+    # 8. 应用 strength（向中性值插值；渲染时不再重复缩放）
     from .render import apply_strength
     options = apply_strength(options, strength)
+    if local and strength < 1.0:
+        local = [
+            {"region": item["region"],
+             "params": {k: float(strength * v)
+                        for k, v in item["params"].items()}}
+            for item in local
+        ]
+        # strength 缩放后可能全部回到中性 → 空蒙版没有意义
+        local = [item for item in local if item["params"]]
 
-    # 8. 渲染
+    # 9. 渲染
     rendered_path = None
     if render:
         if min_confidence is not None and confidence < min_confidence:
@@ -149,10 +168,11 @@ def run_auto_tone(
                 if output_path is None:
                     base, ext = os.path.splitext(image_path)
                     output_path = f"{base}_auto{ext or '.jpg'}"
-                render_options(img, options, output_path, strength=1.0)
+                render_options(img, options, output_path, strength=1.0,
+                               local=local)
                 rendered_path = output_path
             except Exception as e:
                 warnings.append(f"render failed: {e}")
 
     return _result(options, round(confidence, 3), warnings, rendered_path,
-                   {"rag_used": rag_used})
+                   {"rag_used": rag_used}, local=local)

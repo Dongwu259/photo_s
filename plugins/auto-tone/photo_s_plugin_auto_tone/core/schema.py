@@ -66,6 +66,26 @@ OUTPUT_SCHEMA = {
             "maximum": 1.0,
             "description": "0-1 置信度，<0.4 建议人工复审",
         },
+        "local": {
+            "type": "array",
+            "description": (
+                "局部调整（v2.4 词汇表扩展，可选键——模型带局部头且预测"
+                "非中性时携带）。region ∈ subject/person/object:label"
+                "（v1.8 AI 蒙版词汇表）；params 为 mask.ADJUST_KEYS 标量子集"
+                "（中性值全 0，语义与手动 mask_adjust 一致）。"
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "region": {"type": "string"},
+                    "params": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number"},
+                    },
+                },
+                "required": ["region", "params"],
+            },
+        },
         "warnings": {
             "type": "array",
             "items": {"type": "string"},

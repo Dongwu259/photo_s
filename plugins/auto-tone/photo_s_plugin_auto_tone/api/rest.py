@@ -57,6 +57,22 @@ def register_routes(handler_class):
         except Exception as e:
             self._send_json(500, {"error": str(e)})
 
+    def _do_aesthetic_verify(self):
+        """POST /v1/aesthetic/verify（v2.4 —— 组合验证入口）"""
+        from photo_s_plugin_auto_tone.core.verifier import verify_aesthetic
+
+        try:
+            data = _read_json(self)
+            image_path = data.get('image_path')
+            if not image_path:
+                self._send_json(400, {"error": "image_path required"})
+                return
+            result = verify_aesthetic(image_path,
+                                      prefer=str(data.get('prefer', 'auto')))
+            self._send_json(200, {"image_path": image_path, **result})
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
+
     def _do_advisor(self):
         """POST /v1/advisor"""
         from photo_s_plugin_auto_tone.core.advisor import ToneAdvisor
@@ -123,6 +139,8 @@ def register_routes(handler_class):
             _do_auto_tone(self)
         elif self.path == '/v1/aesthetic/score':
             _do_aesthetic(self)
+        elif self.path == '/v1/aesthetic/verify':
+            _do_aesthetic_verify(self)
         elif self.path == '/v1/advisor':
             _do_advisor(self)
         elif self.path == '/v1/auto_tone/batch':
@@ -132,6 +150,7 @@ def register_routes(handler_class):
 
     handler_class._do_auto_tone = _do_auto_tone
     handler_class._do_aesthetic = _do_aesthetic
+    handler_class._do_aesthetic_verify = _do_aesthetic_verify
     handler_class._do_advisor = _do_advisor
     handler_class._do_batch_auto_tone = _do_batch_auto_tone
 
@@ -145,7 +164,8 @@ def register_routes(handler_class):
 
     def _patched_do_POST(self):
         if self.path.startswith('/v1/auto_tone') \
-                or self.path in ('/v1/aesthetic/score', '/v1/advisor'):
+                or self.path in ('/v1/aesthetic/score',
+                                 '/v1/aesthetic/verify', '/v1/advisor'):
             _plugin_route(self)
         else:
             _orig_do_POST(self)

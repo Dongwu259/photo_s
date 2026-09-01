@@ -110,6 +110,45 @@ lora_alpha: 128
 3. 对比：`photo-s diff before.jpg result.jpg`（PSNR/SSIM）+
    `photo-s audit result.jpg`（质量闸门 pass/fail）+ 教师打分（eval_prompt.md）
 
+## 5.1 局部调整头（v2.4 词汇表扩展）
+
+auto-tone 的输出词汇表从 9 个全局标量扩展到**局部调整**：`local:
+[{region, params}]`。推理侧（插件 predictor + 引擎 `photo_s/autotone.py`
++ GUI）已就绪，你的 .pt 训练侧按下列 checkpoint 契约携带局部头即可：
+
+```
+local_state_dict: {...}          # MLP（输入 = 与全局头相同的特征向量）
+local_regions: ["subject", "person"]        # 输出 region 词汇表
+local_params:  ["exposure", "contrast", ...] # 每区域标量（ADJUST_KEYS 子集）
+local_ranges:  {"exposure": [-1, 1], ...}    # 反归一化范围
+# 输出布局：regions × params 展平（region 主序），tanh 到 [-1,1]
+```
+
+LR 数据里的蒙版是几何的（linear/radial），语义 region 标签用 IoU 制备：
+
+```bash
+python3 tools/prep_local_labels.py --data data/lr_records.jsonl \
+    --images data/before --out data/local_labels.jsonl --iou 0.45
+```
+
+（LR 蒙版 ∩ subject/person 分割 IoU ≥ 阈值 → 该蒙版的标量调整记为该
+region 的标签；需 `[enhance]` extra + AI 分割权重。）
+
+## 5.2 美学 verifier（v2.4 —— reward / stop 条件）
+
+你的星级评分就是美学标注（lr-scan 已导出 `rating` 0-5）：
+
+```bash
+python3 tools/train_verifier.py --data data/lr_records.jsonl \
+    --images data/before --out aesthetic_head.pt   # rating×2 = 1-10 分
+cp aesthetic_head.pt ~/.cache/photo-s/models/      # 或 PHOTOS_AUTO_TONE_AESTHETIC_HEAD
+photo-s audit out.jpg --aesthetic 6                # 闸门生效（CLI/MCP/REST 同）
+```
+
+头 = SigLIP 嵌入（L2 归一化）+ MLP，单次前向出 1-10 分——候选排序 /
+闭环 reward 用它；Qwen VLM LoRA（既有 `lora_aesthetic`）做终审。
+无 verifier 时 `--aesthetic` 显式报错，绝不静默放行（stop 条件语义）。
+
 ## 6. 隐私边界（读前必看）
 
 | 数据 | 内容 | 泄露风险 |

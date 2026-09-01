@@ -155,7 +155,7 @@ def _make_catalog(tmp_path: Path) -> str:
     conn = sqlite3.connect(db)
     conn.executescript("""
         CREATE TABLE Adobe_images (id_local INTEGER PRIMARY KEY,
-                                   rootFile, fileWidth, fileHeight);
+                                   rootFile, fileWidth, fileHeight, rating);
         CREATE TABLE AgLibraryFile (id_local INTEGER PRIMARY KEY,
                                     baseName, extension, folder);
         CREATE TABLE AgLibraryFolder (id_local INTEGER PRIMARY KEY,
@@ -171,7 +171,7 @@ def _make_catalog(tmp_path: Path) -> str:
         INSERT INTO AgLibraryRootFolder VALUES (1, '/tmp/photos/');
         INSERT INTO AgLibraryFolder VALUES (2, '', 1);
         INSERT INTO AgLibraryFile VALUES (10, 'DSC0001', 'ARW', 2);
-        INSERT INTO Adobe_images VALUES (5, 10, 6000, 4000);
+        INSERT INTO Adobe_images VALUES (5, 10, 6000, 4000, 4);
         INSERT INTO Adobe_imageDevelopSettings VALUES (
             5, 5, 's = { Exposure2012 = 0.5, Contrast2012 = 26 }',
             1, 0, 0, 'As Shot');
@@ -192,6 +192,7 @@ def test_scan_catalog(tmp_path):
     assert r["history"] == [{"name": "曝光度", "value": "0.50"}]
     assert r["has_masks"] is True
     assert r["white_balance"] == "As Shot"
+    assert r["rating"] == 4  # v2.4: 星级 = 美学标注源
 
 
 def test_scan_catalog_missing_db():

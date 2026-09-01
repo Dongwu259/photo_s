@@ -199,7 +199,7 @@ GET  /health  带 Bearer → {"status": "ok", "version": "..."}
 | `POST /dedup` | `{"paths", "threshold"?, "recursive"?}` | 重复组 |
 | `POST /analyze` | `{"paths", "recursive"?, "sample_size"? (默认 256), "grid"? (4\|8)}` | `{"ok", "count", "results": [{path, size, histogram, stats, white_balance, exposure, blur_score, grid?, regions?}]}` 感知分析（v1.7.0 闭环；v1.7.1 加 `grid` 区域反馈 + `regions` 天空/肤色/过曝框） |
 | `POST /diff` | `{"path_a", "path_b", "sample_size"? (默认 256)}` | `{"ok", "psnr", "ssim", "mean_abs_diff", "size"}` 版本数值对比（v1.7.1，before/after 判定） |
-| `POST /audit` | `{"paths", "recursive"?, "overexposed_max"?, "underexposed_max"?, "blur_min"?}` | `{"ok", "count", "passed", "results": [{ok, passed, checks[], reason}]}` 出片质量闸门（v1.7.1，agent 终止条件） |
+| `POST /audit` | `{"paths", "recursive"?, "overexposed_max"?, "underexposed_max"?, "blur_min"?, "aesthetic"?}` | `{"ok", "count", "passed", "results": [{ok, passed, checks[], reason}]}` 出片质量闸门（v1.7.1，agent 终止条件）；`aesthetic`（1-10，v2.4）追加美学闸门（需 auto-tone 插件） |
 | `POST /preview` | `{"path", "max_dim"? (默认 1024), "include_histogram"? (默认 true)}` | `{"ok", "path", "size", "jpeg_base64", "jpeg_bytes", "histogram_png_base64"?}` 视觉快照（v1.7.1，多模态 agent 的像素输入） |
 | `POST /rename` | `{"paths", "pattern", "output_dir"?, "overwrite"?, "dry_run"?, "recursive"?}` | `{"total", "ok", "results"}` |
 | `POST /contact-sheet` | `{"paths", "output", "cols"?, "thumb_width"?, "thumb_height"?, "captions"?, "bg"?, "recursive"?}` | `{"output", "count"}` |
@@ -347,8 +347,8 @@ shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
 | `analyze` | `paths[]`, `recursive`, `sample_size` (默认 256), `grid` (0\|4\|8) | `{"ok", "count", "results": [{path, size, histogram {r,g,b,luma ×32}, stats, white_balance, exposure, blur_score, grid?, regions?}]}` 感知分析（v1.7.0；`grid`/`regions` v1.7.1：逐格亮度色偏 + 天空/肤色占比 + 过曝/欠曝区域框） |
 | `preview` | `path`, `max_dim` (默认 1024), `include_histogram` (默认 true) | `{"ok", "size", "jpeg_base64", "jpeg_bytes", "histogram_png_base64"?}` 视觉快照（v1.7.1）——多模态 agent 直接看图 |
 | `diff` | `path_a`, `path_b`, `sample_size` (默认 256) | `{"ok", "psnr", "ssim", "mean_abs_diff"}` 版本数值对比（v1.7.1） |
-| `audit` | `paths[]`, `recursive`, `overexposed_max`?, `underexposed_max`?, `blur_min`? | `{"ok", "count", "passed", "results": [{passed, checks[], reason}]}` 出片质量闸门（v1.7.1，终止条件） |
-| `batch_start` | `paths[]`, `options{}`（同 `process` 的键）, `recursive`, `jobs` (默认 4), `audit` (v2.3) | `{"ok", "job_id", "total"}` 异步目录任务（v1.7.1）——选项对整批文件统一生效（masks/lens 等共享 spec）；`audit=true` 完成后结果附 `audit_summary` + 每文件 `audit`（v2.3） |
+| `audit` | `paths[]`, `recursive`, `overexposed_max`?, `underexposed_max`?, `blur_min`?, `aesthetic`?（1-10，v2.4 美学闸门） | `{"ok", "count", "passed", "results": [{passed, checks[], reason}]}` 出片质量闸门（v1.7.1，终止条件） |
+| `batch_start` | `paths[]`, `options{}`（同 `process` 的键）, `recursive`, `jobs` (默认 4), `audit` (v2.3), `aesthetic`? (v2.4) | `{"ok", "job_id", "total"}` 异步目录任务（v1.7.1）——选项对整批文件统一生效（masks/lens 等共享 spec）；`audit=true` 完成后结果附 `audit_summary` + 每文件 `audit`（v2.3） |
 | `batch_status` | `job_id` | `{"ok", "phase" (starting/processing/done), "done", "total", "current", "fail_count", "results"?}` 轮询 |
 | `batch_cancel` | `job_id` | `{"ok", "cancelled"}` 取消（在跑的文件跑完，未开始的跳过） |
 | `suggest` | `paths[]`, `recursive`, `scale` (默认 1.0) | `{"ok", "count", "neutral", "results": [{path, suggested{}, reasons[], neutral}]}` 规则型参数推荐（v2.3，零模型零依赖；见 §7.1） |
@@ -359,8 +359,9 @@ shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
 > **插件工具（v2.3 自动注册）**：装了 `photo-s-plugin-auto-tone` 的环境自动多出
 > `auto_tone` / `aesthetic_score` / `tone_advisor` / `batch_auto_tone` /
 > `auto_tone_with_style`（v2.1，任意自然语言风格描述 → 9 字段参数 + 风格偏置）/
-> `analyze_visual_style`（v2.1，SigLIP 视觉风格 top-K）六个工具
-> （装即所见，无需配置）；`batch_auto_tone` 新增 `style_desc` 参数走风格化分支。
+> `analyze_visual_style`（v2.1，SigLIP 视觉风格 top-K）/
+> `verify_aesthetic`（v2.4，美学验证：SigLIP 回归头快速分，缺席回落 Qwen VLM）
+> 七个工具（装即所见，无需配置）；`batch_auto_tone` 新增 `style_desc` 参数走风格化分支。
 
 **破坏性安全**：`dedup keep-sharpest` 默认 `dry_run=True`，删除需显式
 `dry_run=False`；`process` 不覆盖输入（`overwrite` 默认 False）。MCP 模式仅
@@ -398,10 +399,27 @@ auto-tone 上风格）。
 
 ### 7.2 batch 内建 audit（v2.3，stop 条件进任务）
 
-`POST /process {"async":true, "audit":true}` / MCP `batch_start(audit=True)`：
+`POST /process {"async":true, "audit":true, "aesthetic":6}` /
+MCP `batch_start(audit=True, aesthetic=6.0)`：
 批处理完成后自动对**输出**跑质量闸门，任务结果附每文件 `audit: {passed, reason}`
 + `audit_summary: {audited, passed, failed, pass_rate}`——agent 的终止判据
-不再需要另一次 `/audit` 往返。
+不再需要另一次 `/audit` 往返。`aesthetic`（1-10，v2.4）在技术闸门之上追加
+美学分下限（需 auto-tone 插件）。
+
+### 7.3 美学闸门 + 局部调整词汇表（v2.4）
+
+**美学闸门（模型层 stop 条件）**：`photo-s audit IMG --aesthetic 6` /
+`POST /audit {"aesthetic": 6}` / MCP `audit(aesthetic=6)`。分数来自插件的
+`verify` 槽位：SigLIP 回归头（单次前向，毫秒级——候选排序/循环 reward 用），
+头未训练时回落 Qwen3-VL LoRA 评分（终审级）。**stop 条件语义**：请求了美学
+闸门但插件缺席 → 显式报错（agent 不会在错误的"通过"上停机）；verifier 给不出
+分数 → 该项 fail（value=null，原因进 reason）。
+
+**局部调整词汇表**：`auto_tone` 输出新增加性键 `local:
+[{region, params}]`（region ∈ `subject`/`person`/`object:label`，params 为
+mask_adjust 标量子集）。引擎 `--auto-tone` 经真实管线应用全部 9 个全局字段
+（旧接线只落 3 个）+ 局部调整过蒙版管线；GUI「AI 调色」把局部预测写进
+per-photo 蒙版（蒙版编辑器可改可删）。训练侧见 `docs/TRAINING.md` §5.1/§5.2。
 
 **判读速查**（`analyze` 输出 -> 建议参数；`suggest` 已把此表代码化）：
 

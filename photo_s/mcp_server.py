@@ -970,10 +970,13 @@ def diff_tool(path_a: str, path_b: str, sample_size: int = 256) -> dict:
 def audit_tool(paths: list, recursive: bool = False,
                overexposed_max: Optional[float] = None,
                underexposed_max: Optional[float] = None,
-               blur_min: Optional[float] = None) -> dict:
+               blur_min: Optional[float] = None,
+               aesthetic: Optional[float] = None) -> dict:
     """Quality gate: pass/fail + reasons (overexposure/blur/luminance...).
 
     The agent's stop condition - a photo that passes audit is "good enough".
+    ``aesthetic`` (1-10) adds the model-based aesthetic gate (v2.4) —
+    needs the auto-tone plugin (SigLIP head or the qwen extra).
     """
     from .cli import _collect_files
     from .audit import audit_image
@@ -989,7 +992,12 @@ def audit_tool(paths: list, recursive: bool = False,
         thresholds["underexposed_max"] = underexposed_max
     if blur_min is not None:
         thresholds["blur_min"] = blur_min
-    results = [audit_image(p, **thresholds) for p in files]
+    verifier = None
+    if aesthetic is not None:
+        from .plugin import find_provider
+        verifier = find_provider("verify")
+    results = [audit_image(p, aesthetic=aesthetic, verifier=verifier,
+                           **thresholds) for p in files]
     return {"ok": True, "count": len(results),
             "passed": sum(1 for r in results if r.get("passed")),
             "results": results}
@@ -1029,7 +1037,8 @@ def _prune_jobs() -> None:
         _JOBS.pop(k, None)
 
 
-def _job_worker(job_id: str, files: list, options, audit: bool = False):
+def _job_worker(job_id: str, files: list, options, audit: bool = False,
+                  aesthetic=None):
     from .engine import batch_process
     state = _JOBS[job_id]
 
@@ -1060,17 +1069,38 @@ def _job_worker(job_id: str, files: list, options, audit: bool = False):
         # v2.3: the quality gate rides inside the job — the agent's stop
         # condition without a separate audit round-trip
         from .audit import audit_image
+        verifier = None
+        if aesthetic is not None:
+            from .plugin import find_provider
+            verifier = find_provider("verify")
         audited = passed = 0
-        for row in rows:
-            out = row.get("output") or ""
-            if row.get("status") != "ok" or not out \
-                    or not os.path.exists(out):
-                continue
-            a = audit_image(out)
-            row["audit"] = {"passed": bool(a.get("passed")),
-                            "reason": a.get("reason", "")}
-            audited += 1
-            passed += 1 if a.get("passed") else 0
+        try:
+            for row in rows:
+                out = row.get("output") or ""
+                if row.get("status") != "ok" or not out \
+                        or not os.path.exists(out):
+                    continue
+                try:
+                    a = audit_image(out, aesthetic=aesthetic,
+                                    verifier=verifier)
+                except RuntimeError:
+                    # aesthetic gate requested but plugin missing — fail the
+                    # job loudly instead of silently passing the stop
+                    # condition (an error job, not a hung one)
+                    raise
+                except Exception:
+                    continue
+                row["audit"] = {"passed": bool(a.get("passed")),
+                                "reason": a.get("reason", "")}
+                audited += 1
+                passed += 1 if a.get("passed") else 0
+        except RuntimeError as e:
+            with _JOBS_LOCK:
+                state["phase"] = "error"
+                state["error"] = str(e)
+                state["finished_at"] = time.time()
+                _prune_jobs()
+            return
         audit_summary = {
             "audited": audited, "passed": passed,
             "failed": audited - passed,
@@ -1091,7 +1121,8 @@ def _job_worker(job_id: str, files: list, options, audit: bool = False):
 
 @_versioned
 def batch_start_tool(paths: list, options: dict, recursive: bool = False,
-                     jobs: int = 4, audit: bool = False) -> dict:
+                     jobs: int = 4, audit: bool = False,
+                     aesthetic: Optional[float] = None) -> dict:
     """Start an async directory-level batch job. Returns ``job_id`` to poll
     with ``batch_status`` / cancel with ``batch_cancel``. ``options`` uses the
     same keys as ``process``; options apply to every file (masks/point_color/
@@ -1099,6 +1130,8 @@ def batch_start_tool(paths: list, options: dict, recursive: bool = False,
     ``audit=True`` (v2.3) audits the outputs after processing and attaches
     per-file ``{passed, reason}`` + an overall pass rate to the finished
     job — the grading loop's stop condition inside the task itself.
+    ``aesthetic`` (1-10, v2.4) adds the model-based aesthetic gate to that
+    audit (needs the auto-tone plugin).
     """
     from .cli import _collect_files
     from .engine import ProcessOptions
@@ -1122,7 +1155,8 @@ def batch_start_tool(paths: list, options: dict, recursive: bool = False,
         _JOBS[job_id] = {"job_id": job_id, "phase": "starting",
                          "total": len(files), "done": 0, "current": "",
                          "cancelled": False, "results": None, "fail_count": 0}
-    threading.Thread(target=_job_worker, args=(job_id, files, opts, audit),
+    threading.Thread(target=_job_worker,
+                     args=(job_id, files, opts, audit, aesthetic),
                      daemon=True).start()
     return {"ok": True, "job_id": job_id, "total": len(files)}
 

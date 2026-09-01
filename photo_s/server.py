@@ -232,7 +232,8 @@ _MAX_RUNNING_TASKS = max(2, (os.cpu_count() or 2) * 2)
 
 def start_task(paths: List[str], options: ProcessOptions,
                dry_run: bool = False,
-               audit: bool = False) -> str:
+               audit: bool = False,
+               aesthetic=None) -> str:
     """Start a /process batch in the background; return the task_id.
 
     The agent polls GET /tasks/<id> for progress and result, and may
@@ -262,6 +263,10 @@ def start_task(paths: List[str], options: ProcessOptions,
 
     def _audit_outputs(result_dict: dict) -> dict:
         from .audit import audit_image
+        verifier = None
+        if aesthetic is not None:
+            from .plugin import find_provider
+            verifier = find_provider("verify")
         audited = 0
         passed = 0
         for row in result_dict.get("results", []):
@@ -269,7 +274,9 @@ def start_task(paths: List[str], options: ProcessOptions,
             if row.get("status") != "ok" or not out \
                     or not os.path.exists(out):
                 continue
-            a = audit_image(out)
+            # aesthetic gate with no plugin raises RuntimeError — the run()
+            # wrapper turns it into an error task (agent sees the misconfig)
+            a = audit_image(out, aesthetic=aesthetic, verifier=verifier)
             row["audit"] = {
                 "passed": bool(a.get("passed")),
                 "reason": a.get("reason", ""),
@@ -666,7 +673,13 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
             thresholds = {k: data[k] for k in
                           ("overexposed_max", "underexposed_max", "blur_min")
                           if k in data and isinstance(data[k], (int, float))}
-            results = [audit_image(p, **thresholds) for p in paths]
+            aesthetic = data.get("aesthetic")
+            verifier = None
+            if isinstance(aesthetic, (int, float)):
+                from .plugin import find_provider
+                verifier = find_provider("verify")
+            results = [audit_image(p, aesthetic=aesthetic, verifier=verifier,
+                                   **thresholds) for p in paths]
             self._send_json(200, {
                 "ok": True,
                 "count": len(results),
@@ -722,10 +735,13 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
                 return
             if data.get("async"):
                 # Long-running batch → background task; agent polls /tasks/<id>.
+                aesthetic = data.get("aesthetic")
                 try:
                     task_id = start_task(paths, opts,
                                          dry_run=bool(data.get("dry_run")),
-                                         audit=bool(data.get("audit")))
+                                         audit=bool(data.get("audit")),
+                                         aesthetic=(None if aesthetic is None
+                                                    else float(aesthetic)))
                 except RuntimeError as e:
                     self._send_json(503, {"ok": False, "error": str(e)})
                     return

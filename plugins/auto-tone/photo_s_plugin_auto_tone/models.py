@@ -12,6 +12,10 @@ $PHOTOS_CACHE_DIR 覆盖），并做 sha256 校验。
     PHOTOS_AUTO_TONE_<NAME>_URL     覆盖单个文件 URL（file:// 亦可）
     PHOTOS_AUTO_TONE_<NAME>_SHA256  覆盖单个文件 sha256
     PHOTOS_AUTO_TONE_QWEN_BASE      Qwen3-VL 基座（本地路径或 HF model id）
+
+视觉塔（SigLIP / CLIP，open_clip 运行时从 HuggingFace 拉取的大文件）
+由 :func:`resolve_tower_pretrained` 经 modelstore 下载校验，国内可回落
+ModelScope 镜像（见 TOWERS 注释）。
 """
 
 import json
@@ -29,6 +33,139 @@ STYLE_URL_BASE = f"https://github.com/{GITHUB_REPO}/releases/download/{STYLE_REL
 
 QWEN_BASE_MODEL = os.environ.get("PHOTOS_AUTO_TONE_QWEN_BASE",
                                  "Qwen/Qwen3-VL-2B-Instruct")
+
+# ── 视觉塔（open_clip 的大权重，~1.7-2.6GB）───────────────────────────────
+#
+# open_clip 默认经 huggingface_hub 从 HF 拉塔（国内常 SSL 失败）。
+# resolve_tower_pretrained() 在交给 open_clip 前把 pretrained tag 解析成
+# 本地文件：先查 HF hub 缓存（老用户零重复下载），否则按来源链下载到
+# modelstore towers/ 目录——复用 ensure() 的断点续传/重试/sha256 校验。
+#
+# 来源链 PHOTOS_AUTO_TONE_TOWER_SOURCE：
+#   auto（默认）= 先 HuggingFace，失败回落 ModelScope 镜像
+#   hf          = 仅 HuggingFace
+#   modelscope  = 仅 ModelScope（国内推荐，跳过必失败的 HF 尝试）
+# 单塔 URL / sha256 可用 PHOTOS_AUTO_TONE_TOWER_URL / _SHA256 整体覆盖。
+#
+# sha256 为上游文件内容哈希（HF LFS blob 名，本机缓存实测复核）；
+# ModelScope 镜像按同一 sha 校验——镜像与上游不一致会在校验处报错，
+# 不会静默用上被替换的权重。
+TOWERS: Dict[str, dict] = {
+    # SigLIP ViT-L/16 384 webli —— auto_tone_with_style / analyze_visual_style
+    # sha256 = ModelScope 镜像实测（2.61GB 全量下载校验，2026-09-02）
+    "timm/ViT-L-16-SigLIP-384": {
+        "filename": "open_clip_pytorch_model.bin",
+        "sha256": "0e5943977fd1c6048c056921cc34da37aa0374a8f56ad3b1e111be6ea90aea8d",
+        "size": 2_610_158_302,
+        "modelscope": "timm/ViT-L-16-SigLIP-384",
+    },
+    # CLIP ViT-L/14 openai —— v7_clean predictor / RAG / anomaly
+    "timm/vit_large_patch14_clip_224.openai": {
+        "filename": "open_clip_pytorch_model.bin",
+        "sha256": "9ce2e8a8ebfff3793d7d375ad6d3c35cb9aebf3de7ace0fc7308accab7cd207e",
+        "size": 1_710_517_724,
+        "modelscope": "timm/vit_large_patch14_clip_224.openai",
+    },
+}
+
+_TOWER_CANDIDATE_FILES = ("open_clip_model.safetensors",
+                          "open_clip_pytorch_model.bin")
+
+
+def _tower_repo(model_name: str, pretrained) -> Optional[str]:
+    """(model_name, pretrained tag) → open_clip 配置里的 HF repo id。
+
+    无 hf_hub（直链 URL 型 pretrained）或 open_clip 不可导入时返回 None，
+    调用方原样透传给 open_clip 维持旧行为。
+    """
+    try:
+        from open_clip.pretrained import get_pretrained_cfg
+    except ImportError:
+        return None
+    try:
+        cfg = get_pretrained_cfg(model_name, pretrained)
+    except Exception:
+        return None
+    repo = None
+    if isinstance(cfg, dict):
+        repo = (cfg.get("hf_hub") or "").rstrip("/") or None
+    elif isinstance(cfg, (tuple, list)) and cfg and cfg[0]:
+        loc = str(cfg[0])
+        repo = None if loc.startswith(("http://", "https://")) else loc
+    return repo
+
+
+def _hf_cache_hit(repo: str) -> Optional[str]:
+    """HF hub 本地缓存已命中 → 直接用（完整性由 HF blob sha 布局保证）。"""
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except ImportError:
+        return None
+    for fn in _TOWER_CANDIDATE_FILES:
+        try:
+            p = try_to_load_from_cache(repo_id=repo, filename=fn)
+        except Exception:
+            p = None
+        if p and os.path.isfile(p):
+            return p
+    return None
+
+
+def _tower_spec(repo: str, source: str):
+    """构建塔的 WeightSpec（modelstore 缓存名 towers/<repo>/<filename>）。"""
+    from photo_s.modelstore import WeightSpec
+
+    meta = TOWERS[repo]
+    fn = meta["filename"]
+    if source == "modelscope":
+        url = (f"https://modelscope.cn/models/{meta['modelscope']}"
+               f"/resolve/master/{fn}")
+    else:
+        url = f"https://huggingface.co/{repo}/resolve/main/{fn}"
+    url = os.environ.get("PHOTOS_AUTO_TONE_TOWER_URL", url)
+    sha = os.environ.get("PHOTOS_AUTO_TONE_TOWER_SHA256", meta["sha256"])
+    return WeightSpec(
+        name=f"towers/{repo.replace('/', '__')}/{fn}",
+        url=url, sha256=sha, size=meta["size"])
+
+
+def resolve_tower_pretrained(model_name: str, pretrained):
+    """把 open_clip 的 pretrained tag 解析成本地塔文件路径（可下载）。
+
+    返回值直接作 create_model_and_transforms 的 pretrained 参数：
+    本地文件路径、或原样透传的 URL/未知 tag。已有 HF 缓存优先复用。
+    """
+    if (not isinstance(pretrained, str) or not pretrained
+            or os.path.exists(pretrained)
+            or pretrained.startswith(("http://", "https://", "file://"))):
+        return pretrained
+
+    repo = _tower_repo(model_name, pretrained)
+    if not repo or repo not in TOWERS:
+        # 未登记的塔：维持 open_clip 自身下载行为
+        return pretrained
+
+    cached = _hf_cache_hit(repo)
+    if cached:
+        return cached
+
+    source = os.environ.get("PHOTOS_AUTO_TONE_TOWER_SOURCE",
+                            "auto").strip().lower()
+    chain = {"hf": ["hf"], "modelscope": ["modelscope"]}.get(
+        source, ["hf", "modelscope"])
+
+    from photo_s.modelstore import ensure
+
+    errors = []
+    for src in chain:
+        try:
+            return ensure(_tower_spec(repo, src))
+        except RuntimeError as e:
+            errors.append(f"{src}: {e}")
+    raise RuntimeError(
+        "auto-tone 视觉塔下载失败 ({})。可设 PHOTOS_AUTO_TONE_TOWER_SOURCE="
+        "modelscope 走国内镜像，或 PHOTOS_AUTO_TONE_TOWER_URL 指向自备文件"
+        "（sha256 需匹配）。详情: {}".format(repo, "; ".join(errors)))
 
 # name → (sha256, size, required)
 WEIGHTS: Dict[str, dict] = {
@@ -197,15 +334,18 @@ _shared_clip: Dict[str, tuple] = {}
 def get_shared_clip(model_name: str, pretrained, device: str):
     """进程内共享的 CLIP 模型（predictor / rag / anomaly 复用同一份权重）。
 
-    返回 (model, preprocess)。
+    返回 (model, preprocess)。塔权重经 resolve_tower_pretrained 解析
+    （HF 缓存命中 / modelstore 下载 + ModelScope 国内回落）。
     """
-    key = f"{model_name}|{pretrained}|{device}"
     with _shared_clip_lock:
+        key = f"{model_name}|{pretrained}|{device}"
         if key not in _shared_clip:
             import open_clip
 
             model, _, preprocess = open_clip.create_model_and_transforms(
-                model_name, pretrained=pretrained, device=device)
+                model_name,
+                pretrained=resolve_tower_pretrained(model_name, pretrained),
+                device=device)
             model.eval()
             for p in model.parameters():
                 p.requires_grad_(False)

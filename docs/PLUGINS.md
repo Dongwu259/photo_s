@@ -168,11 +168,14 @@ pip install photo-s-plugin-scunet
 ```bash
 pip install 'photo-s-plugin-auto-tone[model]'
 photo-s batch ~/burst/ --auto-tone 0.8        # v2.3 引擎槽位：预测 9 项全局参数
+                                               # （v2.4 起全字段经真实管线应用 + 局部调整）
 photo-s mcp                                    # 自动注册 auto_tone / aesthetic_score /
-                                               # tone_advisor / batch_auto_tone /
+                                               # verify_aesthetic / tone_advisor /
+                                               # batch_auto_tone /
                                                # auto_tone_with_style /
-                                               # analyze_visual_style 6 个 MCP 工具
+                                               # analyze_visual_style 7 个 MCP 工具
 photo-s serve                                  # 自动挂载 /v1/auto_tone* REST 路由
+export PHOTOS_AUTO_TONE_TOWER_SOURCE=modelscope   # 国内：塔权重走 ModelScope 镜像
 ```
 
 - 提供 `auto_tone` operation：CLIP 视觉特征 + 轻量 MLP 回归（v7_clean，
@@ -188,6 +191,17 @@ photo-s serve                                  # 自动挂载 /v1/auto_tone* RES
 - **v2.3 接线**：引擎槽位（色彩管理后、手动调整前——显式参数在其上继续叠加）、
   MCP 工具注册钩子（`register_mcp_tools`，hooks 协议）、REST 路由钩子
   （`register_rest`）——安装即全层可见，无需任何手工配置。
+- **v2.4 局部调整词汇表**：`auto_tone_params` 参数协议（引擎真实管线应用
+  9 全局字段——旧像素协议的简化渲染只落 3 个字段）+ 可选局部头输出
+  `local: [{region, params}]`（region ∈ subject/person/object:label，经
+  蒙版管线应用；GUI 写 per-photo 蒙版）。训练侧见 TRAINING.md §5.1。
+- **v2.4 美学验证（`verify` operation）**：`audit --aesthetic 1-10` 的模型层
+  闸门。SigLIP 回归头（`aesthetic_head.pt`，`tools/train_verifier.py` 用你的
+  LR 星级评分训练）单次前向出 1-10 分；头缺席回落 Qwen3-VL LoRA 终审。
+  MCP `verify_aesthetic` / REST `/v1/aesthetic/verify`。
+- **塔权重下载源**：SigLIP（~2.6GB）/ CLIP（~1.7GB）塔默认从 HuggingFace
+  拉，`PHOTOS_AUTO_TONE_TOWER_SOURCE=modelscope` 切国内镜像（auto=先 HF
+  失败回落；hf=仅 HF）。镜像按上游 sha256 校验，不一致即报错。
 - **权重许可为 CC-BY-NC 4.0（非商用）**，代码 MIT，详见插件目录
   `LICENSE-WEIGHTS.txt`；权重经 modelstore sha256 校验后缓存，且每次
   使用前重新校验。

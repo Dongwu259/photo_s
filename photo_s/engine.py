@@ -1307,6 +1307,10 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
         # Runs before the manual tone block so explicit flags refine on top
         # of the predicted grade. No built-in fallback — silently skipping a
         # requested AI pass would hide a missing plugin from the user.
+        # v2.4: providers exposing auto_tone_params hand back parameters
+        # (9 global fields + local adjustments) which go through the REAL
+        # engine pipeline via photo_s.autotone — the pixel-returning path
+        # silently dropped 6 of the 9 predicted fields (simplified render).
         if options.auto_tone:
             from .plugin import find_provider
             provider = find_provider("auto_tone")
@@ -1315,7 +1319,12 @@ def process_image(input_path: str, options: ProcessOptions) -> ProcessResult:
                     "--auto-tone needs the auto-tone plugin "
                     "(pip install photo-s-plugin-auto-tone[model]; "
                     "zero-model rule-based alternative: 'photo-s suggest')")
-            img = provider.auto_tone(img, options.auto_tone, ctx)
+            if hasattr(provider, "auto_tone_params"):
+                from .autotone import apply_auto_tone_params
+                img = apply_auto_tone_params(
+                    img, provider.auto_tone_params(options.auto_tone, ctx))
+            else:
+                img = provider.auto_tone(img, options.auto_tone, ctx)
 
         # ── Tone & color ─────────────────────────────────────────────────────
         img = apply_tone_adjustments(

@@ -1753,14 +1753,64 @@ class PhotoSApp:
         self._dev_history_push(path, base)
         if self._dev_selected == path:
             self._apply_dev_fields(base)
+        # 词汇表扩展（v2.4）：模型带局部头时把 [{region, params}] 转成
+        # 紧凑蒙版字符串并入 per-photo 蒙版（与手动蒙版同一通道，预览/
+        # 导出/撤销走既有机制；蒙版可在蒙版编辑器里删除）
+        n_masks = self._dev_ai_apply_local(path, (res or {}).get("local"))
         conf = (res or {}).get("confidence")
         text = (self._t("dev_ai_done", conf=conf)
                 if isinstance(conf, (int, float))
                 else self._t("dev_ai_done", conf=0.0).split(" · ")[0])
+        if n_masks:
+            text += " · " + self._t("dev_ai_masks_added", n=n_masks)
         self._dev_status_lbl.configure(text=text,
                                        fg=COLORS["text_secondary"])
         self._dev_update_undo_buttons()
         self._refresh_export_queue()
+
+    def _dev_ai_apply_local(self, path, local) -> int:
+        """Merge the predicted local adjustments into the photo's per-photo
+        masks; returns how many AI masks were added (0 = none predicted)."""
+        if not local:
+            return 0
+        from photo_s.autotone import local_to_specs
+        try:
+            masks_s, adjust_s = local_to_specs(local)
+        except ValueError as e:
+            self._dev_status_lbl.configure(
+                text=self._t("dev_ai_failed", err=str(e)[:140]),
+                fg=COLORS["warning"])
+            return 0
+        if not masks_s:
+            return 0
+        existing = ((self._photo_masks or {}).get(path)
+                    or {"masks": "", "mask_adjust": ""})
+        masks = [m for m in (existing.get("masks") or "").split(";") if m]
+        adjusts = [a for a in (existing.get("mask_adjust") or "").split(";")
+                   if a]
+        # 防 AI 蒙版名与已有蒙版撞名：换前缀重编号
+        used = {m.split(":", 1)[0] for m in masks}
+        new_masks = masks_s.split(";")
+        new_adjusts = adjust_s.split(";")
+        renamed_m, renamed_a = [], []
+        n = 0
+        for m, a in zip(new_masks, new_adjusts):
+            prefix = f"ai{n}"
+            while prefix in used:
+                n += 1
+                prefix = f"ai{n}"
+            old = m.split(":", 1)[0]
+            renamed_m.append(f"{prefix}:{m.split(':', 1)[1]}")
+            renamed_a.append(a.replace(f"{old}:", f"{prefix}:", 1))
+            used.add(prefix)
+            n += 1
+        if self._photo_masks is None:
+            self._photo_masks = {}
+        self._photo_masks[path] = {
+            "masks": ";".join(masks + renamed_m),
+            "mask_adjust": ";".join(adjusts + renamed_a),
+        }
+        return len(renamed_m)
 
 
     def _paste_settings_to(self, paths) -> None:

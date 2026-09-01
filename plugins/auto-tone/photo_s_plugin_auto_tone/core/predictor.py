@@ -1,7 +1,7 @@
 """AutoTonePredictor: v7_clean 推理核心（CLIP+MLP → 9 字段调色参数）"""
 
 import threading
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 from PIL import Image
@@ -27,6 +27,22 @@ DEFAULT_RANGES = {
     "texture": (-1.0, 1.0),
     "dehaze": (-1.0, 1.0),
 }
+
+# ── 局部调整头（v2.4 词汇表扩展，checkpoint 可选携带）──────────────────
+# region 词汇表 = photo_s v1.8 AI 蒙版；params 词汇表 = mask.ADJUST_KEYS
+# 的标量子集（中性值全为 0——mask_adjust 语义是围绕 0 的偏移）。
+DEFAULT_LOCAL_REGIONS = ["subject", "person"]
+DEFAULT_LOCAL_PARAMS = ["exposure", "contrast", "saturation", "vibrance",
+                        "clarity"]
+DEFAULT_LOCAL_RANGES = {
+    "exposure": (-1.0, 1.0),
+    "contrast": (-0.5, 0.5),
+    "saturation": (-0.5, 0.5),
+    "vibrance": (-1.0, 1.0),
+    "clarity": (-1.0, 1.0),
+}
+# 归一化预测幅度低于该值视为"模型认为此处不用调"，不进输出
+LOCAL_NEUTRAL_EPS = 0.05
 
 
 def _need_torch():
@@ -63,6 +79,11 @@ class AutoTonePredictor:
         self.hand_dim = None  # load() 时按 checkpoint 维度推断
         self.targets = DEFAULT_TARGETS
         self.ranges = DEFAULT_RANGES
+        # 局部头（checkpoint 带 local_state_dict 时才有）
+        self.local_mlp = None
+        self.local_regions: List[str] = []
+        self.local_params: List[str] = []
+        self.local_ranges = DEFAULT_LOCAL_RANGES
 
     def load(self):
         """加载模型（懒加载；torch / open_clip 缺失时报清晰错误）"""
@@ -126,6 +147,22 @@ class AutoTonePredictor:
             self.targets = ck['targets']
         if 'ranges' in ck:
             self.ranges = ck['ranges']
+
+        # 局部调整头（可选）：输入与全局 MLP 相同的特征向量，
+        # 输出 regions×params 个归一化值（[-1,1] → local_ranges 反归一化）
+        local_sd = ck.get('local_state_dict')
+        if local_sd:
+            self.local_regions = list(ck.get('local_regions')
+                                      or DEFAULT_LOCAL_REGIONS)
+            self.local_params = list(ck.get('local_params')
+                                     or DEFAULT_LOCAL_PARAMS)
+            self.local_ranges = dict(ck.get('local_ranges')
+                                     or DEFAULT_LOCAL_RANGES)
+            self.local_mlp = self._build_mlp(
+                local_sd, in_dim).to(self.device)
+            sd_local = self._remap_state_dict_keys(self.local_mlp, local_sd)
+            self.local_mlp.load_state_dict(sd_local, strict=True)
+            self.local_mlp.eval()
 
         self.checkpoint = ck
 
@@ -241,6 +278,35 @@ class AutoTonePredictor:
                 r[f] = float((pred[i, j] + 1) / 2 * (hi - lo) + lo)
             results.append(r)
         return results
+
+    def predict_local(self, image: Image.Image) -> List[Dict[str, Any]]:
+        """局部调整预测 → ``[{region, params}]``（无局部头或全中性 → []）。
+
+        局部头输出布局为 regions×params 展平（region 主序）：
+        ``[r0p0, r0p1, ..., r1p0, ...]``，每个值归一化到 [-1, 1]。
+        幅度低于 :data:`LOCAL_NEUTRAL_EPS` 的参数视为"该区域此项不调"，
+        整个 region 全中性则不出现在结果里（不产生空蒙版）。
+        """
+        if self.local_mlp is None:
+            return []
+        torch = _need_torch()
+        feats = self._extract_features(image)
+        with torch.no_grad():
+            pred = self.local_mlp(feats).cpu().numpy()[0]
+
+        out: List[Dict[str, Any]] = []
+        n_p = len(self.local_params)
+        for i, region in enumerate(self.local_regions):
+            params: Dict[str, float] = {}
+            for j, f in enumerate(self.local_params):
+                norm = float(pred[i * n_p + j])
+                if abs(norm) < LOCAL_NEUTRAL_EPS:
+                    continue
+                lo, hi = self.local_ranges.get(f, (-1.0, 1.0))
+                params[f] = float((norm + 1) / 2 * (hi - lo) + lo)
+            if params:
+                out.append({"region": region, "params": params})
+        return out
 
 
 def get_predictor() -> AutoTonePredictor:
