@@ -201,7 +201,15 @@ export PHOTOS_AUTO_TONE_TOWER_SOURCE=modelscope   # 国内：塔权重走 ModelS
   MCP `verify_aesthetic` / REST `/v1/aesthetic/verify`。
 - **塔权重下载源**：SigLIP（~2.6GB）/ CLIP（~1.7GB）塔默认从 HuggingFace
   拉，`PHOTOS_AUTO_TONE_TOWER_SOURCE=modelscope` 切国内镜像（auto=先 HF
-  失败回落；hf=仅 HF）。镜像按上游 sha256 校验，不一致即报错。
+  失败回落；hf=仅 HF）。镜像按上游 sha256 校验，不一致即报错。同开关也
+  管 SigLIP tokenizer（style 视觉分析需要；HF 拉取失败会让分析静默降级，
+  镜像路径从 ModelScope timm 仓组装本地目录，sha 钉死）。
+- **插件自身权重下载源**（`dwphoto/photo-s-auto-tone-v2` 镜像）：
+  `PHOTOS_AUTO_TONE_WEIGHT_SOURCE=auto|github|modelscope`——auto（默认）
+  GitHub release 优先、失败回落 ModelScope；modelscope 有镜像的文件走
+  ModelScope、其余仍走 GitHub。镜像仓可用
+  `PHOTOS_AUTO_TONE_MODELSCOPE_REPO` 覆盖。与 GitHub 字节不同的镜像文件
+  按各自 sha 钉死校验。
 - **权重许可为 CC-BY-NC 4.0（非商用）**，代码 MIT，详见插件目录
   `LICENSE-WEIGHTS.txt`；权重经 modelstore sha256 校验后缓存，且每次
   使用前重新校验。

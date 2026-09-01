@@ -467,3 +467,155 @@ class TestPipelineLocal:
             predictor=StubPredictor(), anomaly_detector=StubAnomaly(),
             rag_enhancer=StubRAG())
         assert "local" not in r  # 加性键：空则不携带
+
+
+# ── 插件权重 ModelScope 来源链（dwphoto/photo-s-auto-tone-v2）──
+
+
+class TestWeightSourceChain:
+    def test_modelscope_registry_pins_valid_shas(self):
+        from photo_s_plugin_auto_tone import models
+        assert models.MODELSCOPE_REPO == "dwphoto/photo-s-auto-tone-v2"
+        for name, sha in models.MODELSCOPE_WEIGHTS.items():
+            assert len(sha) == 64 and sha.islower()
+            assert name in models.WEIGHTS  # 镜像的必须是注册过的权重
+
+    def test_modelscope_spec_url_and_sha(self):
+        from photo_s_plugin_auto_tone import models
+        spec = models._modelscope_spec("hand_features.npz")
+        assert spec.url == ("https://modelscope.cn/models/"
+                            "dwphoto/photo-s-auto-tone-v2/resolve/master/"
+                            "hand_features.npz")
+        # 字节与 GitHub release 一致 → 与主注册表同 sha
+        assert spec.sha256 == models.WEIGHTS["hand_features.npz"]["sha256"]
+
+    def test_unmirrored_file_has_no_spec(self):
+        from photo_s_plugin_auto_tone import models
+        assert models._modelscope_spec("auto_tone_v7_clean.pt") is None
+
+    def test_auto_chain_falls_back_to_modelscope(self, monkeypatch, tmp_path):
+        from photo_s_plugin_auto_tone import models
+
+        monkeypatch.setattr(models, "WEIGHT_SOURCE", "auto")
+        monkeypatch.setenv("PHOTOS_CACHE_DIR", str(tmp_path))
+        import photo_s.modelstore as ms_mod
+        monkeypatch.setattr(ms_mod, "cached_path", lambda spec: None)
+        tried = []
+
+        def fake_ensure(spec):
+            tried.append(spec.url)
+            if "github.com" in spec.url:
+                raise RuntimeError("github down")
+            return "/ms/hand_features.npz"
+
+        monkeypatch.setattr(ms_mod, "ensure", fake_ensure)
+        out = models.ensure_weight("hand_features.npz")
+        assert out == "/ms/hand_features.npz"
+        assert [u.split("/")[2] for u in tried] == ["github.com",
+                                                    "modelscope.cn"]
+
+    def test_modelscope_mode_prefers_mirror(self, monkeypatch, tmp_path):
+        from photo_s_plugin_auto_tone import models
+
+        monkeypatch.setattr(models, "WEIGHT_SOURCE", "modelscope")
+        monkeypatch.setenv("PHOTOS_CACHE_DIR", str(tmp_path))
+        import photo_s.modelstore as ms_mod
+        monkeypatch.setattr(ms_mod, "cached_path", lambda spec: None)
+
+        def fake_ensure(spec):
+            assert "modelscope.cn" in spec.url  # 镜像必须先于 GitHub
+            return "/ms/hand_features.npz"
+
+        monkeypatch.setattr(ms_mod, "ensure", fake_ensure)
+        assert models.ensure_weight("hand_features.npz") == \
+            "/ms/hand_features.npz"
+
+    def test_github_mode_never_touches_mirror(self, monkeypatch, tmp_path):
+        from photo_s_plugin_auto_tone import models
+
+        monkeypatch.setattr(models, "WEIGHT_SOURCE", "github")
+        monkeypatch.setenv("PHOTOS_CACHE_DIR", str(tmp_path))
+        import photo_s.modelstore as ms_mod
+        monkeypatch.setattr(ms_mod, "cached_path", lambda spec: None)
+        monkeypatch.setattr(ms_mod, "ensure",
+                            lambda spec: (_ for _ in ()).throw(
+                                RuntimeError("offline")))
+        with pytest.raises(RuntimeError, match="下载失败"):
+            models.ensure_weight("hand_features.npz")
+
+    def test_unmirrored_file_in_modelscope_mode_uses_github(
+            self, monkeypatch, tmp_path):
+        from photo_s_plugin_auto_tone import models
+
+        monkeypatch.setattr(models, "WEIGHT_SOURCE", "modelscope")
+        monkeypatch.setenv("PHOTOS_CACHE_DIR", str(tmp_path))
+        import photo_s.modelstore as ms_mod
+        monkeypatch.setattr(ms_mod, "cached_path", lambda spec: None)
+        monkeypatch.setattr(ms_mod, "ensure",
+                            lambda spec: "/gh/auto_tone_v7_clean.pt")
+        assert models.ensure_weight("auto_tone_v7_clean.pt") == \
+            "/gh/auto_tone_v7_clean.pt"
+
+
+# ── SigLIP tokenizer 本地目录 ───────────────────────────────
+
+
+class TestTokenizerDir:
+    def test_github_source_returns_none(self, monkeypatch):
+        from photo_s_plugin_auto_tone import models
+        monkeypatch.setenv("PHOTOS_AUTO_TONE_TOWER_SOURCE", "github")
+        assert models.ensure_siglip_tokenizer_dir() is None
+
+    def test_sha_pins_present(self):
+        from photo_s_plugin_auto_tone import models
+        assert set(models.SIGLIP_TOKENIZER_FILES) == {
+            "tokenizer.json", "tokenizer_config.json",
+            "special_tokens_map.json"}
+        for sha in models.SIGLIP_TOKENIZER_FILES.values():
+            assert len(sha) == 64
+
+
+# ── style 底座回归：必须解析 SigLIP 模型而非 v7 ─────────────
+
+
+class TestStyleBaseRegression:
+    def _make(self, monkeypatch):
+        from photo_s_plugin_auto_tone.core import style as style_mod
+        captured = {}
+
+        class StubPredictor:
+            def __init__(self, model_path=None):
+                captured["path"] = model_path
+                self.device = "cpu"
+                self.clip_model = None
+                self.preprocess = None
+
+            def load(self):
+                pass
+
+        monkeypatch.setattr(style_mod, "AutoTonePredictor", StubPredictor)
+        from photo_s_plugin_auto_tone import models as pm
+        monkeypatch.setattr(pm, "core_path", lambda n: f"/cache/{n}")
+        monkeypatch.setattr(pm, "ensure_siglip_tokenizer_dir",
+                            lambda: None)
+        monkeypatch.setattr(
+            style_mod, "SIGLIP_TOKENIZER", "/nonexistent-tok")
+        # 单例重置：__new__ 缓存 _instance，测试需要全新构造
+        monkeypatch.setattr(style_mod.StyleAutoTone, "_instance", None)
+        monkeypatch.setenv("PHOTOS_AUTO_TONE_TOWER_SOURCE", "github")
+        monkeypatch.delenv("PHOTOS_AUTO_TONE_SIGLIP_MODEL", raising=False)
+        return style_mod, captured
+
+    def test_resolves_siglip_model_by_default(self, monkeypatch, capsys):
+        style_mod, captured = self._make(monkeypatch)
+        style_mod.StyleAutoTone()
+        # 旧 bug：None → predictor 默认 v7_clean（CLIP 77 上下文文本塔，
+        # 配 64 tokenizer 在 encode_text 崩溃，仅被 CN tokenizer 拉取
+        # 失败静默掩盖）
+        assert captured["path"] == "/cache/auto_tone_siglip_h192_d03.pt"
+
+    def test_env_override_wins(self, monkeypatch):
+        style_mod, captured = self._make(monkeypatch)
+        monkeypatch.setenv("PHOTOS_AUTO_TONE_SIGLIP_MODEL", "/my/model.pt")
+        style_mod.StyleAutoTone()
+        assert captured["path"] == "/my/model.pt"

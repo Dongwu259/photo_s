@@ -25,12 +25,21 @@ pip install 'photo-s-plugin-auto-tone[qwen]'  # + transformers / peft（美学�
 `auto_tone_siglip_h192_d03.pt`（~850KB）在 tag `auto-tone-v2.1.0`。
 可选 Qwen LoRA 共约 400MB，基座 Qwen3-VL-2B（约 4.3GB）需自备，
 通过 `PHOTOS_AUTO_TONE_QWEN_BASE` 指向本地快照或 HF model id；
-SigLIP 视觉塔（约 2.6GB）/ CLIP 塔（约 1.7GB）经 modelstore 下载校验：
-默认 HuggingFace，国内推荐 `PHOTOS_AUTO_TONE_TOWER_SOURCE=modelscope`
-走 ModelScope 镜像（`auto` = 先 HF 失败自动回落镜像；镜像按上游 sha256
-校验，不一致即报错；HF hub 缓存已命中则零重复下载）。离线可用
-`PHOTOS_AUTO_TONE_TOWER_URL` / `_SHA256` 指向自备文件，其余权重变量见
-`models.py` 文档字符串。
+SigLIP 视觉塔（约 2.6GB）/ CLIP 塔（约 1.7GB）/ SigLIP tokenizer 经
+modelstore 下载校验：默认 HuggingFace，国内推荐
+`PHOTOS_AUTO_TONE_TOWER_SOURCE=modelscope` 走 ModelScope 镜像
+（`auto` = 先 HF 失败自动回落镜像；镜像按上游 sha256 校验，不一致即报错；
+HF hub 缓存已命中则零重复下载）。离线可用 `PHOTOS_AUTO_TONE_TOWER_URL` /
+`_SHA256` 指向自备文件，其余权重变量见 `models.py` 文档字符串。
+
+插件自身权重另有 ModelScope 镜像仓
+[`dwphoto/photo-s-auto-tone-v2`](https://modelscope.cn/models/dwphoto/photo-s-auto-tone-v2)：
+`PHOTOS_AUTO_TONE_WEIGHT_SOURCE=auto|github|modelscope`（auto=GitHub
+优先失败回落；镜像仓可用 `PHOTOS_AUTO_TONE_MODELSCOPE_REPO` 覆盖）。
+注意：`auto_tone_siglip_h192_d03.pt` 的 ModelScope 现存文件是 numpy-2
+pickle（`torch.load(weights_only=True)` 拒载）——上传重存版
+（`~/Desktop/auto_tone_siglip_h192_d03_resaved.pt`，权重逐位一致）后在
+`models.py` 的 `MODELSCOPE_WEIGHTS` 取消注释该行即启用。
 
 ## v2.4 新增
 

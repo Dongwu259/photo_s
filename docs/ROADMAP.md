@@ -150,7 +150,23 @@
       断点续传/重试/校验，镜像与上游 sha 不一致即报错。实测 MS 下载
       2.61GB @ ~21MB/s + SigLIP 编码验证通过
 
-测试：`test_vocab_verifier.py` 25 + `test_vocab_plugin.py` 29；全量回归见提交。
+- [x] **用户 ModelScope 模型仓接入（dwphoto/photo-s-auto-tone-v2）**：
+      插件自身权重来源链 `PHOTOS_AUTO_TONE_WEIGHT_SOURCE=auto|github|
+      modelscope`（镜像 sha 独立钉死；`hand_features.npz` 字节一致即启用）；
+      SigLIP tokenizer 同走 TOWER_SOURCE 开关（ModelScope timm 仓组装
+      本地目录——此前 CN 拉 tokenizer 失败会让视觉风格分析**静默降级**）；
+      **顺带修复 v2.1 既有发布 bug**：`auto_tone_with_style` 底座误解析
+      v7_clean（CLIP 77 上下文文本塔）而非 SigLIP h192——tokenizer 一旦
+      在 HF 可达机器加载成功，encode_text 必崩 64↔77；此前仅被 CN 的
+      tokenizer SSL 失败掩盖（视觉分析被禁用 + 底座退化）。真实权重
+      e2e：SigLIP 底座 + MS 塔/tokenizer，风格 top-3 与 GitHub 路径
+      逐位一致；重存 .pt（weights_only 兼容）四位数一致
+- [ ] ModelScope 上传重存版 `auto_tone_siglip_h192_d03.pt`（现存文件为
+      numpy-2 pickle，weights_only 拒载；重存文件已备
+      `~/Desktop/auto_tone_siglip_h192_d03_resaved.pt`），上传后取消
+      `MODELSCOPE_WEIGHTS` 注释行即启用镜像
+
+测试：`test_vocab_verifier.py` 25 + `test_vocab_plugin.py` 35；全量回归见提交。
 
 ### v2.5.0 候选（平台收尾 —— GUI_UPGRADE_PLAN §6 原案）
 

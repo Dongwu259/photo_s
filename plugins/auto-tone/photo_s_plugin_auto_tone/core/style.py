@@ -97,22 +97,54 @@ class StyleAutoTone:
             return
         self._initialized = True
 
-        # SigLIP base（None → modelstore 解析 auto_tone_siglip_h192_d03.pt）
+        # SigLIP base：显式解析 auto_tone_siglip_h192_d03.pt——
+        # AutoTonePredictor(model_path=None) 的默认是 v7_clean（CLIP 底座，
+        # 77 上下文文本塔），配 SigLIP tokenizer（64）会在 encode_text
+        # 崩溃；此前仅因 CN 环境 tokenizer 拉取失败被静默掩盖（视觉分析
+        # 禁用 + 底座退化为 v7）。PHOTOS_AUTO_TONE_SIGLIP_MODEL 仍可覆盖。
+        from .. import models as _pkg_models
         if model_path is None:
-            model_path = os.environ.get("PHOTOS_AUTO_TONE_SIGLIP_MODEL")
+            model_path = (os.environ.get("PHOTOS_AUTO_TONE_SIGLIP_MODEL")
+                          or _pkg_models.core_path(
+                              "auto_tone_siglip_h192_d03.pt"))
         self.predictor = AutoTonePredictor(model_path=model_path)
         self.predictor.load()
         self.device = self.predictor.device
         self.clip_model = self.predictor.clip_model
         self.preprocess = self.predictor.preprocess
 
-        # SigLIP tokenizer（HF 在线拉取；失败仅禁用视觉分析，不阻断风格化）
+        # SigLIP tokenizer：modelscope 源直连镜像组装的本地目录；
+        # 其余先 HF 在线、失败后回落 ModelScope（惰性——auto 模式 HF
+        # 可用时零镜像流量，测试环境也不会碰网络之外的源）。
+        # 全部失败仅禁用视觉分析（不阻断风格化），但打一条可见告警——
+        # 静默降级会让用户以为 top_styles 为空是模型判断。
         self.tokenizer = None
-        try:
-            from transformers import AutoTokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(SIGLIP_TOKENIZER)
-        except Exception:
-            self.tokenizer = None
+        from .. import models as _models
+        _src = os.environ.get("PHOTOS_AUTO_TONE_TOWER_SOURCE",
+                              "auto").strip().lower()
+
+        def _try_load(source_id):
+            try:
+                from transformers import AutoTokenizer
+                self.tokenizer = AutoTokenizer.from_pretrained(source_id)
+                return True
+            except Exception:
+                return False
+
+        if _src == "modelscope":
+            _local = _models.ensure_siglip_tokenizer_dir()
+            if _local:
+                _try_load(_local)
+        else:
+            if not _try_load(SIGLIP_TOKENIZER):
+                _local = _models.ensure_siglip_tokenizer_dir()
+                if _local:
+                    _try_load(_local)
+        if self.tokenizer is None:
+            import sys
+            print("auto-tone: SigLIP tokenizer 不可用（HF 与 ModelScope 均"
+                  "失败）——视觉风格分析禁用，风格化仍可用预设偏置",
+                  file=sys.stderr)
 
         # 预编码所有风格描述
         self._prepare_text_features()

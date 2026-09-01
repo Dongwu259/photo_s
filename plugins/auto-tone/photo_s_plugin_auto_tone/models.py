@@ -34,6 +34,37 @@ STYLE_URL_BASE = f"https://github.com/{GITHUB_REPO}/releases/download/{STYLE_REL
 QWEN_BASE_MODEL = os.environ.get("PHOTOS_AUTO_TONE_QWEN_BASE",
                                  "Qwen/Qwen3-VL-2B-Instruct")
 
+# ── 插件权重 ModelScope 镜像（dwphoto/photo-s-auto-tone-v2）────────────────
+#
+# 与塔同样的来源链思路：GitHub release 为主源，国内可切 ModelScope。
+# PHOTOS_AUTO_TONE_WEIGHT_SOURCE：
+#   auto（默认）= GitHub 优先，下载失败回落 ModelScope 镜像
+#   github      = 仅 GitHub release
+#   modelscope  = 有镜像的文件走 ModelScope，其余仍走 GitHub
+#
+# 镜像文件与 GitHub 字节不同时（重存导致）必须分开设 sha——校验按
+# 各自来源的钉死值来，镜像被替换即报错。
+WEIGHT_SOURCE = os.environ.get("PHOTOS_AUTO_TONE_WEIGHT_SOURCE",
+                               "auto").strip().lower()
+MODELSCOPE_REPO = os.environ.get("PHOTOS_AUTO_TONE_MODELSCOPE_REPO",
+                                 "dwphoto/photo-s-auto-tone-v2")
+MODELSCOPE_URL_BASE = (f"https://modelscope.cn/models/{MODELSCOPE_REPO}"
+                       f"/resolve/master")
+
+# name → ModelScope 实测 sha256
+MODELSCOPE_WEIGHTS: Dict[str, str] = {
+    # 与 GitHub release 字节完全一致（2026-09-02 实测）
+    "hand_features.npz":
+        "de29659dd0a5668f2689fe5d83ead27e1449d9d1d0ae6b1db1d421aa3a616c37",
+    # auto_tone_siglip_h192_d03.pt：ModelScope 现存文件为 numpy-2 pickle
+    # （val_mae_per_field 含 np.float32，weights_only=True 拒载）。上传
+    # 重存版（纯 Python 类型；权重张量与 GitHub 版逐位一致，输出四位数
+    # 一致；文件在 ~/Desktop/auto_tone_siglip_h192_d03_resaved.pt）后，
+    # 取消下行注释即启用镜像：
+    # "auto_tone_siglip_h192_d03.pt":
+    #     "31e8c001ded31c413b347a9854c1c3da76cadd0a7088f82d09e26d63ae0d4d32",
+}
+
 # ── 视觉塔（open_clip 的大权重，~1.7-2.6GB）───────────────────────────────
 #
 # open_clip 默认经 huggingface_hub 从 HF 拉塔（国内常 SSL 失败）。
@@ -225,7 +256,8 @@ def _env_suffix(name: str) -> str:
 
 
 def weight_specs(names: Optional[List[str]] = None) -> "List":
-    """构建 WeightSpec 列表（带环境变量覆盖）。"""
+    """构建 WeightSpec 列表（GitHub 源 + 环境变量覆盖；ModelScope 镜像
+    见 :func:`ensure_weight` 的来源链）。"""
     from photo_s.modelstore import WeightSpec
 
     # PHOTOS_AUTO_TONE_URL_BASE 覆盖所有条目的前缀（离线/镜像/测试），
@@ -246,32 +278,66 @@ def weight_specs(names: Optional[List[str]] = None) -> "List":
     return specs
 
 
+def _modelscope_spec(name: str):
+    """name 的 ModelScope 镜像 WeightSpec（无镜像返回 None）。"""
+    from photo_s.modelstore import WeightSpec
+
+    ms_sha = MODELSCOPE_WEIGHTS.get(name)
+    if not ms_sha:
+        return None
+    url = os.environ.get(f"PHOTOS_AUTO_TONE_{_env_suffix(name)}_MS_URL",
+                         f"{MODELSCOPE_URL_BASE}/{name}")
+    return WeightSpec(name=name, url=url, sha256=ms_sha,
+                      size=WEIGHTS[name]["size"])
+
+
+def ensure_weight(name: str) -> str:
+    """单权重解析：按来源链（github ↔ modelscope 镜像）下载校验。
+
+    每次使用都重新校验（cached_path 命中才返回——被篡改/过期的缓存
+    不能绕过 sha256 闸门）。全部来源失败时报含尝试明细的错误。
+    """
+    from photo_s.modelstore import cached_path, ensure
+
+    specs = weight_specs([name])
+    if not specs:
+        raise KeyError(f"unknown weight: {name}")
+    gh_spec = specs[0]
+    ms_spec = _modelscope_spec(name)
+
+    if WEIGHT_SOURCE == "github":
+        chain = [gh_spec]
+    elif WEIGHT_SOURCE == "modelscope":
+        chain = ([ms_spec, gh_spec] if ms_spec else [gh_spec])
+    else:  # auto
+        chain = ([gh_spec, ms_spec] if ms_spec else [gh_spec])
+
+    for spec in chain:  # 已缓存且校验通过 → 零网络
+        if cached_path(spec):
+            return cached_path(spec)
+    errors = []
+    for spec in chain:
+        try:
+            return ensure(spec)
+        except RuntimeError as e:
+            errors.append(f"{spec.url}: {e}")
+    raise RuntimeError(
+        f"权重 {name} 下载失败（来源链 {[s.url for s in chain]}）："
+        + "; ".join(errors))
+
+
 def ensure_core() -> Dict[str, str]:
     """下载（如需）核心权重，返回 {name: 本地路径}。"""
-    from photo_s.modelstore import ensure
-
     paths = {}
-    for spec in weight_specs():
-        if WEIGHTS[spec.name]["required"]:
-            paths[spec.name] = ensure(spec)
+    for name, meta in WEIGHTS.items():
+        if meta["required"]:
+            paths[name] = ensure_weight(name)
     return paths
 
 
 def core_path(name: str) -> str:
-    """单个核心权重的本地路径（不存在则下载）。"""
-    from photo_s.modelstore import ensure, cache_dir
-
-    cached = os.path.join(cache_dir(), name)
-    specs = weight_specs([name])
-    if not specs:
-        raise KeyError(f"unknown weight: {name}")
-    # Verify on every use: "exists → trust" let a tampered/stale cache file
-    # bypass the sha256 gate entirely after landing there once.
-    from photo_s.modelstore import cached_path
-    verified = cached_path(specs[0])
-    if verified:
-        return verified
-    return ensure(specs[0])
+    """单个核心权重的本地路径（不存在则下载；来源链含 ModelScope）。"""
+    return ensure_weight(name)
 
 
 _LORA_PREFIX = {"aesthetic": "lora_aesthetic", "advisor": "lora_advisor"}
@@ -291,11 +357,11 @@ def ensure_lora_dir(kind: str) -> str:
         if kind in _lora_dirs:
             return _lora_dirs[kind]
 
-        from photo_s.modelstore import cache_dir, ensure
+        from photo_s.modelstore import cache_dir
 
         prefix = _LORA_PREFIX[kind]
-        safetensors = ensure(weight_specs([f"{prefix}.safetensors"])[0])
-        config = ensure(weight_specs([f"{prefix}_config.json"])[0])
+        safetensors = ensure_weight(f"{prefix}.safetensors")
+        config = ensure_weight(f"{prefix}_config.json")
 
         lora_dir = os.path.join(cache_dir(), f"lora_{kind}")
         os.makedirs(lora_dir, exist_ok=True)
@@ -325,6 +391,71 @@ def pick_device() -> str:
     if mps is not None and torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+# ── SigLIP tokenizer（transformers 布局的本地目录）────────────────────────
+# style 路径要给 16 风格文案做文本编码：AutoTokenizer 默认从 HF 在线拉，
+# 国内失败后视觉分析被静默禁用（top_styles 为空）。TOWER_SOURCE=modelscope
+# 时改为直接用 ModelScope 镜像（timm 仓自带全套 tokenizer 文件）组装
+# 本地目录；auto 模式下作 HF 失败后的回落。sha 为镜像实测（2026-09-02）。
+SIGLIP_TOKENIZER_FILES: Dict[str, str] = {
+    "tokenizer.json":
+        "83051c8005acc696637fe0c62c711ecee4b59083b4cf07ff9ad5f637eb2a3d2a",
+    "tokenizer_config.json":
+        "8571e0cf70f7ae095c5c544ab94b7967e94c79262202d61604da10cbe426cecb",
+    "special_tokens_map.json":
+        "3a60d3bb0808e7e629845031c2d720d33c2aceee1a6c535255de15d45b9f1ac7",
+}
+SIGLIP_TOKENIZER_MS_REPO = "timm/ViT-L-16-SigLIP-384"
+
+
+def ensure_siglip_tokenizer_dir() -> Optional[str]:
+    """tokenizer 本地目录（modelstore tokenizers/ViT-L-16-SigLIP-384/）。
+
+    TOWER_SOURCE=github 时返回 None（保持 HF 在线行为）；modelscope/auto
+    时下载缺失文件（sha 钉死）。目录不完整且下载失败 → None（调用方回落
+    原行为，不炸主流程）。
+    """
+    if os.environ.get("PHOTOS_AUTO_TONE_TOWER_SOURCE", "auto").strip().lower() \
+            == "github":
+        return None
+    from photo_s.modelstore import cache_dir
+
+    directory = os.path.join(cache_dir(), "tokenizers", "ViT-L-16-SigLIP-384")
+    base = (f"https://modelscope.cn/models/{SIGLIP_TOKENIZER_MS_REPO}"
+            f"/resolve/master")
+    for fn, sha in SIGLIP_TOKENIZER_FILES.items():
+        dst = os.path.join(directory, fn)
+        if os.path.isfile(dst):
+            continue
+        import hashlib
+        import urllib.request
+
+        tmp = dst + f".{os.getpid()}.part"
+        try:
+            os.makedirs(directory, exist_ok=True)
+            req = urllib.request.Request(
+                f"{base}/{fn}",
+                headers={"User-Agent": "photo-s-auto-tone-tokenizer"})
+            with urllib.request.urlopen(req, timeout=30) as r, \
+                    open(tmp, "wb") as f:
+                digest = hashlib.sha256()
+                while True:
+                    chunk = r.read(65536)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    f.write(chunk)
+            if digest.hexdigest().lower() != sha:
+                raise RuntimeError(f"sha256 mismatch for tokenizer {fn}")
+            os.replace(tmp, dst)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            return None  # 目录不完整：宁可回落 HF/禁用，不半套启动
+    return directory
 
 
 _shared_clip_lock = threading.Lock()
