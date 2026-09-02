@@ -1061,6 +1061,62 @@ def autopilot_stop_tool(id: str) -> dict:
             "passed": rec["passed"], "review": rec["review"]}
 
 
+# ── 语义搜索（v2.5：index/find；embed 插件 = SigLIP 文本+图像，无插件 =
+#    内置 84 维仅图像）──────────────────────────────────────────────────────
+
+@_versioned
+def index_tool(paths: list, recursive: bool = False,
+               index: Optional[str] = None, rebuild: bool = False,
+               tags: Optional[list] = None, min_score: float = 0.2,
+               max_tags: int = 5, write_xmp: bool = False) -> dict:
+    """Build (or incrementally update) a semantic embedding index for images.
+
+    With the auto-tone plugin installed the index uses SigLIP (text + image,
+    English queries work best); without it a built-in 84-dim histogram
+    extractor is used (image-only queries). ``tags`` auto-tags every image
+    whose cosine similarity to a tag clears ``min_score`` (writes EXIF
+    keywords; ``write_xmp`` also writes an LR-visible dc:subject sidecar).
+    Returns the index path — pass it to ``find`` as ``index``.
+    """
+    from .search import auto_tag, build_index
+    try:
+        summary = build_index(paths, recursive=recursive, index_path=index,
+                              rebuild=rebuild)
+    except RuntimeError as e:
+        return {"ok": False, "error": str(e)}
+    payload = dict(summary)
+    if tags:
+        try:
+            res = auto_tag(summary["index"], tags, min_score=min_score,
+                           max_tags=max_tags, write_xmp=write_xmp)
+        except RuntimeError as e:
+            payload["tags_error"] = str(e)
+        else:
+            payload["tags"] = {"tagged": res["tagged"],
+                               "untouched": res["untouched"],
+                               "assigned": res["assigned"]}
+    payload["ok"] = True
+    return payload
+
+
+@_versioned
+def find_tool(query: Optional[str] = None, image: Optional[str] = None,
+              index: Optional[str] = None, k: int = 10,
+              min_score: Optional[float] = None) -> dict:
+    """Semantic search over an index built by ``index``: text query (English
+    works best — SigLIP is English-centric) or search-by-image (any extractor). Returns ranked hits with
+    cosine scores."""
+    from .search import INDEX_FILENAME, find_similar
+    index_path = index or os.path.join(".", INDEX_FILENAME)
+    try:
+        res = find_similar(index_path, text=query, image=image, k=k,
+                           min_score=min_score)
+    except RuntimeError as e:
+        return {"ok": False, "error": str(e)}
+    res["ok"] = True
+    return res
+
+
 @_versioned
 def analyze_tool(paths: list, recursive: bool = False,
                  sample_size: int = 256, grid: int = 0) -> dict:
@@ -1457,6 +1513,13 @@ def create_server(config_path: Optional[str] = None):
     mcp.add_tool(autopilot_stop_tool, name="autopilot_stop",
                  description="Stop a background autopilot; records so far stay "
                              "visible via 'autopilot_status'.")
+    mcp.add_tool(index_tool, name="index",
+                 description="Build a semantic embedding index for images "
+                             "(SigLIP with the auto-tone plugin, built-in "
+                             "histogram without); optional auto-tagging.")
+    mcp.add_tool(find_tool, name="find",
+                 description="Semantic search over an 'index'-built index: "
+                             "text query or search-by-image, cosine-ranked.")
     mcp.add_tool(batch_start_tool, name="batch_start",
                  description=batch_start_tool.__doc__)
     mcp.add_tool(batch_status_tool, name="batch_status",

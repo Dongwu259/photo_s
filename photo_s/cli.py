@@ -2153,6 +2153,76 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___resize'),
     )
 
+    index_parser = subparsers.add_parser(
+        "index", help=_t('cmd_index'),
+    )
+    index_parser.add_argument(
+        "paths", nargs="+", help=_t('help___paths'),
+    )
+    index_parser.add_argument(
+        "-r", "--recursive", action="store_true",
+        help=_t('help___recursive'),
+    )
+    index_parser.add_argument(
+        "--index", type=str, default=None, metavar="NPZ",
+        help=_t('help_index_index'),
+    )
+    index_parser.add_argument(
+        "--rebuild", action="store_true",
+        help=_t('help_index_rebuild'),
+    )
+    index_parser.add_argument(
+        "--extractor", type=str, default=None, metavar="NAME",
+        help=_t('help_index_extractor'),
+    )
+    index_parser.add_argument(
+        "--tags", type=str, default=None, metavar="A,B",
+        help=_t('help_index_tags'),
+    )
+    index_parser.add_argument(
+        "--min-score", type=float, default=0.2, metavar="F",
+        help=_t('help_index_min_score'),
+    )
+    index_parser.add_argument(
+        "--max-tags", type=int, default=5, metavar="N",
+        help=_t('help_index_max_tags'),
+    )
+    index_parser.add_argument(
+        "--write-xmp", action="store_true",
+        help=_t('help_index_write_xmp'),
+    )
+    index_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
+    find_parser = subparsers.add_parser(
+        "find", help=_t('cmd_find'),
+    )
+    find_parser.add_argument(
+        "query", nargs="*", help=_t('help_find_query'),
+    )
+    find_parser.add_argument(
+        "--image", type=str, default=None, metavar="PATH",
+        help=_t('help_find_image'),
+    )
+    find_parser.add_argument(
+        "--index", type=str, default=None, metavar="NPZ",
+        help=_t('help_find_index'),
+    )
+    find_parser.add_argument(
+        "-k", type=int, default=10, metavar="N",
+        help=_t('help_find_k'),
+    )
+    find_parser.add_argument(
+        "--min-score", type=float, default=None, metavar="F",
+        help=_t('help_find_min_score'),
+    )
+    find_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
     preview_parser = subparsers.add_parser(
         "preview", help=_t('cmd_preview'),
     )
@@ -3570,6 +3640,68 @@ def run_cli(args: List[str] = None) -> int:
         except RuntimeError as e:
             print(f"❌ {e}", file=sys.stderr)
             return 2
+        return 0
+
+    if parsed.command == "index":
+        import json as _json
+        from .search import auto_tag, build_index
+        try:
+            summary = build_index(
+                parsed.paths, recursive=parsed.recursive,
+                index_path=parsed.index, rebuild=parsed.rebuild,
+                extractor_name=parsed.extractor)
+        except RuntimeError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 2
+        payload = dict(summary)
+        tags = [t.strip() for t in (parsed.tags or "").split(",")
+                if t.strip()] or None
+        if tags:
+            try:
+                tag_res = auto_tag(summary["index"], tags,
+                                   min_score=parsed.min_score,
+                                   max_tags=parsed.max_tags,
+                                   write_xmp=getattr(parsed, 'write_xmp',
+                                                     False))
+            except RuntimeError as e:
+                print(f"❌ {e}", file=sys.stderr)
+                return 2
+            payload["tags"] = {"tagged": tag_res["tagged"],
+                               "untouched": tag_res["untouched"],
+                               "assigned": tag_res["assigned"]}
+        if getattr(parsed, 'json', False):
+            print(_json.dumps(versioned(payload), indent=2,
+                              ensure_ascii=False))
+        else:
+            print(_t("msg_index_done", total=summary["total"],
+                     indexed=summary["indexed"], kept=summary["kept"],
+                     removed=summary["removed"],
+                     extractor=summary["extractor"],
+                     index=summary["index"]))
+            if tags and payload.get("tags"):
+                print(_t("msg_index_tags", n=payload["tags"]["tagged"]))
+        return 0
+
+    if parsed.command == "find":
+        import json as _json
+        from .search import INDEX_FILENAME, find_similar
+        query = " ".join(parsed.query).strip()
+        if not query and not parsed.image:
+            print(f"❌ {_t('msg_find_no_query')}", file=sys.stderr)
+            return 2
+        index_path = parsed.index or os.path.join(".", INDEX_FILENAME)
+        try:
+            res = find_similar(index_path, text=query or None,
+                               image=parsed.image, k=parsed.k,
+                               min_score=parsed.min_score)
+        except RuntimeError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 2
+        if getattr(parsed, 'json', False):
+            print(_json.dumps(versioned(res), indent=2, ensure_ascii=False))
+        else:
+            for hit in res["hits"]:
+                print(f"  {hit['score']:.4f}  {hit['path']}")
         return 0
 
     if parsed.command == "preview":

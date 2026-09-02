@@ -316,7 +316,7 @@ class TestReviewExifEditor:
         root.destroy()
 
 
-def _poll(root, pred, seconds=20.0):
+def _poll(root, pred, seconds=45.0):
     deadline = time.time() + seconds
     while time.time() < deadline:
         root.update()
@@ -392,7 +392,7 @@ class TestGalleryHelper:
 
 
 class TestDialogSmokes:
-    def _poll(self, root, pred, seconds=20.0):
+    def _poll(self, root, pred, seconds=45.0):
         deadline = time.time() + seconds
         while time.time() < deadline:
             root.update()

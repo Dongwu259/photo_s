@@ -20,11 +20,29 @@ class AutoTonePlugin(PhotoSPlugin):
         - auto_tone: 像素协议（兼容旧宿主）
         - auto_tone_with_style: 风格化调色（v2.1）
         - verify: 美学验证（v2.4——audit 的 reward 闸门）
+        - embed: SigLIP 图像/文本嵌入（v2.5——核心 photo-s index/find 的
+          语义搜索槽位，塔与风格化共用零新增下载）
     """
 
     name = "auto_tone"
 
-    provides = ("auto_tone", "auto_tone_with_style", "verify")
+    provides = ("auto_tone", "auto_tone_with_style", "verify", "embed")
+
+    # photo_s.search 的 _PluginExtractor 直接读取（索引记录抽取器身份）
+    embed_name = "siglip:ViT-L-16-SigLIP-384"
+    embed_dim = 1024
+
+    def embed_images(self, paths, batch_size: int = 8):
+        """provider 槽位 ``embed``（v2.5）：图像路径列表 → (N, 1024) float32。"""
+        from .core.embed import get_embedder
+
+        return get_embedder().embed_images(paths, batch_size=batch_size)
+
+    def embed_texts(self, texts):
+        """provider 槽位 ``embed``：文本列表 → (M, 1024) float32。"""
+        from .core.embed import get_embedder
+
+        return get_embedder().embed_texts(texts)
 
     def register_mcp_tools(self, mcp) -> None:
         """v2.3 wiring: photo-s mcp 启动时调用（hooks.PhotoSPlugin 协议）。"""

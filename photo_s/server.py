@@ -894,6 +894,37 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
             aid = self.path[len("/v1/autopilot/"):-len("/cancel")]
             payload = autopilot_stop_tool(aid)
             self._send_json(200 if payload.get("ok") else 404, payload)
+        elif self.path == "/v1/index":
+            # v2.5 语义搜索：建索引（+可选自动打标），返回索引路径供
+            # /v1/find 使用（与 MCP index 工具同一实现）
+            from .mcp_server import index_tool
+            paths = data.get("paths") or []
+            if not isinstance(paths, list) or not paths:
+                self._send_json(400, {"ok": False,
+                                      "error": "'paths' (list) is required"})
+                return
+            tags = data.get("tags")
+            payload = index_tool(
+                paths=paths,
+                recursive=bool(data.get("recursive", False)),
+                index=data.get("index"),
+                rebuild=bool(data.get("rebuild", False)),
+                tags=tags if isinstance(tags, list) else None,
+                min_score=float(data.get("min_score", 0.2) or 0.2),
+                max_tags=int(data.get("max_tags", 5) or 5),
+                write_xmp=bool(data.get("write_xmp", False)),
+            )
+            self._send_json(200 if payload.get("ok") else 400, payload)
+        elif self.path == "/v1/find":
+            from .mcp_server import find_tool
+            payload = find_tool(
+                query=data.get("query"),
+                image=data.get("image"),
+                index=data.get("index"),
+                k=int(data.get("k", 10) or 10),
+                min_score=data.get("min_score"),
+            )
+            self._send_json(200 if payload.get("ok") else 400, payload)
         elif self.path == "/plugins":
             # Remote plugin management: {"action": "install|uninstall|fetch",
             # "name": "scunet", "dry_run": bool?}

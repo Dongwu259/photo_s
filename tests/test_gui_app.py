@@ -7,6 +7,7 @@ and the file-list dimensions cache.
 
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -24,6 +25,17 @@ def _isolate_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
+
+def _poll(root, pred, seconds=45.0):
+    """update() 循环直到谓词为真（慢机容差：线程 → UiBus → after 链在系统
+    高负载下可能远慢于"单次 update 即同步完成"的假设）。"""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        root.update()
+        if pred():
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def _make_app():
@@ -322,15 +334,17 @@ class TestMaskWorkflow:
         app.mask_adjust.set("sky:brightness=0.5;"
                             "sky:curves={r:0,0;128,140;255,255}")
         app._dev_enter_mask_mode()   # v2.5: 弹窗升格进 Develop
-        root.update()
+        assert _poll(root, lambda: bool(
+            app._dev_mask_mode and app._dev_mask_frame is not None)), \
+            "mask canvas must be hosted in Develop"
         assert app._active_module == "develop"
-        assert app._dev_mask_mode and app._dev_mask_frame is not None
         tops = [w for w in root.winfo_children()
                 if isinstance(w, tk.Toplevel)]
         assert not tops, "mask editor is hosted, not a popup"
         app._dev_exit_mask_mode()
-        root.update()
-        assert not app._dev_mask_mode and app._dev_mask_frame is None
+        assert _poll(root, lambda: not app._dev_mask_mode
+                     and app._dev_mask_frame is None), \
+            "mask mode must tear down on exit"
         root.update()  # 触发 pending after 回调，winfo_exists 防护拦截
         root.destroy()
 

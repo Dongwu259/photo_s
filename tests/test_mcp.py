@@ -43,7 +43,8 @@ class TestTools:
                 "watch", "watch_status", "watch_stop", "analyze",
                 "suggest", "diff", "audit", "preview",
                 "batch_start", "batch_status", "batch_cancel",
-                "autopilot_start", "autopilot_status", "autopilot_stop"}
+                "autopilot_start", "autopilot_status", "autopilot_stop",
+                "index", "find"}
         assert core <= names
 
     def test_server_info_version(self):

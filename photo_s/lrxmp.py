@@ -77,7 +77,7 @@ __all__ = [
     "LrError", "parse_xmp_sidecar", "parse_develop_blob", "scan_catalog",
     "crs_to_options", "options_to_xmp", "write_xmp_sidecar",
     "coverage", "scan_and_report", "discover_inputs",
-    "write_export", "HSL_COLORS", "LOCAL_MAP",
+    "write_export", "HSL_COLORS", "LOCAL_MAP", "content_features",
 ]
 
 _XMP_CRS = "{http://ns.adobe.com/camera-raw-settings/1.0/}"
@@ -1566,6 +1566,12 @@ def _content_features(img) -> List[float]:
     # fit is forced through the origin and biases every target
     feats.append(1.0)
     return feats
+
+
+# 公开别名（v2.5 语义搜索的内置特征）：85 列 = 84 维 + 末位截距（岭回归
+# 兼容）。语义检索请截掉最后一列——常量列污染 cosine。私有名保留：插件
+# predictor 依赖它。
+content_features = _content_features
 
 
 def render_before_images(records: Sequence[Dict[str, Any]], out_dir: str,
