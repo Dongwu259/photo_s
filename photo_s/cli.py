@@ -1112,6 +1112,10 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___trace'),
     )
     batch_parser.add_argument(
+        "--write-xmp", action="store_true",
+        help=_t('help___write_xmp'),
+    )
+    batch_parser.add_argument(
         "-f", "--format", type=_format_arg, default=argparse.SUPPRESS,
         help=_t('help___format'),
     )
@@ -2034,6 +2038,49 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___scale'),
     )
     suggest_parser.add_argument(
+        "--json", action="store_true",
+        help=_t('help___json'),
+    )
+
+    xmp_parser = subparsers.add_parser(
+        "xmp-export", help=_t('cmd_xmp_export'),
+    )
+    xmp_parser.add_argument(
+        "paths", nargs="+", help=_t('help___paths'),
+    )
+    xmp_parser.add_argument(
+        "-r", "--recursive", action="store_true",
+        help=_t('help___recursive'),
+    )
+    xmp_parser.add_argument(
+        "--preset", type=str, default=None, metavar="NAME",
+        help=_t('help_xmp_preset'),
+    )
+    xmp_parser.add_argument(
+        "--options", type=str, default=None, metavar="JSON",
+        help=_t('help_xmp_options'),
+    )
+    xmp_parser.add_argument(
+        "--auto-tone", type=float, default=None, metavar="0-1",
+        help=_t('help___auto_tone'),
+    )
+    xmp_parser.add_argument(
+        "--rating", type=int, default=None, metavar="0-5",
+        help=_t('help_xmp_rating'),
+    )
+    xmp_parser.add_argument(
+        "--keywords", type=str, default=None, metavar="A,B",
+        help=_t('help_xmp_keywords'),
+    )
+    xmp_parser.add_argument(
+        "--title", type=str, default=None, metavar="TEXT",
+        help=_t('help_xmp_title'),
+    )
+    xmp_parser.add_argument(
+        "--out-dir", type=str, default=None, metavar="DIR",
+        help=_t('help_xmp_out_dir'),
+    )
+    xmp_parser.add_argument(
         "--json", action="store_true",
         help=_t('help___json'),
     )
@@ -3338,6 +3385,79 @@ def run_cli(args: List[str] = None) -> int:
                     print(f"      · {rs['advice']}")
         return 0
 
+    if parsed.command == "xmp-export":
+        import json as _json
+        from dataclasses import replace as _dc_replace
+        from .lrxmp import write_xmp_sidecar
+        files = _collect_files(parsed.paths, recursive=parsed.recursive)
+        if not files:
+            return _no_files_exit(parsed)
+        base = ProcessOptions()
+        if parsed.preset:
+            from .presets import load_preset
+            preset_opts = load_preset(parsed.preset)
+            if preset_opts is None:
+                print(f"{_t('msg_preset_not_found')}: {parsed.preset}",
+                      file=sys.stderr)
+                return 2
+            base = preset_opts
+        if parsed.options:
+            try:
+                extra = _json.loads(parsed.options)
+            except ValueError as e:
+                print(f"❌ --options: {e}", file=sys.stderr)
+                return 2
+            if not isinstance(extra, dict):
+                print("❌ --options must be a JSON object", file=sys.stderr)
+                return 2
+            unknown = [k for k in extra if k not in
+                       ProcessOptions.__dataclass_fields__]
+            if unknown:
+                print(f"❌ --options unknown fields: {unknown}",
+                      file=sys.stderr)
+                return 2
+            base = _dc_replace(base, **extra)
+        if parsed.auto_tone is not None:
+            base.auto_tone = parsed.auto_tone
+        keywords = [k.strip() for k in (parsed.keywords or "").split(",")
+                    if k.strip()] or None
+        if not (parsed.preset or parsed.options or parsed.auto_tone is not None
+                or parsed.rating is not None or keywords or parsed.title):
+            print(f"❌ {_t('msg_xmp_no_source')}", file=sys.stderr)
+            return 2
+        rows = []
+        fail = 0
+        for p in files:
+            opts = base
+            params_summary = None
+            if base.auto_tone:
+                from .autotone import resolve_auto_tone_options
+                try:
+                    opts, params = resolve_auto_tone_options(base, p)
+                    params_summary = params.get("options")
+                except (RuntimeError, ValueError) as e:
+                    print(f"  ❌ {p}  {e}", file=sys.stderr)
+                    fail += 1
+                    continue
+            try:
+                sidecar, warns = write_xmp_sidecar(
+                    p, opts, rating=parsed.rating, keywords=keywords,
+                    title=parsed.title, out_dir=parsed.out_dir)
+            except Exception as e:
+                print(f"  ❌ {p}  {e}", file=sys.stderr)
+                fail += 1
+                continue
+            rows.append({"path": p, "sidecar": sidecar,
+                         "warnings": warns, "auto_tone_params": params_summary})
+            if not getattr(parsed, 'json', False):
+                note = f"  ⚠️ {'; '.join(warns)}" if warns else ""
+                print(f"  📄 {sidecar}{note}")
+        if getattr(parsed, 'json', False):
+            print(_json.dumps(versioned({"count": len(rows), "failed": fail,
+                                         "results": rows}),
+                              indent=2, ensure_ascii=False))
+        return 0 if fail == 0 else 1
+
     if parsed.command == "preview":
         import json
         from .metrics import snapshot_image
@@ -3637,10 +3757,55 @@ def run_cli(args: List[str] = None) -> int:
     else:
         trace_cb = None
 
+    # ── XMP sidecar 导出（v2.5 LR 双向互通）：--auto-tone 组合时逐图先
+    # 预测一次并把参数并进 per-file options——sidecar 记录的是真实应用的
+    # 参数，且引擎不再经槽位二次推理 ──────────────────────────────────────
+    resolved_xmp_opts: dict = {}
+    per_file_for_xmp = None
+    if getattr(parsed, 'write_xmp', False) and getattr(parsed, 'auto_tone', None):
+        from .plugin import find_provider
+        if find_provider("auto_tone") is None:
+            print("--write-xmp --auto-tone needs the auto-tone plugin "
+                  "(pip install photo-s-plugin-auto-tone)", file=sys.stderr)
+            return 2
+
+        def per_file_for_xmp(path, base_opts):
+            from .autotone import resolve_auto_tone_options
+            try:
+                merged, _ = resolve_auto_tone_options(base_opts, path)
+                resolved_xmp_opts[path] = merged
+                return merged
+            except Exception:
+                # 单图预测失败回落槽位路径（引擎自身有清晰的 per-file 报错）
+                resolved_xmp_opts[path] = base_opts
+                return base_opts
+
     result = batch_process(files, options, progress_callback=progress_callback,
-                           trace_callback=trace_cb)
+                           trace_callback=trace_cb,
+                           per_file_options=per_file_for_xmp)
     if trace_file:
         trace_file.close()
+
+    xmp_rows = []
+    if getattr(parsed, 'write_xmp', False):
+        from .lrxmp import write_xmp_sidecar
+        for r in result.results:
+            if not r.success:
+                continue
+            eff = resolved_xmp_opts.get(r.input_path) or options
+            try:
+                sidecar, warns = write_xmp_sidecar(r.input_path, eff)
+                xmp_rows.append({"input": r.input_path, "sidecar": sidecar,
+                                 "warnings": warns})
+            except Exception as e:
+                xmp_rows.append({"input": r.input_path, "error": str(e)})
+        if not is_json:
+            for row in xmp_rows:
+                if row.get("error"):
+                    print(f"  ⚠️ XMP {row['input']}: {row['error']}",
+                          file=sys.stderr)
+                else:
+                    print(f"  📄 XMP {row['sidecar']}")
 
     # ── Write CSV report if requested ───────────────────────────────────────
     if getattr(parsed, 'report', None):
@@ -3653,7 +3818,10 @@ def run_cli(args: List[str] = None) -> int:
     # ── Print results ───────────────────────────────────────────────────────
     if is_json:
         import json
-        print(json.dumps(versioned(result.to_dict()), indent=2, ensure_ascii=False))
+        payload = result.to_dict()
+        if xmp_rows:
+            payload["xmp_sidecars"] = xmp_rows
+        print(json.dumps(versioned(payload), indent=2, ensure_ascii=False))
     else:
         print()
         for r in result.results:

@@ -17,9 +17,11 @@ params 词汇表 = mask.py :data:`ADJUST_KEYS` 的标量子集
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any, Dict, List, Optional, Tuple
 
-__all__ = ["apply_auto_tone_params", "local_to_specs", "NEUTRAL"]
+__all__ = ["apply_auto_tone_params", "resolve_auto_tone_options",
+           "local_to_specs", "NEUTRAL"]
 
 # 各字段中性值（= 不改图）。与插件 render.NEUTRAL 对齐——wb 中性 5250K
 # 是 lrxmp 训练基线（LR AsShot 平均），非 0。
@@ -145,3 +147,62 @@ def apply_auto_tone_params(img, params: Optional[Dict[str, Any]]):
                                 refs=specs)
                 img = apply_local(img, m, adjust)
     return img
+
+
+# 预测 9 字段 → ProcessOptions 字段名（唯一差异：exposure → ev）
+_PARAM_TO_FIELD = {
+    "exposure": "ev", "contrast": "contrast", "saturation": "saturation",
+    "vibrance": "vibrance", "wb_temp": "wb_temp", "wb_tint": "wb_tint",
+    "clarity": "clarity", "texture": "texture", "dehaze": "dehaze",
+}
+
+
+def resolve_auto_tone_options(options, input_path=None):
+    """预测一次 auto-tone 参数并合并进 ProcessOptions → (merged, params)。
+
+    与引擎槽位路径（apply_auto_tone_params 的像素协议）数值等价：中性字段
+    跳过、用户显式设置的字段不被预测覆盖（含 WB）、局部调整走
+    local_to_specs 并入 masks/mask_adjust（ai0/ai1… 命名与手动蒙版天然
+    错开）。``auto_tone`` 置 None——引擎不再二次推理，合并结果即"真实
+    应用的参数"，XMP sidecar（batch --write-xmp / autopilot）记录的与
+    实际渲染的完全一致。
+
+    缺插件抛 RuntimeError（与引擎槽位同一文案 + suggest 替代指引）。
+    """
+    from .plugin import find_provider
+
+    provider = find_provider("auto_tone")
+    if provider is None or not hasattr(provider, "auto_tone_params"):
+        raise RuntimeError(
+            "--auto-tone needs the auto-tone plugin "
+            "(pip install photo-s-plugin-auto-tone); zero-model rule-based "
+            "alternative: 'photo-s suggest'")
+
+    ctx = None
+    if input_path is not None:
+        from .hooks import PluginContext
+        ctx = PluginContext(input_path=str(input_path), options=options)
+    params = provider.auto_tone_params(float(options.auto_tone or 1.0), ctx)
+
+    changes: Dict[str, Any] = {}
+    for key, value in (params.get("options") or {}).items():
+        field = _PARAM_TO_FIELD.get(key)
+        if field is None or value is None:
+            continue
+        value = float(value)
+        if _is_neutral(key, value):
+            continue
+        if field == "wb_temp" and options.wb_temp is not None:
+            continue  # 用户显式 WB 优先（与槽位路径的叠加语义一致）
+        if field == "wb_tint" and options.wb_tint:
+            continue
+        changes[field] = value
+
+    masks_s, adjust_s = local_to_specs(params.get("local") or [])
+    if masks_s:
+        changes["masks"] = ";".join(
+            [s for s in (options.masks or "", masks_s) if s])
+        changes["mask_adjust"] = ";".join(
+            [s for s in (options.mask_adjust or "", adjust_s) if s])
+    changes["auto_tone"] = None
+    return dataclasses.replace(options, **changes), params

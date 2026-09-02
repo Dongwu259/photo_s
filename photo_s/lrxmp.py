@@ -55,6 +55,11 @@ catalog/XMP、聚合覆盖报告、可选导出训练数据 JSONL（每张已编
 
     PerspectiveUpright/Transform*（透视）、RetouchAreas（修复笔）、
     LensProfile*（镜头配置）、ColorGradeGlobal*（全局分级，PhotoS 无对应）
+
+v2.5 起支持反向：:func:`options_to_xmp` 把 ``ProcessOptions`` 写成 LR 可读的
+``.xmp`` sidecar（上面「直接映射」的逐字段逆变换 + radial/linear 蒙版 →
+MaskGroupBasedCorrections + 评分/关键词 → xmp:Rating / dc:subject）——LR 直接
+打开原图即可续修，是「agent 用的 Lightroom」双向互通的写出侧。
 """
 
 from __future__ import annotations
@@ -70,7 +75,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 
 __all__ = [
     "LrError", "parse_xmp_sidecar", "parse_develop_blob", "scan_catalog",
-    "crs_to_options", "coverage", "scan_and_report", "discover_inputs",
+    "crs_to_options", "options_to_xmp", "write_xmp_sidecar",
+    "coverage", "scan_and_report", "discover_inputs",
     "write_export", "HSL_COLORS", "LOCAL_MAP",
 ]
 
@@ -103,10 +109,14 @@ class LrError(ValueError):
 
 # ---------------------------------------------------------------- XMP sidecar
 
-def parse_xmp_sidecar(source: Any) -> Dict[str, str]:
+def parse_xmp_sidecar(source: Any) -> Dict[str, Any]:
     """解析 XMP sidecar（文件路径或 XML 字符串）→ ``{crs字段: 值}``。
 
     值均为字符串（XMP 属性原始文本）；``crd:`` 默认段字段以 ``crd_`` 前缀并入。
+    v2.5 起 XMP sidecar 与 catalog blob 同能：曲线属性（``"0, 0 128, 140"``）
+    转为 float 列表、``MaskGroupBasedCorrections``/``CorrectionMasks`` 嵌套
+    元素转为与 blob 同形的 list-of-dicts（此前只有 catalog 明文快照能读出
+    曲线/蒙版）。
     """
     if isinstance(source, (str, os.PathLike)) and os.path.exists(source):
         with open(source, "r", encoding="utf-8") as f:
@@ -122,13 +132,106 @@ def parse_xmp_sidecar(source: Any) -> Dict[str, str]:
         root = ET.fromstring(text)
     except ET.ParseError as e:
         raise LrError(f"XMP 解析失败: {e}") from e
-    out: Dict[str, str] = {}
+    out: Dict[str, Any] = {}
     for elem in root.iter():
         for key, value in elem.attrib.items():
             if key.startswith(_XMP_CRS):
                 out[key[len(_XMP_CRS):]] = value
             elif key.startswith(_XMP_CRD):
                 out["crd_" + key[len(_XMP_CRD):]] = value
+    _shim_curve_lists(out)
+    corrections = _xmp_mask_groups(root)
+    if corrections:
+        out["MaskGroupBasedCorrections"] = corrections
+    return out
+
+
+def _shim_curve_lists(out: Dict[str, Any]) -> None:
+    """ToneCurve* XMP 字符串（``"0, 0 128, 140 255, 255"``）→ float 列表。
+
+    _curves_string 只消费 list（catalog blob 形状）；XMP 属性原生是字符串，
+    不转换则曲线静默丢失（v2.5 前的既有缺口）。点对 = "x, y"（逗号后可带
+    空格），相邻点对以空白分隔——不能按空白裸切，那会把点对切碎。
+    """
+    for key in _CURVE_KEY_BY_CHANNEL.values():
+        v = out.get(key)
+        if not isinstance(v, str) or not v.strip():
+            continue
+        pairs = re.findall(r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)", v)
+        if len(pairs) >= 2:
+            nums: List[float] = []
+            for xs, ys in pairs:
+                nums.extend((float(xs), float(ys)))
+            out[key] = nums
+
+
+def _coerce_xmp_scalar(v: str) -> Any:
+    """XMP 标量文本 → int/float/bool/str（对齐 catalog blob 的值类型；
+    MaskInverted 之类必须真 bool——字符串 "False" 是 truthy）。"""
+    if v == "True":
+        return True
+    if v == "False":
+        return False
+    try:
+        return int(v)
+    except ValueError:
+        pass
+    try:
+        return float(v)
+    except ValueError:
+        pass
+    return v
+
+
+def _rdf_li_items(elem: Any) -> List[Any]:
+    """rdf:Bag/Alt/Seq 容器 → li 元素列表（无容器时把子元素当 li，宽容解析）。"""
+    out: List[Any] = []
+    for child in elem:
+        if child.tag.rsplit("}", 1)[-1] in ("Bag", "Alt", "Seq"):
+            out.extend(child)
+        else:
+            out.append(child)
+    return out
+
+
+def _xmp_mask_groups(root: Any) -> List[Dict[str, Any]]:
+    """MaskGroupBasedCorrections / CorrectionMasks 元素 → blob 同形 corrections。
+
+    只处理直接挂在 rdf:Description 下的组元素——嵌在组内 li 里的
+    CorrectionMasks 是蒙版几何载体，不是独立修正组（iter 会重复访问）。
+    """
+    parent_of = {c: p for p in root.iter() for c in p}
+    out: List[Dict[str, Any]] = []
+    for elem in root.iter():
+        if not elem.tag.startswith(_XMP_CRS):
+            continue
+        name = elem.tag[len(_XMP_CRS):]
+        if name not in ("MaskGroupBasedCorrections", "CorrectionMasks"):
+            continue
+        parent = parent_of.get(elem)
+        if parent is not None and parent.tag.startswith(_XMP_CRS):
+            continue
+        for li in _rdf_li_items(elem):
+            corr: Dict[str, Any] = {}
+            for k, v in li.attrib.items():
+                if k.startswith(_XMP_CRS):
+                    corr[k[len(_XMP_CRS):]] = _coerce_xmp_scalar(v)
+            for child in li:
+                if not child.tag.startswith(_XMP_CRS):
+                    continue
+                cname = child.tag[len(_XMP_CRS):]
+                if cname == "CorrectionMasks":
+                    corr[cname] = [
+                        {k[len(_XMP_CRS):]: _coerce_xmp_scalar(v)
+                         for k, v in m.attrib.items() if k.startswith(_XMP_CRS)}
+                        for m in _rdf_li_items(child)]
+                elif cname == "LocalPointColors":
+                    corr[cname] = [(it.text or "").strip()
+                                   for it in _rdf_li_items(child)]
+                elif child.text is not None and child.text.strip():
+                    corr[cname] = _coerce_xmp_scalar(child.text.strip())
+            if corr:
+                out.append(corr)
     return out
 
 
@@ -482,6 +585,360 @@ def crs_to_options(settings: Dict[str, Any], *,
     except (TypeError, ValueError) as e:
         raise LrError(f"crs 字段映射失败: {e}") from e
     return opts
+
+
+# ---------------------------------------------------------------- XMP 写出 (v2.5)
+
+# 结构常量：fixture lr_crs_edited.xmp（LR 18 实测）同源——PV2023 系，
+# LR 4+ 均可读 ProcessVersion=15.4
+_XMP_WRITER_VERSION = "18.3.2"
+_XMP_PROCESS_VERSION = "15.4"
+
+_XMP_TOP_NS = "adobe:ns:meta/"
+_XMP_RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+_XMP_XAP_NS = "http://ns.adobe.com/xap/1.0/"
+_XMP_DC_NS = "http://purl.org/dc/elements/1.1/"
+_XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
+
+_CURVE_KEY_BY_CHANNEL = {"rgb": "ToneCurvePV2012", "r": "ToneCurvePV2012Red",
+                         "g": "ToneCurvePV2012Green", "b": "ToneCurvePV2012Blue"}
+_CG_ZONE_KEYS = {"shadows": "ColorGradeShadow", "midtones": "ColorGradeMidtone",
+                 "highlights": "ColorGradeHighlight"}
+_PS_LOCAL_TO_LR: Dict[str, str] = {v: k for k, v in LOCAL_MAP.items()}
+
+# 单向写出（LR 受益、读侧不回读——crs_to_options 未实现这些字段）：
+# highlight_recovery → Highlights2012 / denoise → LuminanceSmoothing /
+# sharpen → Sharpness / grain → Grain*（语义近似，docstring 已声明）
+
+
+def _lr_num(v: float) -> str:
+    """LR 标度数值格式化：整值给整串，否则 5 位小数去尾零。"""
+    v = float(v)
+    if abs(v - round(v)) < 1e-9:
+        return str(int(round(v)))
+    return f"{v:.5f}".rstrip("0").rstrip(".")
+
+
+def _lr_signed(v: float) -> str:
+    """带符号标量（Exposure2012/Tint 的 LR 风格 ``+0.35``）。"""
+    v = float(v)
+    if abs(v - round(v)) < 1e-9:
+        return f"{int(round(v)):+d}"
+    return f"{v:+.5f}".rstrip("0").rstrip(".")
+
+
+def _corrections_from_masks(masks_str: str, adjust_str: str,
+                            warnings: List[str]) -> List[Dict[str, Any]]:
+    """masks/mask_adjust 紧凑串 → LR 修正组（radial/linear 可逆，其余告警）。"""
+    from .mask import parse_mask_adjust, parse_masks
+
+    specs = parse_masks(masks_str) if masks_str else []
+    adjusts = parse_mask_adjust(adjust_str) if adjust_str else {}
+    out: List[Dict[str, Any]] = []
+    for spec in specs:
+        lr_attrs: Dict[str, str] = {}
+        for key, val in (adjusts.get(spec.name) or {}).items():
+            lr_key = _PS_LOCAL_TO_LR.get(key)
+            if lr_key is None:
+                warnings.append(
+                    f"mask '{spec.name}': 局部参数 {key} 无 LR 对应字段，已跳过")
+                continue
+            val = float(val)
+            if key in ("brightness", "contrast", "saturation", "sharpen"):
+                lr_v = (val - 1.0) * 100.0
+            elif key in ("vibrance", "clarity", "texture"):
+                lr_v = val * 100.0
+            elif key == "temp":
+                lr_v = val - 5250.0
+            else:
+                lr_v = val
+            if abs(lr_v) > 1e-9:
+                lr_attrs[lr_key] = _lr_num(lr_v)
+        if spec.kind == "radial":
+            cx, cy, rx, ry = (float(v) for v in spec.params[:4])
+            geo = _mask_geo("Mask/CircularGradient",
+                            cx - rx, cy - ry, cx + rx, cy + ry,
+                            spec.feather, spec.invert)
+        elif spec.kind == "linear":
+            x0, y0, x1, y1 = (float(v) for v in spec.params[:4])
+            # _linear_mask 的逆：box = 端点包络；dx,dy = 半向量 →
+            # Angle = atan2(dx, dy)（LR 0° = 自上而下，正角顺时针）
+            angle = math.degrees(math.atan2((x1 - x0) / 2.0, (y1 - y0) / 2.0))
+            geo = _mask_geo("Mask/LinearGradient",
+                            min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1),
+                            spec.feather, spec.invert, angle)
+        else:
+            warnings.append(
+                f"mask '{spec.name}'（{spec.kind}）无 LR 几何等价，已跳过"
+                f"（其局部调整一并跳过）")
+            continue
+        out.append({"name": spec.name, "attrs": lr_attrs, "mask": geo})
+    kept = {c["name"] for c in out}
+    for name, adj in adjusts.items():
+        if adj and name not in kept and not any(
+                w.startswith(f"mask '{name}'") for w in warnings):
+            warnings.append(f"mask '{name}' 未导出，其局部调整一并跳过")
+    return out
+
+
+def _mask_geo(what: str, left: float, top: float, right: float, bottom: float,
+              feather: float, invert: bool,
+              angle: Optional[float] = None) -> Dict[str, str]:
+    def u(v: float) -> str:
+        return f"{max(0.0, min(1.0, float(v))):.6f}"
+
+    geo = {
+        "What": what,
+        "Top": u(top), "Left": u(left), "Bottom": u(bottom), "Right": u(right),
+        "CenterWeight": "0", "CornerRadius": "0",
+        "XOffset": "0.000000", "YOffset": "0.000000",
+        "Feather": _lr_num(max(0.0, min(1.0, float(feather or 0.0))) * 100.0),
+        "MaskInput": "100",
+        "MaskInverted": "True" if invert else "False",
+        "MaskVersion": "1",
+    }
+    if angle is not None:
+        geo["Angle"] = f"{float(angle):.4f}"
+    return geo
+
+
+def _render_xmp(crs_attrs: Dict[str, str],
+                corrections: List[Dict[str, Any]],
+                rating: Optional[int], label: Optional[str],
+                keywords: Optional[Sequence[str]],
+                title: Optional[str]) -> str:
+    for prefix, uri in (("x", _XMP_TOP_NS), ("rdf", _XMP_RDF_NS),
+                        ("crs", _XMP_CRS[1:-1]), ("xmp", _XMP_XAP_NS),
+                        ("dc", _XMP_DC_NS)):
+        ET.register_namespace(prefix, uri)
+    root = ET.Element(f"{{{_XMP_TOP_NS}}}xmpmeta")
+    rdf = ET.SubElement(root, f"{{{_XMP_RDF_NS}}}RDF")
+    desc = ET.SubElement(rdf, f"{{{_XMP_RDF_NS}}}Description",
+                         {f"{{{_XMP_RDF_NS}}}about": ""})
+    if rating is not None:
+        desc.set(f"{{{_XMP_XAP_NS}}}Rating", str(int(rating)))
+    if label:
+        desc.set(f"{{{_XMP_XAP_NS}}}Label", label)
+    for k, v in crs_attrs.items():
+        desc.set(f"{_XMP_CRS}{k}", v)
+    if corrections:
+        groups = ET.SubElement(desc, f"{_XMP_CRS}MaskGroupBasedCorrections")
+        bag = ET.SubElement(groups, f"{{{_XMP_RDF_NS}}}Bag")
+        for corr in corrections:
+            li = ET.SubElement(bag, f"{{{_XMP_RDF_NS}}}li")
+            li.set(f"{_XMP_CRS}CorrectionName", corr["name"])
+            li.set(f"{_XMP_CRS}CorrectionActive", "True")
+            for k, v in corr["attrs"].items():
+                li.set(f"{_XMP_CRS}{k}", v)
+            masks_el = ET.SubElement(li, f"{_XMP_CRS}CorrectionMasks")
+            mbag = ET.SubElement(masks_el, f"{{{_XMP_RDF_NS}}}Bag")
+            mli = ET.SubElement(mbag, f"{{{_XMP_RDF_NS}}}li")
+            for k, v in corr["mask"].items():
+                mli.set(f"{_XMP_CRS}{k}", v)
+    if keywords:
+        subj = ET.SubElement(desc, f"{{{_XMP_DC_NS}}}subject")
+        kbag = ET.SubElement(subj, f"{{{_XMP_RDF_NS}}}Bag")
+        for kw in keywords:
+            kli = ET.SubElement(kbag, f"{{{_XMP_RDF_NS}}}li")
+            kli.text = str(kw)
+    if title:
+        t = ET.SubElement(desc, f"{{{_XMP_DC_NS}}}title")
+        alt = ET.SubElement(t, f"{{{_XMP_RDF_NS}}}Alt")
+        tli = ET.SubElement(alt, f"{{{_XMP_RDF_NS}}}li", {_XML_LANG: "x-default"})
+        tli.text = str(title)
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            + ET.tostring(root, encoding="unicode") + "\n")
+
+
+def options_to_xmp(options: Any, *, image_size: Optional[Tuple[int, int]] = None,
+                   rating: Optional[int] = None, label: Optional[str] = None,
+                   keywords: Optional[Sequence[str]] = None,
+                   title: Optional[str] = None) -> Tuple[str, List[str]]:
+    """``ProcessOptions`` → LR 可读 XMP sidecar 文本；返回 ``(xmp, warnings)``。
+
+    crs_to_options「直接映射」的逐字段逆变换（数值互逆，往返可验证）；此外
+    单向写出 LR 受益字段：``highlight_recovery→Highlights2012``、
+    ``denoise→LuminanceSmoothing``、``sharpen→Sharpness``、``grain→Grain*``
+    （读侧未实现这些字段，往返不核对）。中性值一律不写（LR 对缺省属性取
+    默认，sidecar 干净）。
+
+    不可逆内容进 warnings 不抛错：AI/笔刷/combo/颜色蒙版、字符串型局部
+    调整、point_color、levels、crop_ratio、lens_vignette/lens_ca、rotate/flip
+    （vignette 的 feather 无 LR 手动暗角对应，写出即丢）。
+    ``options`` 可为 ProcessOptions、dict（按字段名过滤）或 None（仅元数据）。
+    """
+    warnings: List[str] = []
+    if options is None or isinstance(options, dict):
+        from .engine import ProcessOptions
+        if isinstance(options, dict):
+            known = ProcessOptions.__dataclass_fields__
+            options = ProcessOptions(**{k: v for k, v in options.items()
+                                        if k in known})
+        else:
+            options = ProcessOptions()
+    crs: Dict[str, str] = {
+        "Version": _XMP_WRITER_VERSION,
+        "ProcessVersion": _XMP_PROCESS_VERSION,
+        "HasSettings": "True",
+    }
+
+    ev = getattr(options, "ev", None)
+    if ev:
+        crs["Exposure2012"] = _lr_signed(ev)
+    if options.contrast != 1.0:
+        crs["Contrast2012"] = _lr_num((options.contrast - 1.0) * 100.0)
+    if options.saturation != 1.0:
+        crs["Saturation"] = _lr_num((options.saturation - 1.0) * 100.0)
+    for field, key in (("vibrance", "Vibrance"), ("texture", "Texture"),
+                       ("clarity", "Clarity2012"), ("dehaze", "Dehaze")):
+        v = float(getattr(options, field, 0.0) or 0.0)
+        if v:
+            crs[key] = _lr_num(v * 100.0)
+    if options.wb_temp is not None or options.wb_tint:
+        crs["WhiteBalance"] = "Custom"
+        if options.wb_temp is not None:
+            crs["Temperature"] = str(int(round(options.wb_temp)))
+        if options.wb_tint:
+            crs["Tint"] = _lr_signed(options.wb_tint)
+
+    # 单向写出（LR 受益）
+    hr = getattr(options, "highlight_recovery", None)
+    if hr:
+        crs["Highlights2012"] = _lr_num(-float(hr) * 100.0)
+    dn = getattr(options, "denoise", None)
+    if dn:
+        crs["LuminanceSmoothing"] = _lr_num(float(dn) * 100.0)
+    if options.sharpen != 1.0:
+        crs["Sharpness"] = _lr_num(max(0.0, min(150.0,
+                                                (options.sharpen - 1.0) * 100.0)))
+    if options.grain:
+        try:
+            parts = [p.strip() for p in options.grain.split(",")]
+            amount = float(parts[0]) if parts and parts[0] else 0.1
+            size = float(parts[1]) if len(parts) > 1 and parts[1] else 1.0
+        except ValueError:
+            raise LrError(f"grain 无法解析: {options.grain!r}") from None
+        if amount:
+            crs["GrainAmount"] = _lr_num(amount * 100.0)
+            crs["GrainSize"] = _lr_num(size * 25.0)
+            crs["GrainFrequency"] = "50"
+
+    if options.hsl:
+        from .grade import _parse_hsl  # noqa: SLF001 — 同仓紧凑串语法的唯一权威
+        for color, (h, s, l) in _parse_hsl(options.hsl).items():
+            cap = color.capitalize()
+            if h:
+                crs[f"HueAdjustment{cap}"] = _lr_num(
+                    max(-30.0, min(30.0, h / 1.8)))
+            if s:
+                crs[f"SaturationAdjustment{cap}"] = _lr_num(s * 100.0)
+            if l:
+                crs[f"LuminanceAdjustment{cap}"] = _lr_num(l * 100.0)
+
+    if options.curves:
+        from .grade import _parse_curves  # noqa: SLF001 — 同上
+        for ch, points in _parse_curves(options.curves).items():
+            if len(points) == 2 and points[0] == (0.0, 0.0) \
+                    and points[1] == (255.0, 255.0):
+                continue  # 恒等曲线
+            crs[_CURVE_KEY_BY_CHANNEL[ch]] = " ".join(
+                f"{x:g}, {y:g}" for x, y in points)
+
+    if options.color_grading:
+        from .grade import _parse_color_grading  # noqa: SLF001 — 同上
+        for zone, (h, s, l) in _parse_color_grading(options.color_grading).items():
+            key = _CG_ZONE_KEYS[zone]
+            if h:
+                crs[key + "Hue"] = _lr_num(h + 360.0 if h < 0 else h)
+            if s:
+                crs[key + "Sat"] = _lr_num(s * 100.0)
+            if l:
+                crs[key + "Lum"] = _lr_num(l * 100.0)
+
+    if options.vignette:
+        # 缺省字段沿用 grade._parse_vignette 默认（midpoint/feather 0.5）
+        try:
+            parts = [p.strip() for p in options.vignette.split(",")]
+            amount = float(parts[0]) if parts and parts[0] else 0.5
+            midpoint = float(parts[1]) if len(parts) > 1 and parts[1] else 0.5
+        except ValueError:
+            raise LrError(f"vignette 无法解析: {options.vignette!r}") from None
+        if amount:
+            crs["VignetteAmount"] = _lr_num(amount * 100.0)
+            crs["VignetteMidpoint"] = _lr_num(midpoint * 100.0)
+
+    if options.crop:
+        m = re.match(r"(\d+)x(\d+)(?:\+(\d+)\+(\d+))?", options.crop)
+        if not m:
+            raise LrError(f"crop 无法解析: {options.crop!r}")
+        cw, ch = int(m.group(1)), int(m.group(2))
+        if not image_size:
+            warnings.append("crop 需要 image_size（write_xmp_sidecar 自动提供），"
+                            "已跳过")
+        else:
+            w, h = image_size
+            if m.group(3) is not None:
+                x, y = int(m.group(3)), int(m.group(4))
+            else:  # 与 apply_crop 的居中语义一致
+                x, y = (w - cw) // 2, (h - ch) // 2
+            if not (x == 0 and y == 0 and cw >= w and ch >= h):
+                crs["CropLeft"] = f"{x / w:.6f}"
+                crs["CropTop"] = f"{y / h:.6f}"
+                crs["CropRight"] = f"{(x + cw) / w:.6f}"
+                crs["CropBottom"] = f"{(y + ch) / h:.6f}"
+                crs["HasCrop"] = "True"
+                crs["CropAngle"] = "0"
+                crs["CropConstrainToWarp"] = "0"
+                crs["CropConstrainToUnitSquare"] = "1"
+
+    corrections = _corrections_from_masks(options.masks, options.mask_adjust,
+                                          warnings)
+
+    # 不可逆字段逐条告警（非中性才值得打扰用户）
+    if options.levels and options.levels.strip() not in ("", "0,255", "0,255,1"):
+        warnings.append("levels 无 LR PV2013 对应字段，已跳过")
+    if options.point_color:
+        warnings.append("point_color 尚无 LR 写出映射，已跳过")
+    if options.lens_distort:
+        crs["LensManualDistortionAmount"] = _lr_num(options.lens_distort * 100.0)
+    if options.lens_vignette or options.lens_ca:
+        warnings.append("lens_vignette/lens_ca 无 LR 手动字段，已跳过")
+    if options.crop_ratio:
+        warnings.append("crop_ratio 请在 LR 裁剪工具中按比例重设，已跳过")
+    if getattr(options, "rotate_degrees", 0.0) or options.flip:
+        warnings.append("rotate/flip 无无损 XMP 对应（crs:Orientation 未接线），"
+                        "已跳过")
+
+    xmp = _render_xmp(crs, corrections, rating, label, keywords, title)
+    return xmp, warnings
+
+
+def write_xmp_sidecar(image_path: str, options: Any = None, *,
+                      rating: Optional[int] = None, label: Optional[str] = None,
+                      keywords: Optional[Sequence[str]] = None,
+                      title: Optional[str] = None,
+                      out_dir: Optional[str] = None) -> Tuple[str, List[str]]:
+    """把 options 写成 ``<原图>.xmp``（LR 打开原图即见调整）；返回 (路径, warnings)。
+
+    裁剪换算所需的 image_size 自动从原图读取。``out_dir`` 指定时 sidecar
+    写入该目录（文件名不变）。
+    """
+    from PIL import Image
+
+    p = os.fspath(image_path)
+    with Image.open(p) as im:
+        size = im.size
+    xmp, warnings = options_to_xmp(options, image_size=size, rating=rating,
+                                   label=label, keywords=keywords, title=title)
+    stem = os.path.splitext(os.path.basename(p))[0]
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+        sidecar = os.path.join(os.fspath(out_dir), stem + ".xmp")
+    else:
+        sidecar = os.path.splitext(p)[0] + ".xmp"
+    with open(sidecar, "w", encoding="utf-8") as f:
+        f.write(xmp)
+    return sidecar, warnings
 
 
 # ---------------------------------------------------------------- 覆盖率
