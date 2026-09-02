@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Weights](https://img.shields.io/badge/auto--tone%20weights-CC--BY--NC%204.0-orange)](docs/COMMERCIAL.md)
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **CLI 给 AI agent 用，GUI 给人用。** PhotoS 是一个跨平台批量照片处理工具箱：
@@ -156,6 +156,7 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 | [`docs/PLUGINS.md`](docs/PLUGINS.md) | 插件系统：SCUNet 降噪、LUT、自己写插件 |
 | [`docs/GUI_CHANGES.md`](docs/GUI_CHANGES.md) | GUI 行为与接口契约 |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 版本路线（v1.6.0：Lightroom 方向调色） |
+| [`docs/COMMERCIAL.md`](docs/COMMERCIAL.md) | 商用授权：双许可说明、边界判定表与 FAQ |
 
 > 命名：PyPI 发行名 **`photo-s-tools`**（原名 `photo-s` 被 PyPI 拦截）·
 > CLI 命令 `photo-s` · Python 包 `photo_s` · 品牌 **PhotoS**。
@@ -167,9 +168,12 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 PhotoS 是**批量 / 交付导向管线**，不是交互式编辑器——不做 RAW 域编辑。局部编辑是规格驱动的：命名蒙版（linear/radial/color/AI 分割/笔刷/组合算子）+ 蒙版内局部调整，全部以紧凑字符串建模，经 CLI/REST/MCP/preset 零胶水传递。
 
 - **设备上推理，无云端。** 降噪模型权重（SCUNet）首次使用时下载到本机；不上传任何数据。
-- **许可。** 官方代码与多数官方模型权重（含 SCUNet 检查点）为 **MIT**——可自由商用；
-  但 auto-tone 插件的权重为 **CC-BY-NC 4.0**（非商用，训练数据来自个人照片库），
-  商用需另行授权。第三方插件与模型各自持有自己的许可；商用再分发前请自行核实。
+- **许可（双许可）。** 官方代码与多数官方模型权重（含 SCUNet 检查点）为 **MIT**——
+  可自由商用。唯一例外：auto-tone 插件的模型权重为 **CC-BY-NC 4.0**（非商用，
+  训练数据来自个人 Lightroom 修图记录）——个人与非商业用途永久免费，**商业用途
+  需购买授权**：邮箱 <1634103640@qq.com> · [dwphoto.top/message](https://dwphoto.top/message)。
+  边界判定与常见问题见 [`docs/COMMERCIAL.md`](COMMERCIAL.md)。第三方插件与模型
+  各自持有自己的许可；商用再分发前请自行核实。
 
 ## 📄 许可证
 

@@ -162,6 +162,19 @@ photo-s audit out.jpg --aesthetic 6                # 闸门生效（CLI/MCP/REST
 **lrxmp 只读 develop 设置 + 文件路径，不读 GPS/EXIF 私有字段**；catalog 以
 `mode=ro` 打开，永不写库。训练数据请勿上传公有云；多机传输走私有通道。
 
+## 6.1 权重许可规则（发布前必读）
+
+凡**基于作者个人数据**（Lightroom 修图记录、星级评分等）训练并对外发布的
+权重，一律采用与 auto-tone 相同的**双许可**：
+
+- 非商业用途：CC-BY-NC 4.0 免费开放（含 ModelScope/GitHub 双托管）
+- 商业用途：联系作者购买授权（1634103640@qq.com / dwphoto.top/message）
+
+适用于现有的 `auto_tone_*` / LoRA 全套，以及将来的美学评分头
+（`aesthetic_head.pt`）等一切个人数据训练产物。纯代码/规则产物（如
+style_biases 内置偏置、suggest 规则）随代码走 MIT。边界判定与授权 FAQ
+见 `docs/COMMERCIAL.md`。
+
 ## 7. agent 对接速览
 
 ```bash

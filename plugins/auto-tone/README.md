@@ -93,11 +93,15 @@ LangChain 封装见 `api/langchain.py`（`get_style_tool()` /
 ## 许可
 
 - **代码**：MIT（与 photo_s 主仓库一致）
-- **模型权重**（GitHub Release `auto-tone-v0.1.0` / `auto-tone-v2.1.0`
-  上的文件）：[CC-BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) —
-  署名-非商用。允许自由使用/研究/再分发，但**禁止商业用途**，且需署名。
-  权重由个人 Lightroom 修图记录训练（个人修图风格模型），
-  不适合以 MIT 形式无限制商用。详见本目录 `LICENSE-WEIGHTS.txt`。
+- **模型权重**（GitHub Release 与 ModelScope 镜像
+  `dwphoto/photo-s-auto-tone-v2` 上的文件）：**双许可** —
+  [CC-BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)（署名-非商用，
+  个人与非商业用途永久免费）+ 商业授权（职业交付/企业使用/产品集成/再分发
+  需购买）：邮箱 <1634103640@qq.com> ·
+  [dwphoto.top/message](https://dwphoto.top/message)。权重由个人 Lightroom
+  修图记录训练（个人修图风格模型），不适合以 MIT 形式无限制商用。
+  边界判定表与 FAQ 见主仓 `docs/COMMERCIAL.md`；完整许可文本（含商业
+  授权条款）见本目录 `LICENSE-WEIGHTS.txt`。
 
 上游依赖：OpenAI CLIP ViT-L-14（MIT）、SigLIP webli 权重（Apache-2.0）、
 Qwen3-VL-2B（Apache-2.0）均允许再发布衍生权重。

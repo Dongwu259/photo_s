@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Weights](https://img.shields.io/badge/auto--tone%20weights-CC--BY--NC%204.0-orange)](COMMERCIAL.md)
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
 **CLI for AI agents, GUI for humans.** PhotoS is a cross-platform batch photo
@@ -154,6 +154,7 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 | [`docs/PLUGINS.md`](PLUGINS.md) | Plugin system: SCUNet denoise, LUT, write your own |
 | [`docs/GUI_CHANGES.md`](GUI_CHANGES.md) | GUI behavior & interface contract |
 | [`docs/ROADMAP.md`](ROADMAP.md) | Version roadmap (v1.6.0: Lightroom-direction grading) |
+| [`docs/COMMERCIAL.md`](COMMERCIAL.md) | Commercial licensing: dual-license terms, boundary table & FAQ |
 
 > Names: PyPI distribution **`photo-s-tools`** (the obvious `photo-s` is taken) ·
 > CLI command `photo-s` · Python package `photo_s` · brand **PhotoS**.
@@ -166,11 +167,15 @@ PhotoS is a **batch / delivery pipeline**, not an interactive editor — no RAW-
 
 - **On-device inference, no cloud.** Denoise model weights (SCUNet) download to
   your machine on first use; nothing is uploaded.
-- **Licensing.** Official code and most official model weights (incl. the SCUNet
-  checkpoint) are **MIT** — free for commercial use. Exception: the auto-tone
-  plugin's weights are **CC-BY-NC 4.0** (non-commercial, trained on personal
-  Lightroom edits; see `plugins/auto-tone/LICENSE-WEIGHTS.txt`). Third-party
-  plugins and models carry their own licenses; verify before redistribution.
+- **Licensing (dual license).** Official code and most official model weights
+  (incl. the SCUNet checkpoint) are **MIT** — free for commercial use. One
+  exception: the auto-tone plugin's model weights are **CC-BY-NC 4.0** — free
+  forever for personal and non-commercial use, **commercial use requires a
+  paid license** (trained on the author's personal Lightroom edits):
+  <1634103640@qq.com> · [dwphoto.top/message](https://dwphoto.top/message).
+  See [`COMMERCIAL.md`](COMMERCIAL.md) for a plain-language boundary table
+  and FAQ (Chinese). Third-party plugins and models carry their own licenses;
+  verify before redistribution.
 
 ## 📄 License
 
