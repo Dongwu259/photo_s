@@ -245,6 +245,7 @@ class TestCliRendering:
                     "hash", "gallery", "analyze", "lr-scan", "lr-train",
                     "lr-predict", "lr-recipes", "lr-similar", "lr-eval",
                     "lr-merge", "diff", "audit", "preview", "xmp-export",
+                    "autopilot",
                     "bench", "config", "serve", "mcp"):
             capsys.readouterr()  # drain
             with pytest.raises(SystemExit):

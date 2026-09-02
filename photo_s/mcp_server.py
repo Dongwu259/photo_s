@@ -897,6 +897,170 @@ def watch_stop_tool(id: str) -> dict:
             "processed_count": len(rec["results"])}
 
 
+# ── autopilot（v2.5 无人值守闭环：watch → suggest/auto-tone → audit → 分流）──
+
+_AUTOPILOT_LOCK = threading.Lock()
+_AUTOPILOTS: dict = {}
+_MAX_AUTOPILOTS = 10
+
+
+def _prune_autopilots() -> None:
+    if len(_AUTOPILOTS) <= _MAX_AUTOPILOTS:
+        return
+    dead = [k for k, v in _AUTOPILOTS.items()
+            if not v["thread"].is_alive()
+            and (v["stop_event"].is_set() or v.get("stopped"))]
+    for k in sorted(dead)[: len(_AUTOPILOTS) - _MAX_AUTOPILOTS]:
+        _AUTOPILOTS.pop(k, None)
+
+
+@_versioned
+def autopilot_start_tool(
+    dir: str,
+    out_dir: Optional[str] = None,
+    mode: str = "suggest",
+    auto_tone: Optional[float] = None,
+    scale: float = 1.0,
+    aesthetic: Optional[float] = None,
+    overexposed_max: Optional[float] = None,
+    underexposed_max: Optional[float] = None,
+    blur_min: Optional[float] = None,
+    write_xmp: bool = False,
+    recursive: bool = False,
+    scan_existing: bool = False,
+    quality: Optional[int] = None,
+    output_format: Optional[str] = None,
+    resize: Optional[str] = None,
+    timeout: Optional[int] = None,
+) -> dict:
+    """Run the unattended pipeline on a directory: watch -> suggest/auto-tone
+    -> process -> audit -> route outputs to passed/ or review/ (JSONL trace).
+
+    Returns immediately with an ``id``; poll ``autopilot_status`` for per-file
+    records (params, audit verdict, routed path); ``autopilot_stop`` ends it.
+    mode=suggest needs nothing; auto_tone/both need the auto-tone plugin;
+    aesthetic needs its verifier. Needs watchdog (photo-s-tools[watch]).
+    """
+    import importlib.util
+    from .autopilot import AutopilotConfig, validate_config
+
+    if not os.path.isdir(dir):
+        return {"started": False, "error": f"not a directory: {dir}",
+                "dir": dir}
+    if importlib.util.find_spec("watchdog") is None:
+        return {"started": False,
+                "error": "watchdog not installed. Run: "
+                         "pip install photo-s-tools[watch]",
+                "install": "pip install photo-s-tools[watch]"}
+    if timeout is not None and timeout <= 0:
+        return {"started": False,
+                "error": "timeout must be a positive number of seconds"}
+
+    thresholds = {k: v for k, v in
+                  (("overexposed_max", overexposed_max),
+                   ("underexposed_max", underexposed_max),
+                   ("blur_min", blur_min)) if v is not None}
+    cfg = AutopilotConfig(
+        watch_dir=os.path.abspath(dir),
+        out_dir=os.path.abspath(out_dir) if out_dir else None,
+        mode=mode,
+        auto_tone_strength=auto_tone if auto_tone is not None else 1.0,
+        scale=scale,
+        thresholds=thresholds,
+        aesthetic=aesthetic,
+        write_xmp=write_xmp,
+        recursive=recursive,
+        scan_existing=scan_existing,
+        quality=quality,
+        output_format=output_format,
+        resize=resize,
+    )
+    try:
+        validate_config(cfg)
+    except RuntimeError as e:
+        return {"started": False, "error": str(e)}
+
+    aid = secrets.token_urlsafe(8)
+    stop_event = threading.Event()
+    record = {
+        "dir": cfg.watch_dir, "out_dir": cfg.out_root, "mode": mode,
+        "config": {"mode": mode, "scale": cfg.scale, "aesthetic": aesthetic,
+                   "write_xmp": write_xmp, "recursive": recursive,
+                   "scan_existing": scan_existing,
+                   "thresholds": thresholds},
+        "stop_event": stop_event, "results": [], "passed": 0, "review": 0,
+        "errors": 0, "error": None, "started_at": time.time(),
+        "stopped": False,
+    }
+
+    def on_event(rec):
+        record["results"].append(rec)
+        if rec.get("error"):
+            record["errors"] += 1
+        elif rec.get("audit", {}).get("passed"):
+            record["passed"] += 1
+        else:
+            record["review"] += 1
+
+    def runner():
+        from .autopilot import run_autopilot
+        try:
+            with contextlib.redirect_stdout(sys.stderr):
+                run_autopilot(cfg, on_event=on_event,
+                              stop_event=record["stop_event"])
+        except Exception as e:
+            record["error"] = f"{type(e).__name__}: {e}"
+
+    record["thread"] = threading.Thread(target=runner, daemon=True)
+    with _AUTOPILOT_LOCK:
+        _prune_autopilots()
+        _AUTOPILOTS[aid] = record
+    record["thread"].start()
+    if timeout:
+        threading.Timer(timeout, stop_event.set).start()
+
+    return {"started": True, "id": aid, "dir": cfg.watch_dir,
+            "out_dir": cfg.out_root, "mode": mode,
+            "log": os.path.join(cfg.out_root, "autopilot.jsonl"),
+            "timeout": timeout}
+
+
+@_versioned
+def autopilot_status_tool(id: str) -> dict:
+    """State of a background autopilot: counters (passed/review/errors),
+    per-file records, error."""
+    with _AUTOPILOT_LOCK:
+        rec = _AUTOPILOTS.get(id)
+    if rec is None:
+        return {"ok": False, "error": f"no such autopilot: {id}"}
+    return {
+        "ok": True, "id": id, "dir": rec["dir"], "out_dir": rec["out_dir"],
+        "mode": rec["mode"], "config": rec["config"],
+        "running": rec["thread"].is_alive(),
+        "stopped": rec["stop_event"].is_set() or rec.get("stopped", False),
+        "processed_count": len(rec["results"]),
+        "passed": rec["passed"], "review": rec["review"],
+        "errors": rec["errors"],
+        "results": list(rec["results"]),
+        "error": rec["error"],
+        "started_at": rec["started_at"],
+    }
+
+
+@_versioned
+def autopilot_stop_tool(id: str) -> dict:
+    """Stop a background autopilot; records so far stay visible via status."""
+    with _AUTOPILOT_LOCK:
+        rec = _AUTOPILOTS.get(id)
+    if rec is None:
+        return {"ok": False, "error": f"no such autopilot: {id}"}
+    rec["stop_event"].set()
+    rec["stopped"] = True
+    return {"ok": True, "id": id, "stopped": True,
+            "processed_count": len(rec["results"]),
+            "passed": rec["passed"], "review": rec["review"]}
+
+
 @_versioned
 def analyze_tool(paths: list, recursive: bool = False,
                  sample_size: int = 256, grid: int = 0) -> dict:
@@ -1281,6 +1445,18 @@ def create_server(config_path: Optional[str] = None):
     mcp.add_tool(watch_stop_tool, name="watch_stop",
                  description="Stop a background watch; results so far stay "
                              "visible via 'watch_status'.")
+    mcp.add_tool(autopilot_start_tool, name="autopilot_start",
+                 description="Unattended pipeline on a directory: watch -> "
+                             "suggest/auto-tone -> process -> audit -> route "
+                             "to passed/ or review/ (JSONL trace). Returns an "
+                             "id — poll 'autopilot_status' / stop via "
+                             "'autopilot_stop'.")
+    mcp.add_tool(autopilot_status_tool, name="autopilot_status",
+                 description="State of a background autopilot: passed/review/"
+                             "error counters + per-file records.")
+    mcp.add_tool(autopilot_stop_tool, name="autopilot_stop",
+                 description="Stop a background autopilot; records so far stay "
+                             "visible via 'autopilot_status'.")
     mcp.add_tool(batch_start_tool, name="batch_start",
                  description=batch_start_tool.__doc__)
     mcp.add_tool(batch_status_tool, name="batch_status",

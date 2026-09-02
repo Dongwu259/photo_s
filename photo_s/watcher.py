@@ -31,9 +31,14 @@ class _DebouncedHandler:
     _MAX_STABILIZE_ATTEMPTS = 30
 
     def __init__(self, options: ProcessOptions,
-                 on_process: Optional[Callable[[ProcessResult], None]] = None):
+                 on_process: Optional[Callable[[ProcessResult], None]] = None,
+                 on_file: Optional[Callable[[str], None]] = None):
+        """``on_file``（v2.5 autopilot）：稳定文件交给回调自定义处理，
+        本 handler 不再走内置 process_image——返回 ProcessResult 列表恒空。
+        与 ``on_process`` 互斥（on_file 优先）。"""
         self.options = options
         self.on_process = on_process
+        self.on_file = on_file
         self._pending = {}   # path → first seen time
         self._processed = set()  # paths already processed
         self._attempts = {}  # path → failed stability-check count
@@ -57,6 +62,14 @@ class _DebouncedHandler:
         if self._is_own_output(path):
             return
         self._pending[path] = time.time()
+
+    def on_modified(self, event):
+        """v2.5：就地改写（不重建）的文件同样进防抖通道。
+
+        已处理过的路径仍被 ``_processed`` 挡住——不会重复处理；
+        这里只兜住「建 watcher 前就存在、之后被编辑器原地改写」的文件。
+        """
+        self.on_created(event)
 
     def tick(self):
         """Check pending files; process those that have stabilized."""
@@ -99,6 +112,11 @@ class _DebouncedHandler:
                     del self._pending[path]
                     self._attempts.pop(path, None)
 
+        if self.on_file:
+            for path in to_process:
+                self.on_file(path)
+            return []
+
         results = []
         for path in to_process:
             try:
@@ -124,6 +142,7 @@ def start_watching(
     recursive: bool = False,
     on_process: Optional[Callable[[ProcessResult], None]] = None,
     stop_event: Optional[threading.Event] = None,
+    on_file: Optional[Callable[[str], None]] = None,
 ) -> None:
     """Watch a directory for new images and process them automatically.
 
@@ -136,6 +155,9 @@ def start_watching(
         recursive: Watch subdirectories too.
         on_process: Callback when a file is processed.
         stop_event: When set, the loop exits and the observer is stopped.
+        on_file: v2.5 autopilot hook — stable files go to this callback
+            instead of the built-in process_image (stdout stays quiet: the
+            caller owns reporting).
     """
     try:
         from watchdog.observers import Observer
@@ -144,22 +166,26 @@ def start_watching(
         print("❌ watchdog not installed. Run: pip3 install watchdog")
         return
 
-    handler = _DebouncedHandler(options, on_process)
+    handler = _DebouncedHandler(options, on_process, on_file=on_file)
 
     class Handler(FileSystemEventHandler):
         def on_created(self, event):
             handler.on_created(event)
 
+        def on_modified(self, event):
+            handler.on_modified(event)
+
     observer = Observer()
     observer.schedule(Handler(), watch_dir, recursive=recursive)
     observer.start()
 
-    print(f"👁  正在监视 Watching: {watch_dir}")
-    print(f"   设置: {options.output_format} q={options.quality}")
-    if options.remove_original:
-        print("   ⚠️  处理后删除原文件 Remove original is ON")
-    print("   按 Ctrl+C 停止 Press Ctrl+C to stop")
-    print()
+    if not on_file:
+        print(f"👁  正在监视 Watching: {watch_dir}")
+        print(f"   设置: {options.output_format} q={options.quality}")
+        if options.remove_original:
+            print("   ⚠️  处理后删除原文件 Remove original is ON")
+        print("   按 Ctrl+C 停止 Press Ctrl+C to stop")
+        print()
 
     processed_count = 0
 

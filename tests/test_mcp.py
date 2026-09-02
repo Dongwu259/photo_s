@@ -34,15 +34,16 @@ def _img(path, color=(120, 100, 80), size=(32, 32)):
 class TestTools:
     def test_registered_tools(self):
         names = {t.name for t in asyncio.run(create_server().list_tools())}
-        # core surface (v2.3: +suggest). Installed plugins may add more
-        # (auto-tone registers its 4 via the register_mcp_tools hook), so
-        # assert the core set is present, not exact equality.
+        # core surface (v2.3: +suggest; v2.5: +autopilot×3). Installed plugins
+        # may add more (auto-tone registers its 4 via the register_mcp_tools
+        # hook), so assert the core set is present, not exact equality.
         core = {"process", "info", "exif", "dedup", "cull", "select", "hdr", "blurfaces", "hash",
                 "plugin", "contact_sheet", "gallery",
                 "watermark", "preset", "bench",
                 "watch", "watch_status", "watch_stop", "analyze",
                 "suggest", "diff", "audit", "preview",
-                "batch_start", "batch_status", "batch_cancel"}
+                "batch_start", "batch_status", "batch_cancel",
+                "autopilot_start", "autopilot_status", "autopilot_stop"}
         assert core <= names
 
     def test_server_info_version(self):

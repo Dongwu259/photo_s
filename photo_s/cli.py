@@ -2085,6 +2085,74 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help___json'),
     )
 
+    autopilot_parser = subparsers.add_parser(
+        "autopilot", help=_t('cmd_autopilot'),
+    )
+    autopilot_parser.add_argument(
+        "dir", type=str, help=_t('help_autopilot_dir'),
+    )
+    autopilot_parser.add_argument(
+        "--out-dir", type=str, default=None, metavar="DIR",
+        help=_t('help_autopilot_out_dir'),
+    )
+    autopilot_parser.add_argument(
+        "--mode", type=str, default="suggest",
+        choices=["suggest", "auto_tone", "both"],
+        help=_t('help_autopilot_mode'),
+    )
+    autopilot_parser.add_argument(
+        "--auto-tone", type=float, default=1.0, metavar="0-1",
+        help=_t('help___auto_tone'),
+    )
+    autopilot_parser.add_argument(
+        "--scale", type=float, default=1.0, metavar="0-1",
+        help=_t('help___scale'),
+    )
+    autopilot_parser.add_argument(
+        "--write-xmp", action="store_true",
+        help=_t('help___write_xmp'),
+    )
+    autopilot_parser.add_argument(
+        "--aesthetic", type=float, default=None, metavar="1-10",
+        help=_t('help___aesthetic'),
+    )
+    autopilot_parser.add_argument(
+        "--over-max", type=float, default=argparse.SUPPRESS, metavar="PCT",
+        help=_t('help___over_max'),
+    )
+    autopilot_parser.add_argument(
+        "--under-max", type=float, default=argparse.SUPPRESS, metavar="PCT",
+        help=_t('help___under_max'),
+    )
+    autopilot_parser.add_argument(
+        "--blur-min", type=float, default=argparse.SUPPRESS, metavar="SCORE",
+        help=_t('help___blur_min'),
+    )
+    autopilot_parser.add_argument(
+        "-r", "--recursive", action="store_true",
+        help=_t('help___recursive'),
+    )
+    autopilot_parser.add_argument(
+        "--scan-existing", action="store_true",
+        help=_t('help_autopilot_scan_existing'),
+    )
+    autopilot_parser.add_argument(
+        "--log", type=str, default=None, metavar="JSONL",
+        help=_t('help_autopilot_log'),
+    )
+    autopilot_parser.add_argument(
+        "-q", "--quality", type=int, default=None, metavar="0-100",
+        help=_t('help___quality'),
+    )
+    autopilot_parser.add_argument(
+        "-f", "--format", type=_format_arg, default=None,
+        help=_t('help___format'),
+    )
+    autopilot_parser.add_argument(
+        "--resize", type=str, default=None, metavar="WxH",
+        help=_t('help___resize'),
+    )
+
     preview_parser = subparsers.add_parser(
         "preview", help=_t('cmd_preview'),
     )
@@ -3457,6 +3525,52 @@ def run_cli(args: List[str] = None) -> int:
                                          "results": rows}),
                               indent=2, ensure_ascii=False))
         return 0 if fail == 0 else 1
+
+    if parsed.command == "autopilot":
+        from .autopilot import AutopilotConfig, run_autopilot, validate_config
+        cfg = AutopilotConfig(
+            watch_dir=os.path.abspath(parsed.dir),
+            out_dir=os.path.abspath(parsed.out_dir)
+            if getattr(parsed, 'out_dir', None) else None,
+            mode=parsed.mode,
+            auto_tone_strength=parsed.auto_tone,
+            scale=parsed.scale,
+            thresholds={k: getattr(parsed, k) for k in
+                        ("over_max", "under_max", "blur_min")
+                        if hasattr(parsed, k)},
+            aesthetic=parsed.aesthetic,
+            write_xmp=getattr(parsed, 'write_xmp', False),
+            recursive=parsed.recursive,
+            scan_existing=getattr(parsed, 'scan_existing', False),
+            log_path=os.path.abspath(parsed.log) if parsed.log else None,
+            quality=parsed.quality,
+            output_format=getattr(parsed, 'format', None),
+            resize=parsed.resize,
+        )
+        try:
+            validate_config(cfg)
+        except RuntimeError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 2
+
+        def on_event(rec):
+            mark = "✅" if rec.get("routed") and "passed" in rec["routed"] \
+                else ("❌" if rec.get("error") else "👀")
+            name = os.path.basename(rec.get("input") or "?")
+            detail = rec.get("error") or rec.get("audit", {}).get("reason", "")
+            print(f"  {mark} {name}  {detail}")
+
+        print(_t("msg_autopilot_start", dir=cfg.watch_dir,
+                 mode=cfg.mode, out=cfg.out_root))
+        try:
+            run_autopilot(cfg, on_event=on_event)
+        except KeyboardInterrupt:
+            print(_t("msg_autopilot_stopped"))
+            return 0
+        except RuntimeError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 2
+        return 0
 
     if parsed.command == "preview":
         import json

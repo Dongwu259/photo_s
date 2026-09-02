@@ -597,6 +597,19 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
                 self._send_json(404, {"error": "task not found"})
                 return
             self._send_json(200, state)
+        elif self.path.startswith("/v1/autopilot/"):
+            # v2.5 无人值守闭环：与 MCP autopilot_* 同一注册表（函数级导入
+            # 避免 server <-> mcp_server 环）
+            from .mcp_server import autopilot_status_tool
+            aid = self.path[len("/v1/autopilot/"):].strip("/")
+            if not aid:
+                self._send_json(404, {"error": "autopilot id required"})
+                return
+            payload = autopilot_status_tool(aid)
+            if not payload.get("ok"):
+                self._send_json(404, payload)
+                return
+            self._send_json(200, payload)
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -844,6 +857,43 @@ class _PhotoSHandler(BaseHTTPRequestHandler):
                 return
             task["cancel"].set()
             self._send_json(200, {"task_id": task_id, "cancelled": True})
+        elif self.path == "/v1/autopilot":
+            # v2.5：启动无人值守管线（watch → suggest/auto-tone → audit →
+            # passed/review 分流）；202 + id，GET /v1/autopilot/{id} 轮询
+            from .mcp_server import autopilot_start_tool
+            if not isinstance(data.get("dir"), str) \
+                    or not data.get("dir"):
+                self._send_json(400, {"ok": False,
+                                      "error": "'dir' is required"})
+                return
+            def _num(key):
+                v = data.get(key)
+                return float(v) if v is not None else None
+            payload = autopilot_start_tool(
+                dir=data["dir"],
+                out_dir=data.get("out_dir"),
+                mode=str(data.get("mode", "suggest")),
+                auto_tone=_num("auto_tone"),
+                scale=float(data.get("scale", 1.0) or 1.0),
+                aesthetic=_num("aesthetic"),
+                overexposed_max=_num("overexposed_max"),
+                underexposed_max=_num("underexposed_max"),
+                blur_min=_num("blur_min"),
+                write_xmp=bool(data.get("write_xmp", False)),
+                recursive=bool(data.get("recursive", False)),
+                scan_existing=bool(data.get("scan_existing", False)),
+                quality=data.get("quality"),
+                output_format=data.get("output_format"),
+                resize=data.get("resize"),
+                timeout=_num("timeout"),
+            )
+            self._send_json(202 if payload.get("started") else 400, payload)
+        elif self.path.startswith("/v1/autopilot/") \
+                and self.path.endswith("/cancel"):
+            from .mcp_server import autopilot_stop_tool
+            aid = self.path[len("/v1/autopilot/"):-len("/cancel")]
+            payload = autopilot_stop_tool(aid)
+            self._send_json(200 if payload.get("ok") else 404, payload)
         elif self.path == "/plugins":
             # Remote plugin management: {"action": "install|uninstall|fetch",
             # "name": "scunet", "dry_run": bool?}
