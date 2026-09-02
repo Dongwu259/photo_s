@@ -27,7 +27,7 @@ JSON contract (`schema_version`, additive-only — upgrades never break a consum
 
 | Path | Entry point |
 |---|---|
-| **MCP server** — 26 core tools + plugin tools auto-registered (process / suggest / select / hdr / blurfaces / dedup / …) | `claude mcp add photo-s -- photo-s mcp` |
+| **MCP server** — 30 core tools + plugin tools auto-registered (process / suggest / autopilot / index / find / select / hdr / blurfaces / dedup / …) | `claude mcp add photo-s -- photo-s mcp` |
 | **Packaged SKILL.md** — skill-capable agents, zero extras | `cp -r skills/photo-s ~/.claude/skills/` |
 | **REST API** — async tasks + SSE progress | `photo-s serve --port 0 --token auto --ready-file x.json` |
 | **Python library** — no IPC overhead | `from photo_s.engine import batch_process` |
@@ -108,8 +108,11 @@ Full contract: [`docs/AGENT_API.md`](AGENT_API.md).
 | REST API | — | ✅ | HTTP server for agents (async tasks + SSE progress) |
 | Plugin system | — | ✅ | Third-party plugin support |
 | Official plugin manager | — | ✅ | list/install/info/fetch + pip install |
-| MCP server | — | ✅ | 26 core tools (+plugin tools auto-register) for MCP clients (Claude Desktop / Claude Code / any MCP client) |
+| MCP server | — | ✅ | 30 core tools (+plugin tools auto-register) for MCP clients (Claude Desktop / Claude Code / any MCP client) |
 | Batch benchmark | — | ✅ | Worker-scaling measurement |
+| XMP sidecar export | — | ✅ | `xmp-export` / `batch --write-xmp`: write PhotoS adjustments as LR-readable `.xmp` sidecars (crs field inverse mapping + radial/linear masks + rating/keywords) — open the original in Lightroom and continue editing (v2.5) |
+| Unattended pipeline | ✅ | ✅ | `autopilot`: watch a folder -> suggest/auto-tone -> audit gate -> route to passed/ or review/ with a JSONL trace; `--write-xmp` closes the data loop (human fixes in LR become residual training signal) (v2.5) |
+| Semantic search / auto-tag | — | ✅ | `index` builds an embedding index (SigLIP text+image with the plugin, built-in 84-dim histogram without); `find` by text or image; `--tags` auto-tags into EXIF/XMP keywords (v2.5) |
 
 > ¹ Denoise / auto-straighten / HDR / face blur need an optional dependency:
 > `pip install photo-s-tools[enhance]` (opencv-python-headless). When missing,

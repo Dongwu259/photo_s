@@ -110,6 +110,21 @@ lora_alpha: 128
 3. 对比：`photo-s diff before.jpg result.jpg`（PSNR/SSIM）+
    `photo-s audit result.jpg`（质量闸门 pass/fail）+ 教师打分（eval_prompt.md）
 
+## 5.0 XMP 写出数据闭环（v2.5 —— 残差学习信号）
+
+XMP 写出（`xmp-export` / `batch --write-xmp` / `autopilot --write-xmp`）把
+PhotoS/模型的调整写成 LR 可读 sidecar——LR 打开原图即见全部参数可续修。
+这开启一条**增量数据链**，不需要每次从零修图：
+
+1. 模型先出底稿：`autopilot ~/inbox --mode auto_tone --write-xmp`（或
+   `batch --auto-tone --write-xmp`）——sidecar 记录的是真实预测参数（一次
+   预测并入 options，引擎不二次推理）；
+2. 人工在 LR 里只做**修正**（改 20% 比从零修 100% 快得多——单位时间修图
+   量即数据量）；
+3. `lr-scan` 回采：LR 修正后的 XMP/catalog 即新标签，「模型输出 → 人工终稿」
+   的差值正是下一版模型要学的**残差**（在当前输出上继续学的信号，而不是
+   又一组从零开始的 before/after）。
+
 ## 5.1 局部调整头（v2.4 词汇表扩展）
 
 auto-tone 的输出词汇表从 9 个全局标量扩展到**局部调整**：`local:

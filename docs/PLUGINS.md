@@ -112,6 +112,9 @@ class ScunetPlugin(PhotoSPlugin):
 | 槽位 | 声明 | 方法 | 引擎行为 |
 |---|---|---|---|
 | 降噪 | `provides = ("denoise",)` | `denoise(img, strength, ctx)` | `--denoise N` 有 provider 时用它，否则回退内置 NLM |
+| 自动调色 | `provides = ("auto_tone",)` | `auto_tone_params(strength, ctx)`（v2.4 参数协议优先）/ `auto_tone(img, strength, ctx)`（像素协议） | `--auto-tone 0-1` 有 provider 时经真实管线应用 9 字段 + 局部调整；无 provider 显式报错并指向 `suggest` |
+| 美学验证 | `provides = ("verify",)` | `verify(image, ctx)` | `audit --aesthetic` 闸门分数来源；缺席时请求美学闸门显式报错 |
+| 嵌入 | `provides = ("embed",)` | `embed_images(paths) -> (N,D)`、`embed_texts(texts) -> (M,D)`（可缺省）+ `embed_name`/`embed_dim` 类属性 | `photo-s index/find/autopilot` 的语义搜索特征（v2.5）。无 provider 回落内置 84 维直方图（仅图像）；文本查询无文本编码器时给安装指引不静默降级 |
 
 **关键规则**
 - `provides` 非空的插件是 **provider**：**被排除在通用 `on_pre_process`/`on_post_process` 之外**，
@@ -174,7 +177,11 @@ photo-s mcp                                    # 自动注册 auto_tone / aesthe
                                                # batch_auto_tone /
                                                # auto_tone_with_style /
                                                # analyze_visual_style 7 个 MCP 工具
+                                               # （v2.5 另提供 embed 槽位：核心
+                                               # index/find 的 SigLIP 嵌入，塔零新增下载）
 photo-s serve                                  # 自动挂载 /v1/auto_tone* REST 路由
+photo-s index ~/photos -r                      # v2.5 embed 槽位：SigLIP 语义索引
+photo-s find "sunset beach"                    # 文本搜图（建议英文查询）
 export PHOTOS_AUTO_TONE_TOWER_SOURCE=modelscope   # 国内：塔权重走 ModelScope 镜像
 ```
 

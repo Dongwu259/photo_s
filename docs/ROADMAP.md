@@ -24,6 +24,7 @@
 | v2.3.0 | Agent 自动化闭环收口 | **已发布 2026-08-28**：`photo-s suggest` 规则型参数推荐（analyze→保守参数+理由，`--scale` 调幅，CLI/MCP/REST 三面，零模型）；**auto-tone 插件三线接线修复**（engine `auto_tone` 槽位 + MCP/REST 启动注册钩子，装后 MCP 25→30 工具）+ 修复 v1.7.1 潜伏的 `_job_worker` 锁重入死锁（batch_status 永久挂死）；batch 任务内建 audit（`audit:true` 附 pass_rate）；cull `--score` 加权评分 + `--burst` 连拍留最佳。SKILL.md/全仓文档同步；1277 测试绿 |
 | v2.2.0 | GUI 编辑效率 | **已发布 2026-08-27**：LR 式**复制/粘贴设置**（`_DEV_FIELDS` 42 字段快照，Develop 按钮 + Export 队列「粘贴到勾选」+「已调」徽标；per-photo 覆盖层 `_photo_adjust` 经 `_per_file_overlay` 与蒙版合并注入批处理）；**逐照片撤销/重做**（上限 50、首次编辑记基线、沉降入栈、切照片 flush/加载、Cmd+Z 在 Develop 优先逐照片历史）；**导出配方**（22 输出字段规范值快照，gui_state 持久化，套用/存/删）。agent 面零改动；新增 `test_gui_v22.py` 15 测，全量 1256 绿 |
 | v2.4.0 | 所见即所得 + AI 调色 GUI + 全自动闭环批① | **已发布 2026-09-02**：三处所见统一（⌘P/review 灯箱/蒙版画布走 per-photo 有效 options）；Library VirtualGrid 虚拟列表（5k 首绘 20.9ms、翻页 0.3ms）；键盘评级 1-5/P/? 表；before/after 可拖分割线；设置搜索/预设悬停预览/首跑引导；**AI 调色 GUI**（auto-tone 插件 9 参数写入逐照片覆盖层）。闭环批①：**局部调整词汇表**（`local: [{region, params}]`，引擎真实管线全 9 字段应用——修复旧接线只落 3/9 字段的缺口）+ **美学 verifier**（SigLIP 头 + Qwen 终审组合，`audit --aesthetic` 四面接线，训练工具 `train_verifier.py`，lr-scan 导出星级）+ **ModelScope 国内下载链**（塔/tokenizer/插件权重三源，`PHOTOS_AUTO_TONE_TOWER_SOURCE` / `WEIGHT_SOURCE`）；修复 v2.1 风格化底座错配发布级 bug（误用 v7 CLIP 底座，tokenizer 可达机器必崩 64↔77）。1384 测试绿 |
+| v2.5.0 | 数据闭环 + LR 双向互通 + 语义搜索 | **已发布 2026-09-02**：蒙版画布升格进 Develop、审查灯箱并入 Library（v2.4 推迟的结构归位）；**XMP 写出**（`xmp-export`/`batch --write-xmp`：crs 字段逐项逆映射 + radial/linear 蒙版 + 评分/关键词 → LR 可续修；读侧补齐 XMP 曲线/蒙版解析既有缺口）；**autopilot 无人值守管线**（监视 → suggest/auto-tone → audit → passed/review 分流 + JSONL 轨迹，CLI/MCP×3/REST；watcher on_modified + on_file 钩子）；**语义搜索**（`index`/`find`：embed 槽位——插件 SigLIP 塔（文本+图像，零新增下载）或内置 84 维直方图；`--tags` 自动打标写 EXIF/XMP；MCP 30 核心工具）。平台打包 B 取消（无签名证书/开发者会员，OS 拒跑 unsigned——pip 为前期唯一入口，移远期）。1463 测试绿 + 真实 SigLIP e2e |
 | auto-tone-v2.1.0 | 插件：风格化 + 场景自适应（训练侧 v2.1 同步） | **已发布 2026-08-28**：`auto_tone_with_style`（SigLIP 视觉分析 16 风格 top-K + Qwen3-VL 自然语言→9 字段偏置解析，Qwen 缺席回退 8 手工预设）与 `analyze_visual_style` MCP 工具（插件 4→6，装后 MCP 26→32）；Python API `auto_tone_with_scene`（552 张 LR 目录统计的 7 场景数据驱动偏置，包内 scene_biases.json）；SigLIP 主模型 `auto_tone_siglip_h192_d03.pt`（PSNR 32.21，+2.93 dB vs v7_clean，独立 release tag auto-tone-v2.1.0）；predictor 修复 LayerNorm→GELU→Dropout 重建（v7/siglip 双 checkpoint 验证，修复推理双 GELU bug）+ SigLIP sig_dim 推断；batch_auto_tone 加 style_desc；重存权重兼容 weights_only=True。1286 测试绿 + 真实权重 e2e |
 
 ## 规划中
@@ -176,39 +177,40 @@
 
 测试：`test_vocab_verifier.py` 25 + `test_vocab_plugin.py` 35；全量回归见提交。
 
-### v2.5.0 — 结构归位 + 平台收尾（实施中 2026-09-02）
+### v2.5.0 — 数据闭环 + LR 双向互通 + 语义搜索（已发布 2026-09-02；速览见「已发布」表）
 
-**A. 结构归位（v2.4 推迟的两项，2026-09-02 落地）**：
+**A. 结构归位（v2.4 推迟的两项）**：✅（蒙版画布进 Develop、审查灯箱并入
+Library；顺带修复 v1.8 字符串型局部调整序列化 float() 必崩）
 
-- [x] 蒙版画布升格进 Develop：共享构建器 + 模块内宿主（主行 pack 切换），
-      「编辑蒙版」按钮同入口；退出即写 `_photo_masks`（所见即所得）；
-      键路由（←/→/⌘Z/Esc + 输入焦点守卫）；顺带修复 v1.8 潜伏 bug
-      （字符串型局部调整序列化 float() 必崩）
-- [x] 审查灯箱并入 Library：网格 ↔ 灯箱 pack 切换（工具栏不动），
-      ⌘E/「审查」入口不变；0-5/←/→/⌘Z/Esc 键路由；行内星标退出刷新；
-      `_focus_in_text_widget` 提取共享键守卫
+**B. 平台打包（GUI_UPGRADE_PLAN §6 原案）**：**取消**（2026-09-02 用户决策）——
+无代码签名证书与开发者会员（Apple Developer / Windows EV 证书），macOS
+Gatekeeper 与 Windows SmartScreen 会拒跑 unsigned 应用，"能下载"不等于"能
+运行"；前期以 pip 为唯一安装入口，打包移至远期（待签名条件具备）。
 
-**B. 平台打包（GUI_UPGRADE_PLAN §6 原案，未做）**：
+**C. XMP 写出（远期提级，LR 双向互通收口）**：✅ lrxmp 写侧
+（`options_to_xmp`/`write_xmp_sidecar`）+ 读侧 shim（XMP 曲线/蒙版此前从不
+解析——只有 catalog blob 能读）+ `autotone.resolve_auto_tone_options`（一次
+预测并入 options，XMP 记录真实参数）+ CLI `xmp-export`/`batch --write-xmp`。
 
-- [ ] macOS：PyInstaller windowed `.app` + dmg（codesign ad-hoc、Tk 8.6 pin）；
-      `tk::mac::ShowPreferences/About` 菜单集成
-- [ ] Windows：无控制台 `photo-s-gui.exe`（console=False，主 exe 不变）
-- [ ] Linux：AppImage（可 allowed-to-fail）+ `.desktop` 随 sdist
-- [ ] CI bundle 三平台矩阵 + GUI 冒烟三平台各一次
+**D. autopilot 无人值守管线**：✅ `photo_s/autopilot.py`（suggest/auto_tone →
+process → audit → passed/review 分流 + JSONL）+ watcher `on_modified`/`on_file`
++ CLI/MCP autopilot×3/REST /v1/autopilot。
+
+**E. 语义搜索**：✅ `photo_s/search.py`（embed 槽位：插件 SigLIP 或内置
+hist84；npz 增量索引；严格抽取器身份）+ 插件 `core/embed.py`（塔复用零新增
+下载）+ CLI index/find + MCP×2/REST×2 + `--tags` 自动打标（EXIF + 可选
+XMP dc:subject）。
 
 ### 远期（数据/生态，未排期）
 
-- **XMP 写出**（LR 双向互通收口）：lrxmp 已能 LR→PhotoS；写 `.xmp` sidecar 让 LR
-  直接打开 PhotoS 调整续修——「agent 用的 Lightroom」定位的最后一块
-- **CLIP 语义搜索/自动打标**：`photo-s index` + `find "日落 海边"`（lr-similar
-  84 维特征已留升级口，换 CLIP embedding 即得；控制权重 ≤50MB 蒸馏模型）
-- **美学 verifier**（v1.9 阶段 3 首步）：CLIP/小 VLM + 回归头 → audit 的 reward 闸门
-  （复用 auto-tone 的权重发行/推理基建）
+- **平台打包**（v2.5.0 B 原案，待签名条件）：macOS `.app`/dmg + Windows GUI
+  exe + Linux AppImage + CI 三平台矩阵——需代码签名证书/开发者会员，否则
+  Gatekeeper/SmartScreen 拒跑；在此之前 pip 为唯一入口
 - **AI 超分**（Real-ESRGAN 小模型）：复用 modelstore + SCUNet 分块推理基建，
   交付导向 2x；先评估权重体积与速度
-- **watch 联动**：监视目录 → suggest/auto-tone 动态调参 → audit 自动验收的
-  无人值守管线（P0 落地后自然长出）
 - **分发渠道**：Homebrew tap / scoop / winget / Docker 镜像（REST/MCP server 容器化）
+- ~~XMP 写出~~ / ~~watch 联动~~ / ~~CLIP 语义搜索~~ / ~~美学 verifier~~：
+  已随 v2.4.0（verifier）/ v2.5.0（其余三项）落地
 
 ### v1.8.0（AI 识别蒙版 + 笔刷 -- 主题：智能局部调整，方向已定）
 

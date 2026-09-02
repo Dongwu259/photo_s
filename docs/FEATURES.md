@@ -29,6 +29,10 @@
 | `audit` | **出片质量闸门**（v1.7.1）：过曝/欠曝/模糊/亮度/对比/色温逐项 pass/fail + 原因——agent 终止条件 |
 | `suggest` | **规则型参数推荐**（v2.3）：analyze 统计 → 保守 ProcessOptions 建议（ev/WB/对比/vibrance/高光恢复/levels），每条附理由与依据指标；`--scale 0-1` 调幅；零模型零依赖——闭环 `analyze → suggest → process → audit` 的"算"这一环 |
 | `preview` | **视觉快照**（v1.7.1）：缩放 JPEG base64 + 直方图 PNG——多模态 agent 的像素输入 |
+| `xmp-export` | **XMP 写出**（v2.5，LR 双向互通收口）：PhotoS 调整 → LR 可读 `.xmp` sidecar（crs 字段逐项逆映射 + radial/linear 蒙版 → MaskGroupBasedCorrections + xmp:Rating/dc:subject/dc:title）；`--preset/--options JSON/--auto-tone` 取参数（auto-tone 导出真实预测值）；`batch --write-xmp` 批量版 |
+| `autopilot` | **无人值守管线**（v2.5）：监视目录 → 新图稳定后 suggest/auto-tone → process → audit 闸门 → `passed/`/`review/` 分流 + JSONL 轨迹（含有效参数全集）；`--write-xmp` 闭环（LR 修正回采即残差训练信号）；MCP `autopilot_start/status/stop`、REST `/v1/autopilot` |
+| `index` | **语义索引**（v2.5）：embed 槽位——插件 SigLIP 塔（文本+图像，零新增下载）或内置 84 维直方图（零依赖仅图像）；npz 增量（mtime+size 复用）；`--tags` 自动打标（阈值 topN → EXIF keywords，多词下划线连接；`--write-xmp` 同时写 dc:subject 保真） |
+| `find` | **语义搜索**（v2.5）：文本查询（建议英文——SigLIP 语料英文为主）或 `--image` 以图搜图，余弦排序；查询严格用建索引的抽取器（不匹配报错要求重建） |
 | `check` | 图片完整性检查 |
 | `hash` | 校验和清单生成/校验（SHA-256 manifest） |
 | `contact-sheet` | 联系表（网格拼图） |
@@ -107,9 +111,9 @@
 - 无 token 时 CSRF Origin 防护（拒绝跨域浏览器请求）
 - **`POST /process/stream`**：text/event-stream 实时进度（每文件一条 `data:` 帧 + 结束 `done` 帧），agent 免轮询
 
-## 5. MCP server（26 核心工具 + 插件自动注册）
+## 5. MCP server（30 核心工具 + 插件自动注册）
 
-`process` `info` `exif` `dedup` `cull` `select` `hdr` `blurfaces` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` `bench` `watch` `watch_status` `watch_stop` `analyze` `batch_start` `batch_status` `batch_cancel` `diff` `audit` `preview` — dedup 默认 dry_run 安全；`select` 双阈值分拣、`hdr` 曝光融合、`blurfaces` 人脸模糊均需对应 extra；模块级零 mcp import
+`process` `info` `exif` `dedup` `cull` `select` `hdr` `blurfaces` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` `bench` `watch` `watch_status` `watch_stop` `analyze` `batch_start` `batch_status` `batch_cancel` `diff` `audit` `preview` `suggest` `autopilot_start` `autopilot_status` `autopilot_stop` `index` `find` — dedup 默认 dry_run 安全；`select` 双阈值分拣、`hdr` 曝光融合、`blurfaces` 人脸模糊均需对应 extra；模块级零 mcp import
 
 ## 6. 插件系统
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "photo-s-plugin-auto-tone"
-version = "2.2.0"
+version = "2.3.0"
 description = "PhotoS official AI auto-tone plugin (CLIP/SigLIP+MLP → 9-field Lightroom params, optional RAG / Qwen3-VL advisor / style & scene biases)"
 readme = "README.md"
 requires-python = ">=3.9"

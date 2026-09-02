@@ -98,6 +98,8 @@ key ∈ exposure/brightness/contrast/saturation/vibrance/clarity/texture/sharpen
 | `lr-train --data lr_records.jsonl [--images DIR] --out m.npz` | 训练进度（stderr）+ 模型文件 | 岭回归 9 项全局参数，纯 numpy；sanitize 包缺 --images 时报"缺图跳过"诊断 |
 | `lr-predict IMG [--model m.npz] --json` | `{"path", "options": {ev, contrast, saturation, vibrance, wb_temp, wb_tint, clarity, texture, dehaze}}` | **输出键与 ProcessOptions 字段一致（exposure→ev），REST/MCP/CLI 零映射可直接套用**；自动识别岭回归 / CLIP+MLP npz（后者需 torch + open-clip-torch，缺失报清晰 LrError） |
 | `lr-recipes` / `lr-similar` / `lr-eval` | 配方聚类 / 相似编辑检索 / 教师评测集 | v1.7.1，见 `photo-s <cmd> --help` |
+| `xmp-export PATHS [--preset\|--options JSON\|--auto-tone] [--rating] [--keywords] [--title]` | `{"count", "failed", "results": [{path, sidecar, warnings[]}]}` | **v2.5 LR 双向互通写出侧**：把 PhotoS 调整写成 LR 可读 `.xmp` sidecar（crs 字段逐项逆映射 + radial/linear 蒙版 + xmp:Rating/dc:subject）。LR 打开原图即见全部调整可续修；`--auto-tone` 时导出的是真实预测参数 |
+| `batch --write-xmp` | BatchResult 附 `xmp_sidecars[]` | v2.5：批处理每张输入在原图旁写 sidecar；与 `--auto-tone` 组合时逐图先预测并入 options（引擎不二次推理），sidecar 记录的就是实际渲染参数 |
 
 `--denoise N` 与 `--auto-straighten` 需要
 `pip install photo-s-tools[enhance]`（opencv-python-headless），未装时该文件报错
@@ -192,6 +194,9 @@ GET  /health  带 Bearer → {"status": "ok", "version": "..."}
 | `POST /process` (async) | 同上 + `"async": true` | `202 {"task_id", "poll", "total"}` |
 | `POST /process` (async+audit) | 同上 + `"audit": true` | 任务完成后 result 附每文件 `audit {passed, reason}` + `audit_summary {pass_rate}`（v2.3，stop 条件内建） |
 | `POST /v1/suggest` | `{"paths", "recursive"?, "scale"? (默认 1.0)}` | `{"ok", "count", "neutral", "results": [{path, suggested{}, reasons[], neutral}]}` 规则型参数推荐（v2.3，零模型） |
+| `POST /v1/autopilot` | `{"dir", "mode"? (suggest\|auto_tone\|both), "auto_tone"?, "scale"?, "aesthetic"?, audit 阈值?, "write_xmp"?, "scan_existing"?, "timeout"?}` | `202 {"started", "id", "out_dir", "log"}` 无人值守管线（v2.5，与 MCP autopilot_* 同一实现）；`GET /v1/autopilot/<id>` 轮询、`POST /v1/autopilot/<id>/cancel` 停止 |
+| `POST /v1/index` | `{"paths"[], "recursive"?, "rebuild"?, "tags"?[], "min_score"?, "max_tags"?, "write_xmp"?}` | `{"ok", "index", "extractor", "dim", "total", "indexed", "kept", "removed", "tags"?}` 语义索引 + 可选自动打标（v2.5） |
+| `POST /v1/find` | `{"query"? , "image"?, "index"?, "k"?, "min_score"?}` | `{"ok", "hits": [{path, score}]}` 语义搜索：文本（建议英文）或以图搜图（v2.5） |
 | `POST /process` (dry-run) | 同上 + `"dry_run": true` | `{"dry_run", "count", "paths", "options"}`，不处理 |
 | `GET /tasks` | — | 运行/已完成任务摘要 |
 | `GET /tasks/<id>` | — | `{"status", "current", "total", "current_path", "result"?}` |
@@ -352,6 +357,11 @@ shell 调 CLI `--json`，无需 py3.10+ / `[mcp]` extra）。
 | `batch_status` | `job_id` | `{"ok", "phase" (starting/processing/done), "done", "total", "current", "fail_count", "results"?}` 轮询 |
 | `batch_cancel` | `job_id` | `{"ok", "cancelled"}` 取消（在跑的文件跑完，未开始的跳过） |
 | `suggest` | `paths[]`, `recursive`, `scale` (默认 1.0) | `{"ok", "count", "neutral", "results": [{path, suggested{}, reasons[], neutral}]}` 规则型参数推荐（v2.3，零模型零依赖；见 §7.1） |
+| `autopilot_start` | `dir` (必填), `mode` (默认 suggest), `auto_tone`?, `scale`?, `aesthetic`?, `overexposed_max`?/`underexposed_max`?/`blur_min`?, `write_xmp`, `recursive`, `scan_existing`, `quality`/`output_format`/`resize`?, `timeout`? | `{"started", "id", "dir", "out_dir", "mode", "log", "timeout"}` 无人值守管线（v2.5，见 §7.4）。**需 `photo-s-tools[watch]`**；mode=auto_tone/both 需 auto-tone 插件，aesthetic 需 verifier——缺席启动即报错 |
+| `autopilot_status` | `id` | `{"ok", "running", "processed_count", "passed", "review", "errors", "results": [{input, output, params, audit{passed,reason}, routed, error?}], "error"}` |
+| `autopilot_stop` | `id` | `{"ok", "stopped", "processed_count", "passed", "review"}`（幂等） |
+| `index` | `paths[]`, `recursive`, `index`?, `rebuild`, `tags`[]?, `min_score` (默认 0.2), `max_tags` (默认 5), `write_xmp` | `{"ok", "index", "extractor", "dim", "total", "indexed", "kept", "removed", "tags"?}` 语义索引（v2.5，见 §7.5）；embed 插件在场 = SigLIP（文本+图像），否则内置 84 维直方图（仅图像） |
+| `find` | `query`?（文本，建议英文）, `image`?（以图搜图）, `index`?, `k` (默认 10), `min_score`? | `{"ok", "hits": [{path, score}]}` 余弦排序 |
 
 > `watch` 会话与 MCP 会话同生命周期（daemon 线程随进程退出消亡）；`_WATCHES`
 > 上限 20，死线程自动清理。
@@ -437,3 +447,38 @@ per-photo 蒙版（蒙版编辑器可改可删）。训练侧见 `docs/TRAINING.
 （语法见 §2.6），REST `/process` 的 `options` 直接透传，MCP `process` 工具同名参数。
 未来训练专有调色模型时，这套字符串 schema 即模型输出空间（约束解码友好：有限
 token、无自由文本），`analyze` 统计即监督信号来源。
+
+### 7.4 autopilot 无人值守管线（v2.5）
+
+把 §7 的闭环（参数 → 处理 → 闸门）变成**常驻服务**：监视目录，新图稳定后自动
+`suggest / auto-tone → process → audit`，按闸门结果路由到
+`<out>/passed/`（过闸）或 `<out>/review/`（待人审），每图一行 JSONL 轨迹
+（`autopilot.jsonl`，含有效参数全集——训练可复放）。
+
+```bash
+photo-s autopilot ~/inbox --mode both --write-xmp      # CLI 常驻（Ctrl+C 停）
+# MCP：autopilot_start(dir=...) → autopilot_status(id) 轮询 → autopilot_stop(id)
+# REST：POST /v1/autopilot → GET /v1/autopilot/<id> → POST .../cancel
+```
+
+- `mode=suggest`：零模型规则层（§7.1），什么都不装即可用；
+- `mode=auto_tone` / `both`：AI 风格层（先修偏再上风格，§7.1 叠加语义），
+  缺插件**启动即报错**（fail-loud，与引擎槽位同一约定）；
+- `--aesthetic N`：技术闸门之上追加美学分下限（§7.3），缺 verifier 同样启动即报错；
+- `--write-xmp`：每图在原图旁写 LR sidecar——auto-tone 的真实预测参数进 XMP，
+  人工在 LR 里修正后 `lr-scan` 回采，即是下一版模型的**残差训练信号**（数据闭环：
+  模型出底稿 → 人修终稿 → 差值即标签）。
+
+### 7.5 语义搜索与自动打标（v2.5）
+
+`photo-s index DIR` 建嵌入索引 → `photo-s find "sunset beach"`（文本）或
+`--image ref.jpg`（以图搜图）余弦排序；`index --tags "sunset,portrait,..."`
+自动打标（阈值内 top-N 写 EXIF keywords，`--write-xmp` 同时写 dc:subject——
+LR 关键词面板可见）。MCP `index`/`find`、REST `/v1/index`、`/v1/find` 同构。
+
+抽取器在 `embed` provider 槽位后：装了 auto-tone 插件 = SigLIP
+（`siglip:ViT-L-16-SigLIP-384`，塔与风格化/verifier 共用、零新增下载，
+**文本查询建议英文**——SigLIP 语料以英文为主，中文排序不保证）；未装 =
+内置 `hist84` 84 维直方图（零依赖，仅以图搜图；文本查询返回明确安装指引，
+不静默降级）。索引记录抽取器身份：换抽取器后查询会报错要求 `--rebuild`，
+绝不混用两种嵌入空间。索引增量：mtime+size 未变的行复用（塔只对新图推理）。

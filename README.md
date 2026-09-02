@@ -24,7 +24,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 
 | 通道 | 接入方式 |
 |---|---|
-| **MCP server** — 26 核心工具 + 插件自动注册（process / suggest / select / hdr / blurfaces / dedup …） | `claude mcp add photo-s -- photo-s mcp` |
+| **MCP server** — 30 核心工具 + 插件自动注册（process / suggest / autopilot / index / find / select / hdr / blurfaces / dedup …） | `claude mcp add photo-s -- photo-s mcp` |
 | **现成 SKILL.md** — 支持 skill 的 agent 即取即用，零额外依赖 | `cp -r skills/photo-s ~/.claude/skills/` |
 | **REST API** — 异步任务 + SSE 进度 | `photo-s serve --port 0 --token auto --ready-file x.json` |
 | **Python 库直调** — 无 IPC 开销 | `from photo_s.engine import batch_process` |
@@ -103,12 +103,15 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | REST API | — | ✅ | 供 agent 使用的 HTTP 服务（异步任务 + SSE 进度） |
 | 插件系统 | — | ✅ | 第三方插件支持 |
 | 官方插件管理 | — | ✅ | list/install/info/fetch + pip 安装 |
-| MCP server | — | ✅ | 向 MCP 客户端（Claude Desktop / Claude Code / 任意客户端）暴露 26 个核心工具（插件自动追加） |
+| MCP server | — | ✅ | 向 MCP 客户端（Claude Desktop / Claude Code / 任意客户端）暴露 30 个核心工具（插件自动追加） |
 | 批量基准 | — | ✅ | 并发扩展实测 |
 | AI 识别蒙版 | ✅ | ✅¹ | 主体/人物/物体（80 类）一键生成蒙版，U2Netp/HumanSeg/YOLOv8n-seg（v1.8，onnx 权重自动下载校验） |
 | 笔刷 + 组合蒙版 | ✅ | ✅ | 笔刷涂抹蒙版；A&B / A-B 组合引用已命名蒙版（v1.8） |
 | AI 自动调色 | ✅ | ✅ | auto-tone 官方插件：CLIP+MLP 预测 9 项全局参数 + RAG 检索历史修图（权重 CC-BY-NC 4.0，非商用）；v2.3 引擎槽位接线（`--auto-tone`），装后 MCP/REST 工具自动注册；v2.4 Develop「AI 调色」按钮——参数写入逐照片覆盖层，可微调/可撤销；v2.4 局部调整词汇表（模型预测 subject/person/object 蒙版内调整，经蒙版管线应用） + 美学 verifier（`audit --aesthetic`，SigLIP 头/Qwen 终审）|
 | LR 数据桥 | — | ✅ | `lr-scan` 扫描 Lightroom 目录/XMP → 训练数据；`lr-train`/`lr-predict` 岭回归基调模型；`lr-merge` 合并多机数据包（v1.9） |
+| XMP 写出（LR 双向互通） | — | ✅ | `xmp-export` / `batch --write-xmp`：PhotoS 调整写成 LR 可读 `.xmp` sidecar（crs 字段逐项逆映射 + radial/linear 蒙版 + 评分/关键词），LR 打开原图即续修（v2.5）——「agent 用的 Lightroom」写出侧收口 |
+| 无人值守管线 | ✅ | ✅ | `autopilot`：监视目录 → suggest/auto-tone → audit 闸门 → passed/review 分流 + JSONL 轨迹；`--write-xmp` 让人工在 LR 里修正，回采即残差训练信号（v2.5） |
+| 语义搜索 / 自动打标 | — | ✅ | `index` 建嵌入索引（SigLIP 文本+图像 / 内置 84 维直方图），`find` 中英文文本或以图搜图；`--tags` 自动打标写 EXIF/XMP 关键词（v2.5） |
 | 出片审计 | — | ✅ | `audit` 质量闸门（pass/fail + 原因，agent 终止条件）；`--aesthetic 1-10` 模型美学闸门（v2.4，auto-tone 插件：SigLIP 头/Qwen 终审）；`diff` 前后对比；`preview` base64 快照（v1.9） |
 | GPS 地理标记 | — | ✅ | GPX 轨迹插值写 GPS EXIF（时区偏移自动换算，跨日期变更线正确插值） |
 | SCUNet 强降噪 | — | ✅ | 官方插件（ONNX）：强度感知混合 + 分块推理，大图不 OOM |
