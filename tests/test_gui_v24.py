@@ -20,6 +20,10 @@ import pytest
 def _isolate_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    # 本文件断言基于中文文案（AI 调色状态、设置搜索标签、快捷键表）——
+    # 英文 locale 的 runner（如 Windows CI）系统语言解析会得到英文标签。
+    # 显式钉 zh，任何 runner 上确定。
+    monkeypatch.setenv("PHOTO_S_LANG", "zh")
 
 
 def _make_app():
