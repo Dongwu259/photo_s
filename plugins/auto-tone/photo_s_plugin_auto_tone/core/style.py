@@ -155,12 +155,12 @@ class StyleAutoTone:
 
     def _prepare_text_features(self):
         """预编码风格描述（用于视觉风格分析）"""
-        import torch
-
         if self.tokenizer is None:
             self.text_feats = None
             self.all_descs = []
             return
+
+        import torch
 
         self.all_descs = []  # [(style_key, text)]
         for style_key, descs in STYLE_VISUAL_DESCS.items():

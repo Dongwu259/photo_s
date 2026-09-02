@@ -102,27 +102,36 @@ _TOWER_CANDIDATE_FILES = ("open_clip_model.safetensors",
                           "open_clip_pytorch_model.bin")
 
 
+# open_clip 不可用时的已知 (model_name, tag) → repo 兜底——解析/预下载
+# 不应要求推理依赖齐全（plugin fetch 场景、CI 测试环境）
+_TOWER_TAG_FALLBACK = {
+    ("ViT-L-16-SigLIP-384", "webli"): "timm/ViT-L-16-SigLIP-384",
+    ("ViT-L-14", "openai"): "timm/vit_large_patch14_clip_224.openai",
+}
+
+
 def _tower_repo(model_name: str, pretrained) -> Optional[str]:
     """(model_name, pretrained tag) → open_clip 配置里的 HF repo id。
 
-    无 hf_hub（直链 URL 型 pretrained）或 open_clip 不可导入时返回 None，
-    调用方原样透传给 open_clip 维持旧行为。
+    无 hf_hub（直链 URL 型 pretrained）返回 None，调用方原样透传给
+    open_clip 维持旧行为。open_clip 不可导入时退回内置兜底表（已知
+    两塔），仍未知才透传。
     """
     try:
         from open_clip.pretrained import get_pretrained_cfg
     except ImportError:
-        return None
+        return _TOWER_TAG_FALLBACK.get((model_name, pretrained))
     try:
         cfg = get_pretrained_cfg(model_name, pretrained)
     except Exception:
-        return None
+        return _TOWER_TAG_FALLBACK.get((model_name, pretrained))
     repo = None
     if isinstance(cfg, dict):
         repo = (cfg.get("hf_hub") or "").rstrip("/") or None
     elif isinstance(cfg, (tuple, list)) and cfg and cfg[0]:
         loc = str(cfg[0])
         repo = None if loc.startswith(("http://", "https://")) else loc
-    return repo
+    return repo or _TOWER_TAG_FALLBACK.get((model_name, pretrained))
 
 
 def _hf_cache_hit(repo: str) -> Optional[str]:
@@ -381,8 +390,15 @@ def _link_or_copy(src: str, dst: str) -> None:
 
 
 def pick_device() -> str:
-    """cuda → mps → cpu 自动选择（保持多平台可用）。"""
-    import torch
+    """cuda → mps → cpu 自动选择（保持多平台可用）。
+
+    torch 未安装时返回 "cpu" 而非抛错——设备选择不应早于"真正要跑
+    推理"失败（如权重预取、verifier 可用性探测等路径）。
+    """
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
 
     if torch.cuda.is_available():
         return "cuda"
