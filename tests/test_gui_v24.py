@@ -695,23 +695,26 @@ class TestV25StructuralPromotion:
             assert p not in (app._photo_masks or {})
 
     def test_mask_mode_key_routing(self, app_with_photos):
-        """←/→/⌘Z 在蒙版模式路由给编辑器，退出后恢复。"""
+        """←/→/⌘Z 在蒙版模式路由给编辑器，退出后恢复。直接调用路由
+        处理器——event_generate 在 Windows 真实 Tk 上需要窗口焦点
+        （分发路径由既有的 root.event_generate 测试覆盖）。"""
+
+        class _Evt:
+            def __init__(self, keysym):
+                self.keysym = keysym
+
         root, app, paths = app_with_photos
         app._dev_enter_mask_mode()
         root.update()
         pages = []
-        real = app._dev_mask_ctl["page_prev"]
-
-        def spy():
-            pages.append(1)
-        app._dev_mask_ctl["page_prev"] = spy
-        root.event_generate("<Left>")
+        app._dev_mask_ctl["page_prev"] = lambda: pages.append(1)
+        app._dev_mask_key_page(_Evt("Left"))
         root.update()
         assert pages, "Left must reach the mask editor in mask mode"
         app._dev_exit_mask_mode()
         root.update()
         pages.clear()
-        root.event_generate("<Left>")
+        app._dev_mask_key_page(_Evt("Left"))
         root.update()
         assert not pages, "Left must not route after exiting mask mode"
 
@@ -740,7 +743,7 @@ class TestV25StructuralPromotion:
         app._show_review()
         root.update()
         assert app._lib_lightbox_active
-        root.event_generate("<Escape>")
+        app._on_global_escape()   # root Escape 绑定的处理器（跨平台确定）
         root.update()
         assert not app._lib_lightbox_active
 
@@ -754,7 +757,7 @@ class TestV25StructuralPromotion:
         monkeypatch.setitem(ctl, "set_rating",
                             lambda n: rated.append(n))
         app._lib_lightbox_ctl = ctl
-        root.event_generate("4")
+        app._lib_key_rate(4)      # root 数字键绑定的处理器（跨平台确定）
         root.update()
         assert rated == [4]
         app._exit_library_lightbox()
