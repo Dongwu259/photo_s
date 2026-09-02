@@ -23,6 +23,7 @@
 | v2.1.1 | patch：慢网络下载加固 + CI 转正 | modelstore 断点续传（HTTP Range 收养死进程 `.part`，完整未改名 part 离线采纳）+ 3 次重试 + 读超时 30→60s + 成功后清扫全部 `.part` 残片（v2.1.0 真图冒烟实证的慢网络首用失败）；CI Linux xvfb GUI job 去掉 `continue-on-error` 转正 + actions checkout@v5/setup-python@v6（Node 20 弃用警告） |
 | v2.3.0 | Agent 自动化闭环收口 | **已发布 2026-08-28**：`photo-s suggest` 规则型参数推荐（analyze→保守参数+理由，`--scale` 调幅，CLI/MCP/REST 三面，零模型）；**auto-tone 插件三线接线修复**（engine `auto_tone` 槽位 + MCP/REST 启动注册钩子，装后 MCP 25→30 工具）+ 修复 v1.7.1 潜伏的 `_job_worker` 锁重入死锁（batch_status 永久挂死）；batch 任务内建 audit（`audit:true` 附 pass_rate）；cull `--score` 加权评分 + `--burst` 连拍留最佳。SKILL.md/全仓文档同步；1277 测试绿 |
 | v2.2.0 | GUI 编辑效率 | **已发布 2026-08-27**：LR 式**复制/粘贴设置**（`_DEV_FIELDS` 42 字段快照，Develop 按钮 + Export 队列「粘贴到勾选」+「已调」徽标；per-photo 覆盖层 `_photo_adjust` 经 `_per_file_overlay` 与蒙版合并注入批处理）；**逐照片撤销/重做**（上限 50、首次编辑记基线、沉降入栈、切照片 flush/加载、Cmd+Z 在 Develop 优先逐照片历史）；**导出配方**（22 输出字段规范值快照，gui_state 持久化，套用/存/删）。agent 面零改动；新增 `test_gui_v22.py` 15 测，全量 1256 绿 |
+| v2.4.0 | 所见即所得 + AI 调色 GUI + 全自动闭环批① | **已发布 2026-09-02**：三处所见统一（⌘P/review 灯箱/蒙版画布走 per-photo 有效 options）；Library VirtualGrid 虚拟列表（5k 首绘 20.9ms、翻页 0.3ms）；键盘评级 1-5/P/? 表；before/after 可拖分割线；设置搜索/预设悬停预览/首跑引导；**AI 调色 GUI**（auto-tone 插件 9 参数写入逐照片覆盖层）。闭环批①：**局部调整词汇表**（`local: [{region, params}]`，引擎真实管线全 9 字段应用——修复旧接线只落 3/9 字段的缺口）+ **美学 verifier**（SigLIP 头 + Qwen 终审组合，`audit --aesthetic` 四面接线，训练工具 `train_verifier.py`，lr-scan 导出星级）+ **ModelScope 国内下载链**（塔/tokenizer/插件权重三源，`PHOTOS_AUTO_TONE_TOWER_SOURCE` / `WEIGHT_SOURCE`）；修复 v2.1 风格化底座错配发布级 bug（误用 v7 CLIP 底座，tokenizer 可达机器必崩 64↔77）。1384 测试绿 |
 | auto-tone-v2.1.0 | 插件：风格化 + 场景自适应（训练侧 v2.1 同步） | **已发布 2026-08-28**：`auto_tone_with_style`（SigLIP 视觉分析 16 风格 top-K + Qwen3-VL 自然语言→9 字段偏置解析，Qwen 缺席回退 8 手工预设）与 `analyze_visual_style` MCP 工具（插件 4→6，装后 MCP 26→32）；Python API `auto_tone_with_scene`（552 张 LR 目录统计的 7 场景数据驱动偏置，包内 scene_biases.json）；SigLIP 主模型 `auto_tone_siglip_h192_d03.pt`（PSNR 32.21，+2.93 dB vs v7_clean，独立 release tag auto-tone-v2.1.0）；predictor 修复 LayerNorm→GELU→Dropout 重建（v7/siglip 双 checkpoint 验证，修复推理双 GELU bug）+ SigLIP sig_dim 推断；batch_auto_tone 加 style_desc；重存权重兼容 weights_only=True。1286 测试绿 + 真实权重 e2e |
 
 ## 规划中
@@ -85,7 +86,7 @@
 分组/留最佳）；test_mcp 工具表改核心子集断言（兼容插件加工具）。
 **待发布**（版本 bump + RELEASE 流程，用户确认后执行）。
 
-### v2.4.0（实施中 2026-08-29 —— 主题：所见即所得，滚得动 + AI 调色 GUI）
+### v2.4.0（已发布 2026-09-02 —— 主题：所见即所得，滚得动 + AI 调色 GUI；速览见上方「已发布」表）
 
 > 立项研究结论：v2.2 的 per-photo 覆盖层加深了「三处所见不一致」——Develop 预览
 > 含覆盖层、⌘P 预览弹窗只走全局 options、review 灯箱/蒙版画布显示原图（三处同一个
@@ -117,7 +118,7 @@
 
 测试：`test_gui_v24.py` 32 项；全量 1308 通过。
 
-### 全自动闭环批①：词汇表扩展 + 美学 verifier + ModelScope 塔源（实施 2026-09-02）
+### 全自动闭环批①：词汇表扩展 + 美学 verifier + ModelScope 塔源（已发布 2026-09-02，随 v2.4.0；速览见上方「已发布」表）
 
 > 立项来源：v1.9 阶段 3 模型层差距分析的前两项（输出词汇表太窄、无 verifier
 > 即无 stop 条件）。随 v2.4.0 一同发布或作 v2.4.1（发版时定）。

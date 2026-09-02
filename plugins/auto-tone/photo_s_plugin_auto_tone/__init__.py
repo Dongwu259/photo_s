@@ -11,7 +11,7 @@ Qwen3-VL 美学评分、修图建议、风格化调色（SigLIP 视觉分析 + Q
     styled = auto_tone_with_style("/path/to/img.jpg", "忧郁蓝调")
 """
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 __all__ = [
     "AutoTonePlugin",
