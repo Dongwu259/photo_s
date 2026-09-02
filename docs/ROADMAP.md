@@ -161,10 +161,10 @@
       tokenizer SSL 失败掩盖（视觉分析被禁用 + 底座退化）。真实权重
       e2e：SigLIP 底座 + MS 塔/tokenizer，风格 top-3 与 GitHub 路径
       逐位一致；重存 .pt（weights_only 兼容）四位数一致
-- [ ] ModelScope 上传重存版 `auto_tone_siglip_h192_d03.pt`（现存文件为
-      numpy-2 pickle，weights_only 拒载；重存文件已备
-      `~/Desktop/auto_tone_siglip_h192_d03_resaved.pt`），上传后取消
-      `MODELSCOPE_WEIGHTS` 注释行即启用镜像
+- [x] ModelScope 重存版 `auto_tone_siglip_h192_d03.pt` 已上传替换
+      （用户授权 token 代传，2026-09-02）：回读 sha 校验 + weights_only
+      加载验证 + `WEIGHT_SOURCE=modelscope` 全新缓存 e2e——镜像下载的
+      权重推理输出与 GitHub 路径逐位一致，`MODELSCOPE_WEIGHTS` 条目启用
 
 测试：`test_vocab_verifier.py` 25 + `test_vocab_plugin.py` 35；全量回归见提交。
 

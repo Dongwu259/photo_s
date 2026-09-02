@@ -36,10 +36,10 @@ HF hub 缓存已命中则零重复下载）。离线可用 `PHOTOS_AUTO_TONE_TOW
 [`dwphoto/photo-s-auto-tone-v2`](https://modelscope.cn/models/dwphoto/photo-s-auto-tone-v2)：
 `PHOTOS_AUTO_TONE_WEIGHT_SOURCE=auto|github|modelscope`（auto=GitHub
 优先失败回落；镜像仓可用 `PHOTOS_AUTO_TONE_MODELSCOPE_REPO` 覆盖）。
-注意：`auto_tone_siglip_h192_d03.pt` 的 ModelScope 现存文件是 numpy-2
-pickle（`torch.load(weights_only=True)` 拒载）——上传重存版
-（`~/Desktop/auto_tone_siglip_h192_d03_resaved.pt`，权重逐位一致）后在
-`models.py` 的 `MODELSCOPE_WEIGHTS` 取消注释该行即启用。
+镜像的 `auto_tone_siglip_h192_d03.pt` 为重存版（纯 Python 类型，
+`weights_only=True` 兼容；权重张量与 GitHub 版逐位一致——sha 不同仅为
+torch 重存编码差异），2026-09-02 实测镜像下载 + 推理与 GitHub 路径输出
+逐位一致。
 
 ## v2.4 新增
 

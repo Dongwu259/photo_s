@@ -56,13 +56,12 @@ MODELSCOPE_WEIGHTS: Dict[str, str] = {
     # 与 GitHub release 字节完全一致（2026-09-02 实测）
     "hand_features.npz":
         "de29659dd0a5668f2689fe5d83ead27e1449d9d1d0ae6b1db1d421aa3a616c37",
-    # auto_tone_siglip_h192_d03.pt：ModelScope 现存文件为 numpy-2 pickle
-    # （val_mae_per_field 含 np.float32，weights_only=True 拒载）。上传
-    # 重存版（纯 Python 类型；权重张量与 GitHub 版逐位一致，输出四位数
-    # 一致；文件在 ~/Desktop/auto_tone_siglip_h192_d03_resaved.pt）后，
-    # 取消下行注释即启用镜像：
-    # "auto_tone_siglip_h192_d03.pt":
-    #     "31e8c001ded31c413b347a9854c1c3da76cadd0a7088f82d09e26d63ae0d4d32",
+    # auto_tone_siglip_h192_d03.pt：2026-09-02 已替换为重存版（纯
+    # Python 类型，weights_only=True 兼容；权重张量与 GitHub 版逐位
+    # 一致，风格化输出四位数一致）。sha 与 GitHub 版不同纯粹是 torch
+    # 重存编码差异，非模型差异。
+    "auto_tone_siglip_h192_d03.pt":
+        "31e8c001ded31c413b347a9854c1c3da76cadd0a7088f82d09e26d63ae0d4d32",
 }
 
 # ── 视觉塔（open_clip 的大权重，~1.7-2.6GB）───────────────────────────────
