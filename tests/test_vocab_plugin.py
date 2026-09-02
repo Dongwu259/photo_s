@@ -491,7 +491,13 @@ class TestWeightSourceChain:
 
     def test_unmirrored_file_has_no_spec(self):
         from photo_s_plugin_auto_tone import models
-        assert models._modelscope_spec("auto_tone_v7_clean.pt") is None
+        # 注册表外的文件不存在镜像
+        assert models._modelscope_spec("nonexistent.onnx") is None
+
+    def test_all_weights_mirrored(self):
+        """2026-09-02 全部 8 个权重上传 ModelScope 后：镜像全覆盖。"""
+        from photo_s_plugin_auto_tone import models
+        assert set(models.MODELSCOPE_WEIGHTS) == set(models.WEIGHTS)
 
     def test_auto_chain_falls_back_to_modelscope(self, monkeypatch, tmp_path):
         from photo_s_plugin_auto_tone import models

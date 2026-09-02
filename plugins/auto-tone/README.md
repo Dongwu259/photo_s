@@ -36,10 +36,11 @@ HF hub 缓存已命中则零重复下载）。离线可用 `PHOTOS_AUTO_TONE_TOW
 [`dwphoto/photo-s-auto-tone-v2`](https://modelscope.cn/models/dwphoto/photo-s-auto-tone-v2)：
 `PHOTOS_AUTO_TONE_WEIGHT_SOURCE=auto|github|modelscope`（auto=GitHub
 优先失败回落；镜像仓可用 `PHOTOS_AUTO_TONE_MODELSCOPE_REPO` 覆盖）。
-镜像的 `auto_tone_siglip_h192_d03.pt` 为重存版（纯 Python 类型，
-`weights_only=True` 兼容；权重张量与 GitHub 版逐位一致——sha 不同仅为
-torch 重存编码差异），2026-09-02 实测镜像下载 + 推理与 GitHub 路径输出
-逐位一致。
+**2026-09-02 起全部 8 个权重（含两个 LoRA，上传自训练机原件并回读
+sha 复核）均有镜像**——与 `TOWER_SOURCE=modelscope` 一起即 100% 国内源。
+镜像差异说明：siglip 主模型为重存编码（`weights_only=True` 兼容，权重
+逐位一致）；两个 LoRA config JSON 为 ModelScope 上传时的 CRLF→LF 规范化
+（语义等价，差 1 字节），均按各自来源 sha 钉死校验。
 
 ## v2.4 新增
 

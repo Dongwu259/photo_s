@@ -166,6 +166,13 @@
       （用户授权 token 代传，2026-09-02）：回读 sha 校验 + weights_only
       加载验证 + `WEIGHT_SOURCE=modelscope` 全新缓存 e2e——镜像下载的
       权重推理输出与 GitHub 路径逐位一致，`MODELSCOPE_WEIGHTS` 条目启用
+- [x] **100% 国内源达成（2026-09-02）**：剩余 5 个权重全部上传
+      （v7/rag/hand 字节一致；两个 LoRA safetensors 上传自训练机原件
+      `~/Desktop/AI_LR_Trainning/release/weights`，回读 sha 与注册表
+      逐位复核——GitHub 断点续传在弱网下拼接损坏，本地原件即真值）；
+      两个 LoRA config JSON 被 ModelScope 上传时 CRLF→LF 规范化
+      （语义等价），按镜像实测 sha 钉死。干净缓存 + 双 modelscope 开关
+      下 8/8 权重 + 塔 + tokenizer 全量国内解析验证
 
 测试：`test_vocab_verifier.py` 25 + `test_vocab_plugin.py` 35；全量回归见提交。
 

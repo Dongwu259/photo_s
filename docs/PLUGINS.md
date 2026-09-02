@@ -209,7 +209,11 @@ export PHOTOS_AUTO_TONE_TOWER_SOURCE=modelscope   # 国内：塔权重走 ModelS
   GitHub release 优先、失败回落 ModelScope；modelscope 有镜像的文件走
   ModelScope、其余仍走 GitHub。镜像仓可用
   `PHOTOS_AUTO_TONE_MODELSCOPE_REPO` 覆盖。与 GitHub 字节不同的镜像文件
-  按各自 sha 钉死校验。
+  按各自 sha 钉死校验（siglip 主模型为重存编码差异；两个 LoRA config
+  为 ModelScope 上传时的 CRLF→LF 规范化，语义等价）。
+  **2026-09-02 起全部 8 个权重均有镜像**——`TOWER_SOURCE=modelscope` +
+  `WEIGHT_SOURCE=modelscope` 双开关下塔/tokenizer/权重 100% 国内源，
+  已用干净缓存全量解析验证（含 420MB LoRA）。
 - **权重许可为 CC-BY-NC 4.0（非商用）**，代码 MIT，详见插件目录
   `LICENSE-WEIGHTS.txt`；权重经 modelstore sha256 校验后缓存，且每次
   使用前重新校验。

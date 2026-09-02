@@ -51,17 +51,32 @@ MODELSCOPE_REPO = os.environ.get("PHOTOS_AUTO_TONE_MODELSCOPE_REPO",
 MODELSCOPE_URL_BASE = (f"https://modelscope.cn/models/{MODELSCOPE_REPO}"
                        f"/resolve/master")
 
-# name → ModelScope 实测 sha256
+# name → ModelScope 实测 sha256。二进制文件与 GitHub release 字节一致
+# （sha 相同）；两个 JSON config 例外——ModelScope 上传时把 CRLF 规范化
+# 成 LF（语义等价，差 1 字节），按镜像实测值钉。auto_tone_siglip 重存
+# 版差异是 torch 重存编码，非模型差异。
 MODELSCOPE_WEIGHTS: Dict[str, str] = {
-    # 与 GitHub release 字节完全一致（2026-09-02 实测）
+    # ── 与 GitHub 字节一致 ─────────────────────────────────────────
     "hand_features.npz":
         "de29659dd0a5668f2689fe5d83ead27e1449d9d1d0ae6b1db1d421aa3a616c37",
-    # auto_tone_siglip_h192_d03.pt：2026-09-02 已替换为重存版（纯
-    # Python 类型，weights_only=True 兼容；权重张量与 GitHub 版逐位
-    # 一致，风格化输出四位数一致）。sha 与 GitHub 版不同纯粹是 torch
-    # 重存编码差异，非模型差异。
+    "auto_tone_v7_clean.pt":
+        "6b41c1f9e43415a19277bf0e2f70ccce6c0da27079c915502990459bef95a15a",
+    "clip_train_rag.npz":
+        "0c830971c1ea4457758fee2353e63ec9338c428d114cf0eb68a94a89a6d6e580",
+    # ── 重存版（weights_only=True 兼容；权重张量与 GitHub 逐位一致）──
     "auto_tone_siglip_h192_d03.pt":
         "31e8c001ded31c413b347a9854c1c3da76cadd0a7088f82d09e26d63ae0d4d32",
+    # ── ModelScope CRLF→LF 规范化（语义等价 JSON）─────────────────
+    "lora_aesthetic_config.json":
+        "6696fc6348b33767fb94802494891689af2672c94c27f8b971bbf6b2da98daa1",
+    "lora_advisor_config.json":
+        "a2460d9713499a2ecff391fbee68aa728b965cab3caa3a24ccae48b648b6fb52",
+    # LoRA safetensors（二进制字节一致；2026-09-02 上传自训练机原件，
+    # 回读 sha 复核）——至此全部 8 个权重均有镜像，100% 国内源可用
+    "lora_aesthetic.safetensors":
+        "571d808074916ddd5e244114bb2fb0084df900ab346815ea81b083a901e9add2",
+    "lora_advisor.safetensors":
+        "26381130c226b49e73ab589fa53fe6e5791dd03f0ca173813b083e69f7df4b31",
 }
 
 # ── 视觉塔（open_clip 的大权重，~1.7-2.6GB）───────────────────────────────
