@@ -321,12 +321,16 @@ class TestMaskWorkflow:
                       "c:combo:sky&f;f:brush:0.5,0.5,0.05")
         app.mask_adjust.set("sky:brightness=0.5;"
                             "sky:curves={r:0,0;128,140;255,255}")
-        app._open_mask_workflow()
+        app._dev_enter_mask_mode()   # v2.5: 弹窗升格进 Develop
         root.update()
-        wins = [w for w in root.winfo_children()
+        assert app._active_module == "develop"
+        assert app._dev_mask_mode and app._dev_mask_frame is not None
+        tops = [w for w in root.winfo_children()
                 if isinstance(w, tk.Toplevel)]
-        assert wins, "workflow window must open"
-        wins[0].destroy()
+        assert not tops, "mask editor is hosted, not a popup"
+        app._dev_exit_mask_mode()
+        root.update()
+        assert not app._dev_mask_mode and app._dev_mask_frame is None
         root.update()  # 触发 pending after 回调，winfo_exists 防护拦截
         root.destroy()
 
@@ -340,10 +344,9 @@ class TestMaskWorkflow:
         root, app = _make_app()
         app.files = []
         app._checked = set()
-        app._open_mask_workflow()
+        app._dev_enter_mask_mode()
         root.update()
         assert warns, "must warn when no photos are checked"
-        wins = [w for w in root.winfo_children()
-                if isinstance(w, tk.Toplevel)]
-        assert not wins, "no checked files must not open a window"
+        assert not app._dev_mask_mode, "no checked files must not enter"
+        assert app._dev_mask_frame is None
         root.destroy()

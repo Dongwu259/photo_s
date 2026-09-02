@@ -283,8 +283,9 @@ class TestReviewExifEditor:
         app._checked = {a}
         app._refresh_file_list()
         app._show_review()
-        win = [w for w in root.winfo_children()
-               if isinstance(w, tk.Toplevel)][0]
+        # v2.5: 灯箱内嵌进 Library（不再是 Toplevel）
+        assert app._lib_lightbox_active
+        win = app._lib_lightbox_frame
 
         def values():
             out = []
@@ -408,11 +409,13 @@ class TestDialogSmokes:
         app._checked = {a}
         app._refresh_file_list()
         app._show_review()
-        win = [w for w in root.winfo_children()
-               if isinstance(w, tk.Toplevel)][0]
+        assert app._lib_lightbox_active
+        win = app._lib_lightbox_frame
         # wait for the metadata scan to finish and render "1 / 1"
         assert self._poll(root, lambda: _find_text(win, "1 / 1")), \
-            "review dialog must render position 1 / 1 after the scan"
+            "review lightbox must render position 1 / 1 after the scan"
+        app._exit_library_lightbox()
+        assert not app._lib_lightbox_active
         root.destroy()
 
     def test_dedup_dialog_smoke(self, tmp_path):
@@ -616,21 +619,22 @@ class TestReviewDialogUndo:
         app._checked = {p}
         app._refresh_file_list()
         app._show_review()
-        win = [w for w in root.winfo_children()
-               if isinstance(w, tk.Toplevel)][0]
+        assert app._lib_lightbox_active
+        win = app._lib_lightbox_frame
         deadline = time.time() + 20
         while time.time() < deadline:
             root.update()
             if _find_text(win, "1 / 1"):
                 break
             time.sleep(0.05)
-        win.focus_force()
+        root.focus_force()
         root.update()
-        win.event_generate("3")           # rate 3 stars (writes EXIF)
+        # v2.5: hosted 键走 root 路由（_lib_key_rate → 灯箱分支）
+        root.event_generate("3")          # rate 3 stars (writes EXIF)
         root.update()
         assert read_exif_metadata(p)["rating"] == 3
         assert len(app._undo_stack) == 1
-        win.event_generate("<Command-z>")  # undo inside the lightbox
+        root.event_generate("<Command-z>")  # undo inside the lightbox
         root.update()
         m = read_exif_metadata(p)
         assert m["rating"] is None, "rating cleared back to unrated"

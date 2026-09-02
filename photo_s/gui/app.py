@@ -350,6 +350,12 @@ class PhotoSApp:
         # touched, so leaving the list restores the edit state for free)
         self._dev_preset_preview = None
         self._dev_preset_hovered = ""
+        self._dev_mask_mode = False
+        self._dev_mask_frame = None
+        self._dev_mask_ctl = None
+        self._lib_lightbox_active = False
+        self._lib_lightbox_frame = None
+        self._lib_lightbox_ctl = None
         # v2.4: settings search highlights (label, bg, fg) to restore
         self._settings_search_marked = []
         self._settings_search_hits = []
@@ -566,6 +572,10 @@ class PhotoSApp:
                 str(n), lambda e, n=n: self._lib_key_rate(n))
         self.root.bind("p", lambda e: self._lib_key_rate(0))
         self.root.bind("<Return>", lambda e: self._lib_key_open())
+        self.root.bind("<Left>", self._dev_mask_key_page)
+        self.root.bind("<Right>", self._dev_mask_key_page)
+        self.root.bind("<Left>", self._lib_lightbox_key, add=True)
+        self.root.bind("<Right>", self._lib_lightbox_key, add=True)
         self.root.bind("<Delete>", lambda e: self._lib_key_remove())
         self.root.bind("<BackSpace>", lambda e: self._lib_key_remove())
         self.root.bind("<KeyPress-question>",
@@ -576,7 +586,14 @@ class PhotoSApp:
     def _on_global_escape(self, event=None):
         """Esc cancels a running batch from the main window. Events in
         Toplevels never reach the root binding, so dialog-level Escape
-        handlers keep working."""
+        handlers keep working. v2.5: exiting the hosted mask editor (and
+        the Library lightbox) wins over batch-cancel."""
+        if getattr(self, "_dev_mask_mode", False):
+            self._dev_exit_mask_mode()
+            return "break"
+        if getattr(self, "_lib_lightbox_active", False):
+            self._exit_library_lightbox()
+            return "break"
         if self.processing:
             self._cancel_processing()
 
@@ -1196,10 +1213,14 @@ class PhotoSApp:
         side = tk.Frame(main, bg=COLORS["bg"], width=SETTINGS_WIDTH)
         side.pack(side="right", fill="y", padx=(10, 0))
         side.pack_propagate(False)
+        self._dev_side = side
 
         viewer_card = tk.Frame(main, bg=COLORS["card"], bd=0,
                                highlightthickness=0)
         viewer_card.pack(side="left", fill="both", expand=True)
+        self._dev_viewer_card = viewer_card
+        # v2.5: 蒙版编辑器宿主（pack 切换见 _dev_mask_apply_layout）
+        self._dev_mask_host = tk.Frame(main, bg=COLORS["bg"])
 
         top = tk.Frame(viewer_card, bg=COLORS["card"])
         top.pack(fill="x", padx=12, pady=(8, 0))
@@ -1276,6 +1297,13 @@ class PhotoSApp:
             bottom_bar, textvariable=self._dev_ai_strength, width=4,
             values=("1.0", "0.8", "0.6", "0.4", "0.2"), state="readonly")
         self._dev_ai_strength_box.pack(side="left")
+        # v2.5: mask canvas promoted into Develop (was a popup dialog)
+        self._dev_mask_btn = FlatButton(
+            bottom_bar, text=self._t("dev_mask_edit"),
+            command=self._dev_enter_mask_mode, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=12, pady=4)
+        self._dev_mask_btn.pack(side="left", padx=(12, 0))
         # v2.4: before/after compare — split (draggable divider) and
         # side-by-side, composed from the pipeline-rendered pair
         self._dev_compare_btn = FlatButton(
@@ -2373,6 +2401,9 @@ class PhotoSApp:
 
         list_frame = tk.Frame(card, bg=COLORS["card"])
         list_frame.pack(fill="both", expand=True, padx=14, pady=12)
+        self._lib_list_frame = list_frame
+        # v2.5: 审查灯箱宿主（pack 切换见 _lib_lightbox_apply_layout）
+        self._lib_lightbox_host = tk.Frame(card, bg=COLORS["bg"])
 
         # v2.4 VirtualGrid: rows are drawn directly on the canvas at a
         # fixed row height — only the visible window is materialized, so
@@ -3226,7 +3257,7 @@ class PhotoSApp:
              "grade_hsl_val"),
             ("point_color", "point_color_hint", "edit_point_color",
              "_open_point_color_dialog", "grade_point_color_val"),
-            ("masks", "masks_hint", "edit_masks", "_open_mask_workflow",
+            ("masks", "masks_hint", "edit_masks", "_dev_enter_mask_mode",
              "grade_masks_val"),
         ]
         for off, (var_key, hint_key) in enumerate(_grade_widgets):
@@ -4305,6 +4336,11 @@ class PhotoSApp:
 
     def _masks_ok(self, win, specs, adjusts):
         def _n(v):
+            if isinstance(v, str):
+                # v1.8 字符串型局部调整（curves={...}/hsl={...}/...）——
+                # 原样透传；float() 会崩（弹窗 OK 路径的潜伏 bug，旧测试
+                # 只开窗不点 OK 从未触发）
+                return v
             v = round(float(v), 4)
             return str(int(v)) if v == int(v) else str(v)
         mask_segs = [_mask_spec_string(*s) for s in specs]
@@ -4322,8 +4358,100 @@ class PhotoSApp:
 
     # ── LR-style canvas mask workflow (v1.8.0) ───────────────────────────
 
-    def _open_mask_workflow(self):
-        """Canvas mask editor over checked photos, Lightroom-style.
+    def _dev_enter_mask_mode(self):
+        """v2.5: 蒙版画布从弹窗升格进 Develop（原 _open_mask_workflow）。
+
+        切到 Develop 并把预览/侧栏换成内嵌蒙版编辑器（作用域 = 勾选照片，
+        起始 = 当前 Develop 选择）。编辑即所见：退出时写入 _photo_masks，
+        预览/导出队列立即反映（与调色覆盖层同一通道）。
+        """
+        if self._active_module != "develop":
+            self._show_module("develop")
+        files = self._checked_files()
+        if not files:
+            messagebox.showwarning(self._t("dlg_no_files_title"),
+                                   self._t("mask_no_check"))
+            return
+        self._dev_mask_mode = True
+        # 每次进入重建：_photo_masks/全局 masks 是事实源，撤销栈按会话计
+        if self._dev_mask_frame is not None:
+            self._dev_mask_frame.destroy()
+        self._dev_mask_frame = tk.Frame(self._dev_mask_host,
+                                        bg=COLORS["bg"])
+        start = self._dev_selected if self._dev_selected in files else None
+        self._dev_mask_ctl = self._build_mask_workflow(
+            self._dev_mask_frame, files, hosted=True, start_path=start)
+        self._dev_mask_frame.pack(fill="both", expand=True)
+        self._dev_mask_apply_layout()
+
+    def _dev_exit_mask_mode(self):
+        """退出蒙版模式；内嵌编辑视为即改即生效（退出时应用一次）。"""
+        ctl = self._dev_mask_ctl
+        self._dev_mask_mode = False
+        self._dev_mask_ctl = None
+        if ctl is not None:
+            ctl["apply"]()
+        if self._dev_mask_frame is not None:
+            self._dev_mask_frame.destroy()
+            self._dev_mask_frame = None
+        self._dev_mask_apply_layout()
+        # 蒙版变化 → 预览与导出队列即时反映（sig 变化由 dev tick 稳定后
+        # 触发；这里直接以当前 sig 立即重渲一次，不等防抖）
+        if self._dev_selected:
+            self._dev_render(self._dev_current_sig())
+        self._refresh_export_queue()
+
+    def _dev_mask_apply_layout(self):
+        """Develop 主行 pack 切换：调色（预览+侧栏）↔ 蒙版编辑器。"""
+        mask_on = getattr(self, "_dev_mask_mode", False)
+        if mask_on:
+            self._dev_viewer_card.pack_forget()
+            self._dev_side.pack_forget()
+            self._dev_mask_host.pack(fill="both", expand=True)
+        else:
+            self._dev_mask_host.pack_forget()
+            self._dev_side.pack(side="right", fill="y", padx=(10, 0))
+            self._dev_side.pack_propagate(False)
+            self._dev_viewer_card.pack(side="left", fill="both",
+                                       expand=True)
+
+    def _dev_mask_key_page(self, event):
+        """←/→ 在蒙版模式翻页（输入框聚焦/非激活时不拦截）。"""
+        if not getattr(self, "_dev_mask_mode", False) \
+                or not self._dev_mask_ctl:
+            return
+        if self._focus_in_text_widget():
+            return
+        if event.keysym == "Left":
+            self._dev_mask_ctl["page_prev"]()
+        else:
+            self._dev_mask_ctl["page_next"]()
+        return "break"
+
+    def _focus_in_text_widget(self) -> bool:
+        """键盘焦点在文本输入类控件里（快捷键不得吞掉正常输入）。
+        v2.5 从 _lib_keys_active 提取共享（蒙版/灯箱键守卫复用）。"""
+        w = None
+        try:
+            w = self.root.focus_get()
+        except tk.TclError:
+            pass
+        return isinstance(w, (tk.Entry, ttk.Entry, tk.Text, ttk.Combobox,
+                              tk.Listbox, tk.Spinbox, ttk.Spinbox))
+
+    def _lib_lightbox_key(self, event):
+        """←/→ 在灯箱模式翻页（输入框聚焦/非激活时不拦截）。"""
+        if not getattr(self, "_lib_lightbox_active", False) \
+                or not self._lib_lightbox_ctl:
+            return
+        if self._focus_in_text_widget():
+            return
+        self._lib_lightbox_ctl["go"](-1 if event.keysym == "Left" else 1)
+        return "break"
+
+    def _build_mask_workflow(self, host, files, *, hosted=False,
+                             start_path=None):
+        """Canvas mask editor, Lightroom-style — 弹窗/Develop 共用构建器。
 
         Big image + per-photo masks (each photo keeps its own spec list),
         brush/linear/radial/color/AI tools painted on the canvas with a
@@ -4333,22 +4461,14 @@ class PhotoSApp:
         Per-photo state lives in ``self._photo_masks`` (path -> dict of
         masks/mask_adjust strings) and is injected into batch processing
         via the engine's ``per_file_options`` hook.
+
+        ``hosted=True`` 时由 Develop 内嵌（host = 模块内 frame，退出经
+        ``self._dev_exit_mask_mode`` 应用）；否则 host 为独立 Toplevel
+        （测试/诊断路径）。返回控制器 ``{apply, undo, page_prev,
+        page_next}``。
         """
-        if self._dlg_cooldown_active():
-            return
-        files = self._checked_files()
-        if not files:
-            messagebox.showwarning(self._t("dlg_no_files_title"),
-                                   self._t("mask_no_check"))
-            return
         from ..mask import (MaskError, MaskSpec, parse_masks,
                            parse_mask_adjust, render_mask)
-        win = tk.Toplevel(self.root)
-        win.title(self._t("mask_workflow"))
-        win.configure(bg=COLORS["bg"])
-        win.transient(self.root)
-        win.geometry("1320x860")
-        win.minsize(1080, 700)
 
         # ── per-photo state ──────────────────────────────────────────────
         # photo[path] = {"specs": [(name, kind, params, feather, invert)],
@@ -4390,6 +4510,8 @@ class PhotoSApp:
             photo[f] = {"specs": specs, "adjusts": adjusts,
                         "visible": {s[0]: True for s in specs}}
         idx = [0]
+        if start_path and start_path in files:
+            idx[0] = files.index(start_path)
         current = {"name": None}  # selected mask name
         # undo history: deep snapshots of the CURRENT photo's state, pushed
         # before every mutating action; Ctrl+Z / undo button pops one.
@@ -4405,7 +4527,7 @@ class PhotoSApp:
         _MASK_COLORS = [(255, 70, 70), (70, 140, 255), (70, 220, 110),
                         (250, 200, 60), (220, 90, 240), (90, 230, 230)]
 
-        top = tk.Frame(win, bg=COLORS["bg"])
+        top = tk.Frame(host, bg=COLORS["bg"])
         top.pack(fill="x", padx=12, pady=(10, 4))
         page_lbl = tk.Label(top, text="", font=FONT_SMALL,
                             fg=COLORS["text_secondary"], bg=COLORS["bg"])
@@ -4413,7 +4535,7 @@ class PhotoSApp:
         tk.Label(top, text="", font=FONT_SMALL, bg=COLORS["bg"],
                  fg=COLORS["text_secondary"]).pack(side="left", padx=8)
 
-        body = tk.Frame(win, bg=COLORS["bg"])
+        body = tk.Frame(host, bg=COLORS["bg"])
         body.pack(fill="both", expand=True, padx=12)
 
         # left: mask list
@@ -4540,7 +4662,7 @@ class PhotoSApp:
 
         def _draw_image():
             """Fit the current photo into the canvas, with overlay."""
-            if not win.winfo_exists():
+            if not host.winfo_exists():
                 return  # 窗口已关闭（<50ms 内关窗时 after 回调仍会触发）
             canvas.delete("all")
             import numpy as np
@@ -4558,7 +4680,7 @@ class PhotoSApp:
             if path not in adj_cache and path in self._photo_adjust:
 
                 def _deliver(result, err, _p=path):
-                    if not win.winfo_exists() or files[idx[0]] != _p:
+                    if not host.winfo_exists() or files[idx[0]] != _p:
                         return
                     if not result:
                         return  # original stays on failure
@@ -4941,12 +5063,12 @@ class PhotoSApp:
                     return
                 # CPU 推理耗时数秒：先落 watch 光标 + 状态提示，避免
                 # 无反馈冻结（异步化需要 queue 模式，超出本对话框范围）
-                win.config(cursor="watch")
-                win.update_idletasks()
+                host.config(cursor="watch")
+                host.update_idletasks()
                 try:
                     m = segment(base, kind, label=label)
                 finally:
-                    win.config(cursor="")
+                    host.config(cursor="")
                 if m.max() < 0.01:
                     messagebox.showwarning(
                         self._t("mask_ai_empty"), self._t("mask_ai_empty"))
@@ -5159,12 +5281,12 @@ class PhotoSApp:
         def _page_next():
             _page(1)
 
-        win.bind("<Left>", lambda e: _page_prev())
-        win.bind("<Right>", lambda e: _page_next())
-        win.bind("<Command-z>", lambda e: _undo())
-        win.bind("<Control-z>", lambda e: _undo())
+        host.bind("<Left>", lambda e: _page_prev())
+        host.bind("<Right>", lambda e: _page_next())
+        host.bind("<Command-z>", lambda e: _undo())
+        host.bind("<Control-z>", lambda e: _undo())
 
-        bottom = tk.Frame(win, bg=COLORS["bg"])
+        bottom = tk.Frame(host, bg=COLORS["bg"])
         bottom.pack(fill="x", padx=12, pady=(6, 12))
         FlatButton(bottom, text=self._t("mask_prev"), command=_page_prev,
                    bg=COLORS["bg"], fg=COLORS["text"],
@@ -5211,6 +5333,8 @@ class PhotoSApp:
                                             photo[f]["adjusts"]))
 
         def _n(v):
+            if isinstance(v, str):
+                return v  # v1.8 字符串型局部调整（curves={...} 等）透传
             v = round(float(v), 4)
             return str(int(v)) if v == int(v) else str(v)
 
@@ -5225,7 +5349,9 @@ class PhotoSApp:
                     f"{k}={_n(v)}" for k, v in adjust.items()))
             return ";".join(mask_segs), ";".join(adj_segs)
 
-        def _on_ok():
+        def _apply_state():
+            """序列化全部照片的蒙版状态到 _photo_masks（弹窗 OK 与
+            Develop 退出共用——纯写入，不触碰 UI 生命周期）。"""
             _save_adjusts()
             if self._photo_masks is None:
                 self._photo_masks = {}
@@ -5238,30 +5364,47 @@ class PhotoSApp:
                 else:
                     self._photo_masks[f] = {"masks": masks_s,
                                             "mask_adjust": adj_s}
-            win.destroy()
 
-        FlatButton(bottom, text=self._t("ok"), command=_on_ok,
-                   bg=COLORS["bg"], fg=COLORS["text"],
-                   hover_bg=COLORS["border"], font=FONT_SMALL,
-                   padx=10, pady=3, border_color=COLORS["border"]).pack(
-            side="right")
-        FlatButton(bottom, text=self._t("cancel"), command=win.destroy,
-                   bg=COLORS["bg"], fg=COLORS["text"],
-                   hover_bg=COLORS["border"], font=FONT_SMALL,
-                   padx=10, pady=3, border_color=COLORS["border"]).pack(
-            side="right", padx=(0, 8))
+        if hosted:
+            # 内嵌：完成 = 应用 + 退回调色视图（退出路径单一，防重入）
+            FlatButton(bottom, text=self._t("mask_done"),
+                       command=self._dev_exit_mask_mode,
+                       bg=COLORS["bg"], fg=COLORS["text"],
+                       hover_bg=COLORS["border"], font=FONT_SMALL,
+                       padx=10, pady=3, border_color=COLORS["border"]).pack(
+                side="right")
+        else:
+            def _ok_close():
+                _apply_state()
+                host.destroy()
 
-        tk.Label(win, text=self._t("mask_overlay_hint"), font=FONT_TINY,
+            FlatButton(bottom, text=self._t("ok"), command=_ok_close,
+                       bg=COLORS["bg"], fg=COLORS["text"],
+                       hover_bg=COLORS["border"], font=FONT_SMALL,
+                       padx=10, pady=3, border_color=COLORS["border"]).pack(
+                side="right")
+            FlatButton(bottom, text=self._t("cancel"),
+                       command=host.destroy,
+                       bg=COLORS["bg"], fg=COLORS["text"],
+                       hover_bg=COLORS["border"], font=FONT_SMALL,
+                       padx=10, pady=3, border_color=COLORS["border"]).pack(
+                side="right", padx=(0, 8))
+
+        tk.Label(host, text=self._t("mask_overlay_hint"), font=FONT_TINY,
                  fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
             fill="x", padx=12, pady=(0, 2))
-        tk.Label(win, text=self._t("mask_drag_hint"), font=FONT_TINY,
+        tk.Label(host, text=self._t("mask_drag_hint"), font=FONT_TINY,
                  fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
             fill="x", padx=12, pady=(0, 8))
 
         _refresh_list()
         _draw_image()
-        page_lbl.config(text=self._t("mask_page", cur=1, total=len(files)))
-        win.after(50, _draw_image)  # canvas size settled after layout
+        page_lbl.config(text=self._t("mask_page", cur=idx[0] + 1,
+                                     total=len(files)))
+        host.after(50, _draw_image)  # canvas size settled after layout
+
+        return {"apply": _apply_state, "undo": _undo,
+                "page_prev": _page_prev, "page_next": _page_next}
 
     def _browse_gpx(self):
         """Pick a GPX track file."""
@@ -6616,12 +6759,13 @@ class PhotoSApp:
             menu.grab_release()
 
     def _show_review(self):
-        """Lightbox review dialog: navigate, rate 0-5, tag keywords/title,
-        filter by rating/keywords. EXIF writes go through the engine's
-        PhotoS: UserComment segment; partial updates preserve other tags.
-        Operates on the tree selection, or all files when none selected."""
-        import importlib.util
+        """v2.5: 审查灯箱并入 Library（原独立 Toplevel 弹窗）。
 
+        切到 Library 并把文件列表区换成内嵌灯箱：导航 / 0-5 星 / 关键词
+        标题 / 拍摄信息编辑 / 精选淘汰双阈值分拣。EXIF 写走 _review_save
+        （UserComment 分段，部分更新保留其他标签）；作用域 = 勾选照片；
+        Esc / 关闭退出回网格。⌘E 入口不变。
+        """
         if not self.files:
             messagebox.showinfo(self._t("review_title"),
                                 self._t("review_none"))
@@ -6631,20 +6775,68 @@ class PhotoSApp:
             messagebox.showinfo(self._t("review_title"),
                                 self._t("check_none"))
             return
+        if self._active_module != "library":
+            self._show_module("library")
+        if getattr(self, "_lib_lightbox_active", False):
+            self._exit_library_lightbox()  # 保存挂起编辑后重建
+        self._lib_lightbox_active = True
+        self._lib_lightbox_frame = tk.Frame(self._lib_lightbox_host,
+                                            bg=COLORS["bg"])
+        start = next(iter(self._selected_rows or ()), None)
+        self._lib_lightbox_ctl = self._build_review_ui(
+            self._lib_lightbox_frame, all_paths, hosted=True,
+            start_path=start if start in all_paths else None)
+        self._lib_lightbox_frame.pack(fill="both", expand=True)
+        self._lib_lightbox_apply_layout()
+
+    def _exit_library_lightbox(self):
+        """退出灯箱回网格：冲掉输入框里未提交的关键词/标题（即改即写
+        语义与弹窗 OK 一致），刷新网格行内星标。"""
+        ctl = self._lib_lightbox_ctl
+        self._lib_lightbox_ctl = None
+        self._lib_lightbox_active = False
+        if ctl is not None:
+            ctl["close"]()
+        if self._lib_lightbox_frame is not None:
+            self._lib_lightbox_frame.destroy()
+            self._lib_lightbox_frame = None
+        self._lib_lightbox_apply_layout()
+        cache = getattr(self, "_lib_rating_cache", None)
+        if cache is not None:
+            cache.clear()
+        self._lib_draw()
+
+    def _lib_lightbox_apply_layout(self):
+        """Library 卡片内 pack 切换：文件网格 ↔ 内嵌灯箱（工具栏不动）。"""
+        if getattr(self, "_lib_lightbox_active", False):
+            self._lib_list_frame.pack_forget()
+            self._lib_lightbox_host.pack(fill="both", expand=True,
+                                         padx=14, pady=12)
+        else:
+            self._lib_lightbox_host.pack_forget()
+            self._lib_list_frame.pack(fill="both", expand=True,
+                                      padx=14, pady=12)
+
+    def _build_review_ui(self, host, all_paths, *, hosted=False,
+                         start_path=None):
+        """Lightbox review UI — 弹窗/内嵌共用构建器。
+
+        导航 / 0-5 星评级 / 关键词标题 / 拍摄信息 / 评分关键词筛选 /
+        精选淘汰分拣。``hosted=True`` 由 Library 内嵌（退出走
+        ``self._exit_library_lightbox``），否则 host 为 Toplevel（诊断
+        路径）。返回 ``{close, set_rating, go, undo}`` 控制器。
+        """
+        import importlib.util
 
         from ..engine import read_exif_metadata
         has_piexif = importlib.util.find_spec("piexif") is not None
 
-        win = tk.Toplevel(self.root)
-        win.title(self._t("review_title"))
-        win.geometry("1000x720")
-        win.configure(bg=COLORS["bg"])
-        win.transient(self.root)
-
+        initial_idx = (all_paths.index(start_path)
+                       if start_path and start_path in all_paths else 0)
         state = {"seq": [], "meta": {}, "idx": 0, "rating": None,
                  "photo": None, "reverts": {}}
 
-        header = tk.Frame(win, bg=COLORS["bg"])
+        header = tk.Frame(host, bg=COLORS["bg"])
         header.pack(fill="x", padx=20, pady=(14, 4))
         tk.Label(header, text=self._t("review_title"),
                  font=(PLATFORM_FONTS["title"], 14, "bold"),
@@ -6657,19 +6849,19 @@ class PhotoSApp:
         status_lbl.pack(side="right")
 
         if not has_piexif:
-            tk.Label(win, text=self._t("review_no_piexif"), font=FONT_SMALL,
+            tk.Label(host, text=self._t("review_no_piexif"), font=FONT_SMALL,
                      fg=COLORS["danger"], bg=COLORS["bg"]).pack(
                 anchor="w", padx=20)
 
         # Image area + shooting-info line
-        img_lbl = tk.Label(win, bg=COLORS["bg"])
+        img_lbl = tk.Label(host, bg=COLORS["bg"])
         img_lbl.pack(fill="both", expand=True, padx=20, pady=8)
-        info_lbl = tk.Label(win, text="", font=FONT_SMALL,
+        info_lbl = tk.Label(host, text="", font=FONT_SMALL,
                             fg=COLORS["text_secondary"], bg=COLORS["bg"])
         info_lbl.pack(fill="x", padx=20, pady=(0, 2))
 
         # Nav + rating row
-        ctrl = tk.Frame(win, bg=COLORS["bg"])
+        ctrl = tk.Frame(host, bg=COLORS["bg"])
         ctrl.pack(fill="x", padx=20, pady=(0, 6))
         nav = tk.Frame(ctrl, bg=COLORS["bg"])
         nav.pack(side="left")
@@ -6701,7 +6893,7 @@ class PhotoSApp:
             rating_btns[n] = btn
 
         # Keywords + title row
-        fields = tk.Frame(win, bg=COLORS["bg"])
+        fields = tk.Frame(host, bg=COLORS["bg"])
         fields.pack(fill="x", padx=20, pady=(0, 4))
         tk.Label(fields, text=self._t("review_keywords"), font=FONT_BODY,
                  fg=COLORS["text"], bg=COLORS["bg"]).pack(side="left")
@@ -6730,7 +6922,7 @@ class PhotoSApp:
         # aperture / date. Filled from the current image's metadata on
         # every navigation; on save, unchanged fields go out as None so
         # only real edits hit the file (_review_save diffs again anyway).
-        exif = tk.Frame(win, bg=COLORS["bg"])
+        exif = tk.Frame(host, bg=COLORS["bg"])
         exif.pack(fill="x", padx=20, pady=(0, 4))
         tk.Label(exif, text=self._t("review_shooting"), font=FONT_BODY,
                  fg=COLORS["text"], bg=COLORS["bg"]).grid(
@@ -6757,7 +6949,7 @@ class PhotoSApp:
                 col += 2
 
         # Filter row
-        filt = tk.Frame(win, bg=COLORS["bg"])
+        filt = tk.Frame(host, bg=COLORS["bg"])
         filt.pack(fill="x", padx=20, pady=(0, 14))
         tk.Label(filt, text=self._t("review_filter"), font=FONT_BODY,
                  fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
@@ -6795,7 +6987,7 @@ class PhotoSApp:
 
         # Select (keeper workflow) row: after rating, move keepers/rejects to
         # the chosen folders. Acts on the currently filtered set.
-        sel = tk.Frame(win, bg=COLORS["bg"])
+        sel = tk.Frame(host, bg=COLORS["bg"])
         sel.pack(fill="x", padx=20, pady=(0, 14))
         tk.Label(sel, text=self._t("review_select_lbl"), font=FONT_BODY,
                  fg=COLORS["text_secondary"], bg=COLORS["bg"]).pack(
@@ -6871,7 +7063,7 @@ class PhotoSApp:
                            COLORS["accent"])
 
         # Worker→UI marshalling queue (see gallery dialog for rationale)
-        bus = UiBus(win)
+        bus = UiBus(host)
         schedule = bus.schedule
         bus.start()
 
@@ -7043,7 +7235,7 @@ class PhotoSApp:
                 state["adj"] = (state.get("adj", 0) + 1)
 
                 def _deliver(result, err, _tok=state["adj"]):
-                    if not win.winfo_exists() or _tok != state.get("adj"):
+                    if not host.winfo_exists() or _tok != state.get("adj"):
                         return  # dialog closed / navigated away
                     if not result:
                         return  # keep the original on render failure
@@ -7103,21 +7295,29 @@ class PhotoSApp:
 
         def on_close():
             save_current()
-            win.destroy()
+            if hosted:
+                self._exit_library_lightbox()
+            else:
+                host.destroy()
 
-        def _focus_in_input():
-            w = win.focus_get()
-            return isinstance(w, (ttk.Entry, ttk.Combobox, tk.Entry))
+        if not hosted:
+            # 弹窗键绑定；内嵌模式的 ←/→/0-5/Esc/⌘Z 走 root 路由 +
+            # _lib_lightbox_active 守卫（_lib_lightbox_key / _lib_key_rate /
+            # _on_global_escape / _undo）
+            def _focus_in_input():
+                w = host.focus_get()
+                return isinstance(w, (ttk.Entry, ttk.Combobox, tk.Entry))
 
-        win.bind("<Left>", lambda e: go(-1) if not _focus_in_input() else None)
-        win.bind("<Right>", lambda e: go(1) if not _focus_in_input() else None)
-        for n in range(6):
-            win.bind(str(n), lambda e, n=n: (
-                set_rating(n) if not _focus_in_input() else None))
-        win.bind("<Escape>", lambda e: on_close())
-        # in-lightbox undo (root shortcuts don't reach Toplevel windows)
-        win.bind("<Command-z>", lambda e: undo_current())
-        win.bind("<Control-z>", lambda e: undo_current())
+            host.bind("<Left>",
+                      lambda e: go(-1) if not _focus_in_input() else None)
+            host.bind("<Right>",
+                      lambda e: go(1) if not _focus_in_input() else None)
+            for n in range(6):
+                host.bind(str(n), lambda e, n=n: (
+                    set_rating(n) if not _focus_in_input() else None))
+            host.bind("<Escape>", lambda e: on_close())
+            host.bind("<Command-z>", lambda e: undo_current())
+            host.bind("<Control-z>", lambda e: undo_current())
 
         def scan_thread():
             try:
@@ -7133,16 +7333,20 @@ class PhotoSApp:
             schedule(lambda: _scanned(meta))
 
         def _scanned(meta):
-            if not win.winfo_exists():
+            if not host.winfo_exists():
                 return
             state["meta"] = meta
             state["seq"] = list(all_paths)
-            state["idx"] = 0
+            state["idx"] = initial_idx
             set_status("")
             show()
 
-        win.protocol("WM_DELETE_WINDOW", on_close)
+        if not hosted:
+            host.protocol("WM_DELETE_WINDOW", on_close)
         threading.Thread(target=scan_thread, daemon=True).start()
+
+        return {"close": save_current, "set_rating": set_rating,
+                "go": go, "undo": undo_current}
 
     def _after_file_dialog(self, btn=None):
         """Work around the macOS Tk native-file-dialog focus bug: after
@@ -7313,7 +7517,15 @@ class PhotoSApp:
     def _undo(self):
         """Pop and run the latest undo entry; push its redo counterpart.
         In the Develop module, per-photo adjustment history wins over the
-        global file-action stack (v2.2)."""
+        global file-action stack (v2.2); the hosted mask editor and the
+        Library lightbox (v2.5) win over both while active."""
+        if getattr(self, "_dev_mask_mode", False) and self._dev_mask_ctl:
+            self._dev_mask_ctl["undo"]()
+            return
+        if getattr(self, "_lib_lightbox_active", False) \
+                and self._lib_lightbox_ctl:
+            self._lib_lightbox_ctl["undo"]()
+            return
         if self._dev_undo_available():
             self._dev_undo()
             return
@@ -7875,17 +8087,15 @@ class PhotoSApp:
         filter box must never rate a photo)."""
         if getattr(self, "_active_module", "") != "library":
             return False
-        w = None
-        try:
-            w = self.root.focus_get()
-        except tk.TclError:
-            pass
-        if isinstance(w, (tk.Entry, ttk.Entry, tk.Text, ttk.Combobox,
-                          tk.Listbox, tk.Spinbox, ttk.Spinbox)):
-            return False
-        return True
+        return not self._focus_in_text_widget()
 
     def _lib_key_rate(self, n):
+        # v2.5: 灯箱激活时 0-5 给灯箱当前照片（不是网格行）
+        if getattr(self, "_lib_lightbox_active", False):
+            if self._lib_lightbox_ctl is not None \
+                    and not self._focus_in_text_widget():
+                self._lib_lightbox_ctl["set_rating"](n)
+            return
         if self._lib_keys_active():
             self._lib_rate(n)
 

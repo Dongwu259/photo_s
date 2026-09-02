@@ -712,6 +712,8 @@ STRINGS = {
         "dev_ai_no_params": "AI 未返回任何参数",
         "dev_ai_done": "AI 调色完成 · 置信度 {conf:.2f} · 参数已写入滑杆，可微调或 ⌘Z 撤销",
         "dev_ai_masks_added": "局部蒙版 ×{n}（蒙版编辑器可改可删）",
+        "dev_mask_edit": "蒙版",
+        "mask_done": "完成",
         # ── v2.4 shortcut table ──
         "shortcuts_title": "键盘快捷键",
         "shortcuts_text": (
@@ -1445,6 +1447,8 @@ STRINGS = {
         "dev_ai_no_params": "AI returned no parameters",
         "dev_ai_done": "AI tone done · confidence {conf:.2f} · params applied to sliders — tweak or ⌘Z to undo",
         "dev_ai_masks_added": "+{n} local mask(s) — editable/removable in the mask editor",
+        "dev_mask_edit": "Masks",
+        "mask_done": "Done",
         # ── v2.4 shortcut table ──
         "shortcuts_title": "Keyboard Shortcuts",
         "shortcuts_text": (

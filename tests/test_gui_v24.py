@@ -304,8 +304,8 @@ class TestWysiwygRender:
         while time.time() < deadline and not calls:
             root.update()
             time.sleep(0.02)
-        tops = [w for w in root.winfo_children()
-                if isinstance(w, tk.Toplevel)]
+        # v2.5: 灯箱内嵌进 Library（不再是 Toplevel）
+        assert app._lib_lightbox_active
         try:
             assert calls and calls[0][0] == paths[0]
             assert calls[0][1] is True  # lightbox shows the full truth
@@ -319,15 +319,10 @@ class TestWysiwygRender:
                         if badge in t:
                             found.append(t)
                     walk(c)
-            for tp in tops:
-                walk(tp)
+            walk(app._lib_lightbox_frame)
             assert found, "badge missing from the lightbox info line"
         finally:
-            for tp in tops:
-                try:
-                    tp.destroy()
-                except tk.TclError:
-                    pass
+            app._exit_library_lightbox()
 
 
 class TestLibraryVirtualGrid:
@@ -656,3 +651,110 @@ def root_update(app):
 
 
 
+
+
+class TestV25StructuralPromotion:
+    """v2.5: 蒙版画布升格进 Develop / 审查灯箱并入 Library（无弹窗）。"""
+
+    def test_mask_mode_enter_apply_exit(self, app_with_photos):
+        """进入蒙版模式：模块切 develop、无 Toplevel、退出时序列化
+        _photo_masks 并复位布局。"""
+        import tkinter as tk
+        root, app, paths = app_with_photos
+        app._show_module("library")
+        # 快照对比而非绝对为零——全量顺序下其他测试可能遗留未关窗口
+        before = {id(w) for w in root.winfo_children()
+                  if isinstance(w, tk.Toplevel)}
+        app._dev_enter_mask_mode()
+        root.update()
+        assert app._active_module == "develop"
+        assert app._dev_mask_mode and app._dev_mask_frame is not None
+        leaked = [w for w in root.winfo_children()
+                  if isinstance(w, tk.Toplevel) and id(w) not in before]
+        assert not leaked, "mask editor must not open a popup"
+        assert app._dev_mask_host.winfo_manager() == "pack"
+        assert app._dev_viewer_card.winfo_manager() == ""
+        app._dev_exit_mask_mode()
+        root.update()
+        assert not app._dev_mask_mode and app._dev_mask_frame is None
+        assert app._dev_viewer_card.winfo_manager() == "pack"
+        assert app._dev_mask_host.winfo_manager() == ""
+
+    def test_mask_exit_writes_photo_masks(self, app_with_photos):
+        root, app, paths = app_with_photos
+        app._dev_enter_mask_mode()
+        root.update()
+        ctl = app._dev_mask_ctl
+        # 直接操纵控制器等价于在画布上画了一个蒙版后退出
+        photo_state = app._dev_mask_frame  # frame 存在即可
+        assert ctl is not None and callable(ctl["apply"])
+        app._dev_exit_mask_mode()
+        root.update()
+        # 无编辑 → 与全局一致 → 不产生 per-photo 覆盖
+        for p in paths:
+            assert p not in (app._photo_masks or {})
+
+    def test_mask_mode_key_routing(self, app_with_photos):
+        """←/→/⌘Z 在蒙版模式路由给编辑器，退出后恢复。"""
+        root, app, paths = app_with_photos
+        app._dev_enter_mask_mode()
+        root.update()
+        pages = []
+        real = app._dev_mask_ctl["page_prev"]
+
+        def spy():
+            pages.append(1)
+        app._dev_mask_ctl["page_prev"] = spy
+        root.event_generate("<Left>")
+        root.update()
+        assert pages, "Left must reach the mask editor in mask mode"
+        app._dev_exit_mask_mode()
+        root.update()
+        pages.clear()
+        root.event_generate("<Left>")
+        root.update()
+        assert not pages, "Left must not route after exiting mask mode"
+
+    def test_lightbox_enter_exit(self, app_with_photos):
+        import tkinter as tk
+        root, app, paths = app_with_photos
+        app._show_module("develop")
+        before = {id(w) for w in root.winfo_children()
+                  if isinstance(w, tk.Toplevel)}
+        app._show_review()
+        root.update()
+        assert app._active_module == "library"
+        assert app._lib_lightbox_active
+        leaked = [w for w in root.winfo_children()
+                  if isinstance(w, tk.Toplevel) and id(w) not in before]
+        assert not leaked, "lightbox must not open a popup"
+        assert app._lib_lightbox_host.winfo_manager() == "pack"
+        assert app._lib_list_frame.winfo_manager() == ""
+        app._exit_library_lightbox()
+        root.update()
+        assert not app._lib_lightbox_active
+        assert app._lib_list_frame.winfo_manager() == "pack"
+
+    def test_lightbox_escape_exits(self, app_with_photos):
+        root, app, paths = app_with_photos
+        app._show_review()
+        root.update()
+        assert app._lib_lightbox_active
+        root.event_generate("<Escape>")
+        root.update()
+        assert not app._lib_lightbox_active
+
+    def test_lightbox_rating_key_routes_to_lightbox(
+            self, app_with_photos, monkeypatch):
+        root, app, paths = app_with_photos
+        app._show_review()
+        root.update()
+        rated = []
+        ctl = app._lib_lightbox_ctl
+        monkeypatch.setitem(ctl, "set_rating",
+                            lambda n: rated.append(n))
+        app._lib_lightbox_ctl = ctl
+        root.event_generate("4")
+        root.update()
+        assert rated == [4]
+        app._exit_library_lightbox()

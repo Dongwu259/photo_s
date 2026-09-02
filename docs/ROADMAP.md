@@ -169,7 +169,19 @@
 
 测试：`test_vocab_verifier.py` 25 + `test_vocab_plugin.py` 35；全量回归见提交。
 
-### v2.5.0 候选（平台收尾 —— GUI_UPGRADE_PLAN §6 原案）
+### v2.5.0 — 结构归位 + 平台收尾（实施中 2026-09-02）
+
+**A. 结构归位（v2.4 推迟的两项，2026-09-02 落地）**：
+
+- [x] 蒙版画布升格进 Develop：共享构建器 + 模块内宿主（主行 pack 切换），
+      「编辑蒙版」按钮同入口；退出即写 `_photo_masks`（所见即所得）；
+      键路由（←/→/⌘Z/Esc + 输入焦点守卫）；顺带修复 v1.8 潜伏 bug
+      （字符串型局部调整序列化 float() 必崩）
+- [x] 审查灯箱并入 Library：网格 ↔ 灯箱 pack 切换（工具栏不动），
+      ⌘E/「审查」入口不变；0-5/←/→/⌘Z/Esc 键路由；行内星标退出刷新；
+      `_focus_in_text_widget` 提取共享键守卫
+
+**B. 平台打包（GUI_UPGRADE_PLAN §6 原案，未做）**：
 
 - [ ] macOS：PyInstaller windowed `.app` + dmg（codesign ad-hoc、Tk 8.6 pin）；
       `tk::mac::ShowPreferences/About` 菜单集成
