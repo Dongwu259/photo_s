@@ -207,6 +207,41 @@ class TestMetadataAndXml:
                               white_balance=settings.get("WhiteBalance"))
         assert back["crop"] == "300x200+10+5"
 
+    def test_embed_into_jpeg(self, tmp_path):
+        from PIL import Image
+        from photo_s.lrxmp import read_embedded_xmp
+        p = tmp_path / "e.jpg"
+        Image.new("RGB", (60, 40), (120, 100, 80)).save(str(p))
+        from photo_s.engine import apply_exif_tags
+        apply_exif_tags(str(p), {"make": "Canon"})  # EXIF 段必须在嵌入后保留
+        path, warns = write_xmp_sidecar(
+            str(p), {"ev": 0.3, "masks": "m:radial:0.5,0.5,0.2,0.2",
+                     "mask_adjust": "m:exposure=-0.2"}, rating=3, embed=True)
+        assert path == str(p) and not warns
+        # 文件仍是合法 JPEG、像素未变、EXIF 保留
+        with Image.open(p) as im:
+            assert im.size == (60, 40)
+        from photo_s.engine import read_exif_metadata
+        assert read_exif_metadata(str(p)).get("make") == "Canon"
+        # 内嵌 XMP 可读回且内容完整（含 xpacket 包裹）
+        text = read_embedded_xmp(str(p))
+        assert text and text.startswith("<?xpacket")
+        settings = parse_xmp_sidecar(text)
+        assert settings["Exposure2012"] == "+0.3"
+        assert len(settings["MaskGroupBasedCorrections"]) == 1
+        # 二次嵌入 = 替换而非叠加
+        write_xmp_sidecar(str(p), {"ev": 0.1}, embed=True)
+        assert read_embedded_xmp(str(p)).count("<x:xmpmeta") == 1
+        assert parse_xmp_sidecar(read_embedded_xmp(str(p)))["Exposure2012"] == "+0.1"
+
+    def test_embed_non_jpeg_falls_back(self, tmp_path):
+        from PIL import Image
+        p = tmp_path / "f.png"
+        Image.new("RGB", (60, 40)).save(str(p))
+        path, warns = write_xmp_sidecar(str(p), {"ev": 0.1}, embed=True)
+        assert path.endswith("f.xmp")
+        assert any("JPEG" in w for w in warns)
+
     def test_sidecar_out_dir(self, tmp_path):
         from PIL import Image
         p = tmp_path / "a.jpg"
@@ -344,6 +379,19 @@ class TestCli:
         assert rc == 0
         assert float(settings["Exposure2012"]) == pytest.approx(0.3, abs=0.005)
         assert float(settings["Contrast2012"]) == pytest.approx(10.0)
+
+    def test_xmp_export_embed(self, tmp_path, capsys):
+        from PIL import Image
+        from photo_s.cli import run_cli
+        from photo_s.lrxmp import read_embedded_xmp
+        p = tmp_path / "g.jpg"
+        Image.new("RGB", (60, 40), (120, 100, 80)).save(str(p))
+        rc = run_cli(["xmp-export", str(p), "--embed",
+                      "--rating", "5", "--keywords", "t"])
+        assert rc == 0
+        text = read_embedded_xmp(str(p))
+        assert text and "Rating" in text and "dc:subject" in text
+        assert not (tmp_path / "g.xmp").exists()
 
     def test_xmp_export_no_source_errors(self, tmp_path):
         from PIL import Image

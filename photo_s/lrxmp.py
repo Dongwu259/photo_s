@@ -76,6 +76,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 __all__ = [
     "LrError", "parse_xmp_sidecar", "parse_develop_blob", "scan_catalog",
     "crs_to_options", "options_to_xmp", "write_xmp_sidecar",
+    "embed_xmp_jpeg", "read_embedded_xmp",
     "coverage", "scan_and_report", "discover_inputs",
     "write_export", "HSL_COLORS", "LOCAL_MAP", "content_features",
 ]
@@ -116,13 +117,16 @@ def parse_xmp_sidecar(source: Any) -> Dict[str, Any]:
     v2.5 起 XMP sidecar 与 catalog blob 同能：曲线属性（``"0, 0 128, 140"``）
     转为 float 列表、``MaskGroupBasedCorrections``/``CorrectionMasks`` 嵌套
     元素转为与 blob 同形的 list-of-dicts（此前只有 catalog 明文快照能读出
-    曲线/蒙版）。
+    曲线/蒙版）。v2.5.1 起容忍 xpacket 包裹（真实 LR sidecar / JPEG 内嵌
+    XMP 均带 ``<?xpacket ...?>`` PI——``<?xml?>`` 声明前有 PI 时 ET 拒解析）。
     """
     if isinstance(source, (str, os.PathLike)) and os.path.exists(source):
         with open(source, "r", encoding="utf-8") as f:
             text = f.read()
     else:
         text = str(source)
+    text = text.lstrip("﻿").strip()
+    text = re.sub(r"^<\?xpacket[^>]*\?>", "", text).strip()
     if "<!ENTITY" in text:
         # stdlib ElementTree expands internal entities — a crafted sidecar
         # (billion laughs) would balloon memory. Real XMP files from
@@ -927,11 +931,17 @@ def write_xmp_sidecar(image_path: str, options: Any = None, *,
                       rating: Optional[int] = None, label: Optional[str] = None,
                       keywords: Optional[Sequence[str]] = None,
                       title: Optional[str] = None,
-                      out_dir: Optional[str] = None) -> Tuple[str, List[str]]:
+                      out_dir: Optional[str] = None,
+                      embed: bool = False) -> Tuple[str, List[str]]:
     """把 options 写成 ``<原图>.xmp``（LR 打开原图即见调整）；返回 (路径, warnings)。
 
     裁剪换算所需的 image_size 自动从原图读取。``out_dir`` 指定时 sidecar
     写入该目录（文件名不变）。
+
+    ``embed=True``（v2.5.1）：XMP 直接嵌入 JPEG 文件的 APP1 段（LR 对
+    JPEG/TIFF/PSD/DNG 只读**内嵌** XMP，不读 sidecar——sidecar 仅对 RAW
+    格式生效）。非 JPEG 回落写 sidecar 并追加 warning。原地改写原子完成
+    （临时文件 + os.replace），像素与其余段（EXIF/ICC）逐字节保留。
     """
     from PIL import Image
 
@@ -940,6 +950,12 @@ def write_xmp_sidecar(image_path: str, options: Any = None, *,
         size = im.size
     xmp, warnings = options_to_xmp(options, image_size=size, rating=rating,
                                    label=label, keywords=keywords, title=title)
+    if embed:
+        if os.path.splitext(p)[1].lower() in (".jpg", ".jpeg"):
+            embed_xmp_jpeg(p, xmp)
+            return p, warnings
+        warnings.append(f"{os.path.basename(p)} 不是 JPEG，XMP 嵌入仅支持 "
+                        f"JPEG——已回落写 sidecar（RAW 格式 LR 原生读 sidecar）")
     stem = os.path.splitext(os.path.basename(p))[0]
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
@@ -949,6 +965,99 @@ def write_xmp_sidecar(image_path: str, options: Any = None, *,
     with open(sidecar, "w", encoding="utf-8") as f:
         f.write(xmp)
     return sidecar, warnings
+
+
+# JPEG 内嵌 XMP：标准 APP1 段命名空间（Adobe 规范）
+_XMP_APP1_NS = b"http://ns.adobe.com/xap/1.0/\x00"
+_XMPACKET_BEGIN = ('<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>\n')
+_XMPACKET_END = '\n<?xpacket end="w"?>'
+
+
+def _wrap_xpacket(xmp: str) -> bytes:
+    """嵌入用的标准 XMP 包（xpacket PI 包裹——LR/ACR 写 JPEG 即此形态）。"""
+    return (_XMPACKET_BEGIN + xmp.rstrip("\n") + _XMPACKET_END).encode("utf-8")
+
+
+def embed_xmp_jpeg(jpeg_path: str, xmp: str) -> None:
+    """把 XMP 包写入 JPEG 的 APP1 段（已有 XMP 段则替换），原子改写。
+
+    段级操作：SOI 之后逐段扫描到 SOS，收集已有 XMP APP1 的字节区间并剔除；
+    新段插在 SOI（及紧随的 APP0/JFIF，若有）之后。像素与 EXIF/ICC 等其余
+    段逐字节保留。
+    """
+    with open(jpeg_path, "rb") as f:
+        data = f.read()
+    if data[:2] != b"\xff\xd8":
+        raise LrError(f"not a JPEG: {jpeg_path}")
+
+    pos = 2
+    insert_at = 2
+    xmp_spans = []
+    while pos + 4 <= len(data):
+        if data[pos] != 0xFF:
+            raise LrError(f"corrupt JPEG segment at byte {pos}")
+        marker = data[pos + 1]
+        if marker == 0xD8 or marker == 0x01 or 0xD0 <= marker <= 0xD7:
+            pos += 2
+            continue
+        seglen = int.from_bytes(data[pos + 2:pos + 4], "big")
+        seg_end = pos + 2 + seglen
+        if seg_end > len(data):
+            raise LrError(f"corrupt JPEG segment length at byte {pos}")
+        if marker == 0xE1 and data[pos + 4:pos + 4 + len(_XMP_APP1_NS)] \
+                == _XMP_APP1_NS:
+            xmp_spans.append((pos, seg_end))
+        elif marker == 0xE0 and pos == insert_at:
+            insert_at = seg_end  # JFIF APP0 保持在最前
+        if marker == 0xDA:  # SOS——其后是熵编码数据，段扫描到此为止
+            break
+        pos = seg_end
+
+    payload = _XMP_APP1_NS + _wrap_xpacket(xmp)
+    seg = b"\xff\xe1" + (len(payload) + 2).to_bytes(2, "big") + payload
+    if len(payload) + 2 > 0xFFFF:
+        raise LrError("XMP packet too large for one APP1 segment "
+                      f"({len(payload) + 2} > 65535)")
+
+    drop = set()
+    for a, b in xmp_spans:
+        drop.update(range(a, b))
+    kept = bytes(b for i, b in enumerate(data) if i not in drop)
+    # insert_at 按原文件偏移计算——被剔除的段都在其后（XMP 段不会在
+    # SOI/APP0 之前），偏移在 kept 前缀中不变
+    out = kept[:insert_at] + seg + kept[insert_at:]
+    tmp = jpeg_path + ".xmp.tmp"
+    with open(tmp, "wb") as f:
+        f.write(out)
+    os.replace(tmp, jpeg_path)
+
+
+def read_embedded_xmp(jpeg_path: str) -> Optional[str]:
+    """读出 JPEG 内嵌的 XMP 包文本（无则 None）。"""
+    with open(jpeg_path, "rb") as f:
+        data = f.read()
+    if data[:2] != b"\xff\xd8":
+        return None
+    pos = 2
+    while pos + 4 <= len(data):
+        if data[pos] != 0xFF:
+            return None
+        marker = data[pos + 1]
+        if marker == 0xD8 or marker == 0x01 or 0xD0 <= marker <= 0xD7:
+            pos += 2
+            continue
+        seglen = int.from_bytes(data[pos + 2:pos + 4], "big")
+        seg_end = pos + 2 + seglen
+        if seg_end > len(data):
+            return None
+        if marker == 0xE1 and data[pos + 4:pos + 4 + len(_XMP_APP1_NS)] \
+                == _XMP_APP1_NS:
+            return data[pos + 4 + len(_XMP_APP1_NS):seg_end] \
+                .decode("utf-8", errors="replace")
+        if marker == 0xDA:
+            return None
+        pos = seg_end
+    return None
 
 
 # ---------------------------------------------------------------- 覆盖率

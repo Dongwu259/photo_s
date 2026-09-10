@@ -2081,6 +2081,10 @@ def run_cli(args: List[str] = None) -> int:
         help=_t('help_xmp_out_dir'),
     )
     xmp_parser.add_argument(
+        "--embed", action="store_true",
+        help=_t('help_xmp_embed'),
+    )
+    xmp_parser.add_argument(
         "--json", action="store_true",
         help=_t('help___json'),
     )
@@ -3580,7 +3584,8 @@ def run_cli(args: List[str] = None) -> int:
             try:
                 sidecar, warns = write_xmp_sidecar(
                     p, opts, rating=parsed.rating, keywords=keywords,
-                    title=parsed.title, out_dir=parsed.out_dir)
+                    title=parsed.title, out_dir=parsed.out_dir,
+                    embed=getattr(parsed, 'embed', False))
             except Exception as e:
                 print(f"  ❌ {p}  {e}", file=sys.stderr)
                 fail += 1

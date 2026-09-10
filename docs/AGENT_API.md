@@ -98,7 +98,7 @@ key ∈ exposure/brightness/contrast/saturation/vibrance/clarity/texture/sharpen
 | `lr-train --data lr_records.jsonl [--images DIR] --out m.npz` | 训练进度（stderr）+ 模型文件 | 岭回归 9 项全局参数，纯 numpy；sanitize 包缺 --images 时报"缺图跳过"诊断 |
 | `lr-predict IMG [--model m.npz] --json` | `{"path", "options": {ev, contrast, saturation, vibrance, wb_temp, wb_tint, clarity, texture, dehaze}}` | **输出键与 ProcessOptions 字段一致（exposure→ev），REST/MCP/CLI 零映射可直接套用**；自动识别岭回归 / CLIP+MLP npz（后者需 torch + open-clip-torch，缺失报清晰 LrError） |
 | `lr-recipes` / `lr-similar` / `lr-eval` | 配方聚类 / 相似编辑检索 / 教师评测集 | v1.7.1，见 `photo-s <cmd> --help` |
-| `xmp-export PATHS [--preset\|--options JSON\|--auto-tone] [--rating] [--keywords] [--title]` | `{"count", "failed", "results": [{path, sidecar, warnings[]}]}` | **v2.5 LR 双向互通写出侧**：把 PhotoS 调整写成 LR 可读 `.xmp` sidecar（crs 字段逐项逆映射 + radial/linear 蒙版 + xmp:Rating/dc:subject）。LR 打开原图即见全部调整可续修；`--auto-tone` 时导出的是真实预测参数 |
+| `xmp-export PATHS [--preset\|--options JSON\|--auto-tone] [--rating] [--keywords] [--title]` | `{"count", "failed", "results": [{path, sidecar, warnings[]}]}` | **v2.5 LR 双向互通写出侧**：把 PhotoS 调整写成 LR 可读 `.xmp` sidecar（crs 字段逐项逆映射 + radial/linear 蒙版 + xmp:Rating/dc:subject）。LR 打开原图即见全部调整可续修；`--auto-tone` 时导出的是真实预测参数。**`--embed`（v2.5.1）**：JPEG 直接内嵌 XMP 到 APP1 段——LR 对 JPEG/TIFF/PSD/DNG 只读内嵌 XMP，sidecar 仅对 RAW 格式生效（替换该文件已有内嵌 XMP，像素/EXIF 逐字节保留） |
 | `batch --write-xmp` | BatchResult 附 `xmp_sidecars[]` | v2.5：批处理每张输入在原图旁写 sidecar；与 `--auto-tone` 组合时逐图先预测并入 options（引擎不二次推理），sidecar 记录的就是实际渲染参数 |
 
 `--denoise N` 与 `--auto-straighten` 需要
