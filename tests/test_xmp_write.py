@@ -258,6 +258,19 @@ class TestReaderShims:
         assert cm["MaskInverted"] is True  # 字符串 "False" 是 truthy 的坑
         assert float(cm["Feather"]) == pytest.approx(51.0)
 
+    def test_inner_correction_masks_not_duplicated(self):
+        # 组内 li 里的 CorrectionMasks 是几何载体——不得被重复收集为
+        # 独立修正组（其父级是 rdf:li，直接父级检查拦不住，须走祖先链）
+        opts = ProcessOptions(
+            masks="a:radial:0.5,0.5,0.2,0.2;b:linear:0,0.5,1,0.5",
+            mask_adjust="a:exposure=0.1")
+        xmp, _, _ = _roundtrip(opts)
+        settings = parse_xmp_sidecar(xmp)
+        groups = settings["MaskGroupBasedCorrections"]
+        assert len(groups) == 2
+        assert all(g.get("CorrectionMasks") for g in groups)
+        assert [g["CorrectionName"] for g in groups] == ["a", "b"]
+
 
 class TestResolveAutoTone:
     def _fake_provider(self, monkeypatch):

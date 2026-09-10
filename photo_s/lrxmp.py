@@ -199,8 +199,19 @@ def _xmp_mask_groups(root: Any) -> List[Dict[str, Any]]:
 
     只处理直接挂在 rdf:Description 下的组元素——嵌在组内 li 里的
     CorrectionMasks 是蒙版几何载体，不是独立修正组（iter 会重复访问）。
+    判据走祖先链而非直接父级：内层 CorrectionMasks 的父级是 rdf:li（rdf
+    命名空间），直接父级检查拦不住它。
     """
     parent_of = {c: p for p in root.iter() for c in p}
+
+    def _nested_in_crs(elem: Any) -> bool:
+        p = parent_of.get(elem)
+        while p is not None:
+            if p.tag.startswith(_XMP_CRS):
+                return True
+            p = parent_of.get(p)
+        return False
+
     out: List[Dict[str, Any]] = []
     for elem in root.iter():
         if not elem.tag.startswith(_XMP_CRS):
@@ -208,8 +219,7 @@ def _xmp_mask_groups(root: Any) -> List[Dict[str, Any]]:
         name = elem.tag[len(_XMP_CRS):]
         if name not in ("MaskGroupBasedCorrections", "CorrectionMasks"):
             continue
-        parent = parent_of.get(elem)
-        if parent is not None and parent.tag.startswith(_XMP_CRS):
+        if _nested_in_crs(elem):
             continue
         for li in _rdf_li_items(elem):
             corr: Dict[str, Any] = {}
