@@ -974,8 +974,16 @@ _XMPACKET_END = '\n<?xpacket end="w"?>'
 
 
 def _wrap_xpacket(xmp: str) -> bytes:
-    """嵌入用的标准 XMP 包（xpacket PI 包裹——LR/ACR 写 JPEG 即此形态）。"""
-    return (_XMPACKET_BEGIN + xmp.rstrip("\n") + _XMPACKET_END).encode("utf-8")
+    """嵌入用的标准 XMP 包（LR 实测形态）。
+
+    ``<?xpacket?>`` PI 后**直接是 ``<x:xmpmeta>``——不能带 ``<?xml?>`` 声明**
+    （声明出现在 PI 之后是非法 XML，LR 的解析器会静默丢弃整个包）；包尾
+    ``end="w"`` 前留 ~2KB 空白填充（可写包规范，Adobe 工具均如此）。
+    """
+    body = re.sub(r"^<\?xml[^>]*\?>\s*", "", xmp.strip())
+    padding = " " * 2048
+    return (_XMPACKET_BEGIN + body + "\n" + padding
+            + _XMPACKET_END).encode("utf-8")
 
 
 def embed_xmp_jpeg(jpeg_path: str, xmp: str) -> None:
@@ -1007,8 +1015,14 @@ def embed_xmp_jpeg(jpeg_path: str, xmp: str) -> None:
         if marker == 0xE1 and data[pos + 4:pos + 4 + len(_XMP_APP1_NS)] \
                 == _XMP_APP1_NS:
             xmp_spans.append((pos, seg_end))
-        elif marker == 0xE0 and pos == insert_at:
-            insert_at = seg_end  # JFIF APP0 保持在最前
+        elif pos == insert_at and (
+                marker == 0xE0
+                or (marker == 0xE1 and data[pos + 4:pos + 10] == b"Exif\x00\x00")
+                or marker == 0xE2 or marker == 0xED or marker == 0xEE):
+            # Adobe/exiftool 约定的前置元数据段（JFIF/EXIF/ICC/Photoshop/
+            # Adobe）保持在 XMP 之前——LR 写的 JPEG 即此顺序，XMP 排在
+            # EXIF 之后的第二个 APP1
+            insert_at = seg_end
         if marker == 0xDA:  # SOS——其后是熵编码数据，段扫描到此为止
             break
         pos = seg_end
