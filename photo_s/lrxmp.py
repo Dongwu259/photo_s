@@ -794,6 +794,12 @@ def options_to_xmp(options: Any, *, image_size: Optional[Tuple[int, int]] = None
         "Version": _XMP_WRITER_VERSION,
         "ProcessVersion": _XMP_PROCESS_VERSION,
         "HasSettings": "True",
+        # LR 对 JPEG 的保守策略：缺 AlreadyApplied 时把 crs 块当「已烘焙
+        # 进像素的记录」忽略（实测：xmp:Rating 可读、曝光/蒙版不出现）。
+        # False = 设置未应用、LR 须作为可编辑开发设置导入——与真实 LR
+        # sidecar（fixture lr_crs_edited.xmp）一致。
+        "AlreadyApplied": "False",
+        "ToneCurveName2012": "Linear",
     }
 
     ev = getattr(options, "ev", None)
@@ -851,12 +857,16 @@ def options_to_xmp(options: Any, *, image_size: Optional[Tuple[int, int]] = None
 
     if options.curves:
         from .grade import _parse_curves  # noqa: SLF001 — 同上
+        wrote_curve = False
         for ch, points in _parse_curves(options.curves).items():
             if len(points) == 2 and points[0] == (0.0, 0.0) \
                     and points[1] == (255.0, 255.0):
                 continue  # 恒等曲线
             crs[_CURVE_KEY_BY_CHANNEL[ch]] = " ".join(
                 f"{x:g}, {y:g}" for x, y in points)
+            wrote_curve = True
+        if wrote_curve:
+            crs["ToneCurveName2012"] = "Custom"
 
     if options.color_grading:
         from .grade import _parse_color_grading  # noqa: SLF001 — 同上

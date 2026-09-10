@@ -83,7 +83,7 @@ class TestCompactStrings:
         xmp, _, back = _roundtrip(
             ProcessOptions(curves="rgb:0,0;255,255"))
         assert "curves" not in back
-        assert "ToneCurve" not in xmp
+        assert "ToneCurvePV2012" not in xmp   # Name=Linear 结构属性可以有
 
     def test_color_grading_negative_hue_wraps(self):
         opts = ProcessOptions(color_grading="shadows:-60.0,0.400,0.000")
