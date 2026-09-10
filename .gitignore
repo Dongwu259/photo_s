@@ -28,3 +28,6 @@ photo-s.toml
 
 # Claude Code local settings (machine-specific, not for the repo)
 .claude/
+
+# ZCode local session artifacts
+.zcode/

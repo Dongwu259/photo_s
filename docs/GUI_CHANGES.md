@@ -762,3 +762,52 @@ mkdtemp 追踪误伤 → root 泄漏 → macOS focus 事件风暴）。
 - 测试迁移：弹窗断言 → 内嵌断言（无 Toplevel + 模式标志 + pack 状态）；
   新增 `TestV25StructuralPromotion` 6 项（进/出/序列化/键路由/Escape/
   评级路由）
+
+## 18. v2.6 P0：XMP 互通三入口（LR 双向 GUI 化）
+
+> v2.5.1 打通的 LR 互通（CLI `xmp-export --embed`）补进 GUI——摄影师
+> 往返工作流（PhotoS 调色 → LR 续修 → lr-scan 回采）在 GUI 侧收口。
+> 全部经 `gui/workflows.py` 新增的 3 个 Tk-free seam 走 `lrxmp`，
+> agent 面（CLI/REST/MCP）零改动。
+
+### 18.1 三个 seam（`workflows.py`，无 Tk 可单测）
+
+- `xmp_write_back(path, options, *, meta_from=None)`：rating/关键词/
+  标题从 EXIF 透传（best-effort）→ `write_xmp_sidecar(embed=True)`
+  （JPEG 内嵌 / 非 JPEG 回落 sidecar+warning）
+- `xmp_read_adjust(path)`：sidecar 优先、其次 JPEG 内嵌；无
+  `HasSettings`/解析失败 → None（无 XMP 是常态，不报错）；返回
+  `{"fields", "masks", "mask_adjust"}`（`exposure→ev` 已重命名）
+- `reveal_in_file_manager(path)`：三平台打开目录，全 try/except
+
+### 18.2 Develop「写回 XMP」按钮
+
+- 工具栏（对比按钮旁）：当前照片的有效 options（全局+覆盖层+蒙版）
+  写回原文件——JPEG 内嵌（**改写原文件字节，每会话首次确认一次**，
+  `_xmp_embed_confirmed`）、RAW 等写同名 `.xmp`
+- busy 守卫 + daemon 线程 + `_dev_bus` 回投，模式同 `_dev_ai_tone`；
+  状态栏报目标文件与警告（笔刷/AI 蒙版等无 LR 等价项逐条列出）
+
+### 18.3 Export「同时写 XMP」勾选（输出格式区）
+
+- 勾选后批处理完成的每个输出带配方：**写输出**（JPEG 内嵌、其他格式
+  输出旁 sidecar）——交付物自带可续修配方，与写回按钮（写原件）互补；
+  有效参数含逐照片覆盖层（`_per_file_masks` 复用）
+- `_process_thread(files, options, write_xmp=False)`（签名加默认参
+  数，调用方兼容）；完成状态行追加「XMP 已写 N 个」
+
+### 18.4 Develop 自动载入 XMP（LR 修过的照片）
+
+- `_dev_select`：照片无本地覆盖层时后台解析其 XMP → 命中则按
+  `_dev_ai_apply` 同款模式入覆盖层/蒙版/撤销史（基线=全局字段），
+  「已调」徽标自动点亮，状态栏提示
+- 冲突策略：**本地编辑永远赢**（有覆盖层不读；读取期间被编辑则丢弃
+  结果）；无 XMP / 纯浏览零副作用（已核实 `_dev_select` 的 flush 有
+  `old in _photo_adjust` 守卫，浏览不建覆盖层）
+
+### 18.5 测试
+
+`test_gui_workflows.py::TestXmpSeams` 7 项（无 Tk：嵌入/回落/meta
+透传/三态读取/sidecar 优先/reveal）+ `test_gui_v26.py` 12 项（按钮
+守卫/确认一次/警告与失败状态/真实 JPEG 往返；Export 勾选三态；自动
+载入三态）

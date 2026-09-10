@@ -192,6 +192,9 @@ class PhotoSApp:
         self.max_width = tk.StringVar(value="")
         self.max_height = tk.StringVar(value="")
         self.preserve_exif = tk.BooleanVar(value=True)
+        # v2.6: write the recipe into each output's XMP (JPEG embed / other
+        # formats sidecar) so Lightroom can continue editing the deliverable
+        self.write_xmp = tk.BooleanVar(value=False)
         self.optimize = tk.BooleanVar(value=True)
         self.progressive = tk.BooleanVar(value=False)
         self.jpeg_subsampling = tk.StringVar(value="420")
@@ -340,6 +343,10 @@ class PhotoSApp:
         # v2.4: AI auto-tone (official plugin) runs in a worker thread; the
         # busy flag re-entry-guards the button until the result lands
         self._dev_ai_busy = False
+        # v2.6: XMP write-back button busy flag; the embed confirmation is
+        # asked once per session (embedding rewrites the original JPEG)
+        self._dev_xmp_busy = False
+        self._xmp_embed_confirmed = False
         # v2.4: before/after compare mode — "off" | "split" | "side";
         # the split divider position is a 0-1 fraction of the viewer
         self._dev_compare_mode = "off"
@@ -388,6 +395,7 @@ class PhotoSApp:
         self._progress_started = None  # ETA baseline
         self._batch_result = None
         self._batch_error = None
+        self._xmp_stats = None  # v2.6: (ok, fail) XMP writes of last batch
         self._after_id = None
 
     # ── Localization ────────────────────────────────────────────────────────
@@ -1312,6 +1320,14 @@ class PhotoSApp:
             fg=COLORS["text"], hover_bg=COLORS["divider"],
             border_color=COLORS["border"], font=FONT_SMALL, padx=12, pady=4)
         self._dev_compare_btn.pack(side="left", padx=(12, 0))
+        # v2.6: write the photo's effective adjustments back into its XMP
+        # (JPEG embed / RAW sidecar) so Lightroom can continue editing
+        self._dev_xmp_btn = FlatButton(
+            bottom_bar, text=self._t("dev_xmp_write"),
+            command=self._dev_write_xmp, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=12, pady=4)
+        self._dev_xmp_btn.pack(side="left", padx=(12, 0))
         tk.Label(bottom_bar, text=self._t("dev_hint"), font=FONT_TINY,
                  fg=COLORS["text_secondary"],
                  bg=COLORS["card"]).pack(side="right")
@@ -1840,6 +1856,112 @@ class PhotoSApp:
         }
         return len(renamed_m)
 
+    def _dev_write_xmp(self):
+        """Write the selected photo's effective adjustments (global + its
+        overlay + masks) back into its XMP — JPEG embed / RAW sidecar —
+        so Lightroom opens the photo with the edits applied. Runs in a
+        worker thread; the result is marshalled back through the dev bus
+        (same three-step pattern as _dev_ai_tone)."""
+        if self._dev_xmp_busy:
+            return
+        path = self._dev_selected
+        if not path:
+            self._dev_status_lbl.configure(
+                text=self._t("dev_xmp_need_photo"), fg=COLORS["warning"])
+            return
+        # Embedding rewrites the original JPEG's bytes — confirm once per
+        # session (sidecars for RAW just add a file, no question needed)
+        if (not self._xmp_embed_confirmed
+                and path.lower().endswith((".jpg", ".jpeg"))
+                and not messagebox.askyesno(
+                    self._t("dev_xmp_write"),
+                    self._t("dev_xmp_confirm"))):
+            return
+        self._xmp_embed_confirmed = True
+        # _build_options reads tk vars — must run on the Tk thread
+        opts = self._per_file_overlay(path, self._build_options())
+        self._dev_xmp_busy = True
+        try:
+            self._dev_xmp_btn.configure(state=tk.DISABLED)
+        except tk.TclError:
+            pass
+        self._dev_status_lbl.configure(
+            text=self._t("dev_xmp_working"), fg=COLORS["text_secondary"])
+
+        def work():
+            res, err = None, None
+            try:
+                res = workflows.xmp_write_back(path, opts)
+            except Exception as e:
+                err = str(e) or e.__class__.__name__
+            self._dev_bus.schedule(
+                lambda: self._dev_xmp_done(path, res, err))
+
+        threading.Thread(target=work, daemon=True,
+                         name="photos-xmp-write").start()
+
+    def _dev_xmp_done(self, path, res, err):
+        """Bus-delivered completion for _dev_write_xmp: status only —
+        the file on disk is the effect, no GUI state changes."""
+        self._dev_xmp_busy = False
+        try:
+            self._dev_xmp_btn.configure(state=tk.NORMAL)
+        except tk.TclError:
+            pass  # panel torn down mid-flight
+        if err is not None:
+            self._dev_status_lbl.configure(
+                text=self._t("dev_xmp_failed", err=err[:140]),
+                fg=COLORS["warning"])
+            return
+        text = self._t("dev_xmp_done", target=os.path.basename(res["target"]))
+        warns = res.get("warnings") or []
+        if warns:
+            text = self._t("dev_xmp_done_warn",
+                           target=os.path.basename(res["target"]),
+                           n=len(warns), first=warns[0][:80])
+        self._dev_status_lbl.configure(text=text,
+                                       fg=COLORS["warning"] if warns
+                                       else COLORS["text_secondary"])
+
+    def _dev_xmp_autoload(self, path):
+        """Load the develop settings a photo carries in its XMP (Lightroom
+        roundtrip) into its overlay — only when the photo has no local
+        edits yet. Parsing runs in a worker thread; the apply is guarded
+        against switching away or editing meanwhile."""
+        def work():
+            res = workflows.xmp_read_adjust(path)
+            self._dev_bus.schedule(
+                lambda: self._dev_xmp_loaded(path, res))
+
+        threading.Thread(target=work, daemon=True,
+                         name="photos-xmp-read").start()
+
+    def _dev_xmp_loaded(self, path, res):
+        """Bus-delivered apply of _dev_xmp_autoload: mirror _dev_ai_apply's
+        overlay/history pattern so the loaded adjustments are editable,
+        undoable and light up the adjusted badge."""
+        if res is None:
+            return
+        # stale result: user switched away or started editing meanwhile
+        if path != self._dev_selected or path in self._photo_adjust:
+            return
+        fields = {k: v for k, v in res["fields"].items()
+                  if k in self._DEV_FIELDS}
+        if fields:
+            self._dev_history_push(
+                path, self._dev_fields_of(self._build_options()))
+            self._photo_adjust[path] = fields
+            self._dev_history_push(path, fields)
+            if self._dev_selected == path:
+                self._apply_dev_fields(fields)
+        if res.get("masks"):
+            self._photo_masks[path] = {
+                "masks": res["masks"],
+                "mask_adjust": res.get("mask_adjust") or ""}
+        self._dev_status_lbl.configure(
+            text=self._t("dev_xmp_loaded"), fg=COLORS["text_secondary"])
+        self._dev_update_undo_buttons()
+        self._refresh_export_queue()
 
     def _paste_settings_to(self, paths) -> None:
         """Write the clipboard onto photos: per-photo overlay + history
@@ -2102,6 +2224,10 @@ class PhotoSApp:
                                      os.path.basename(path)))
         self._dev_highlight_strip()
         self._dev_display_current()
+        # v2.6: photo with no local edits — pick up any develop settings
+        # it carries in its XMP (Lightroom roundtrip), badges it as edited
+        if self._photo_adjust.get(path) is None:
+            self._dev_xmp_autoload(path)
 
         def work():
             try:
@@ -2606,6 +2732,9 @@ class PhotoSApp:
             font=FONT_BODY,
         )
         self.format_combo.pack(fill="x")
+        ttk.Checkbutton(
+            fmt_frame, text=self._t("write_xmp_label"),
+            variable=self.write_xmp).pack(anchor="w", pady=(6, 0))
 
         # ── Quality / Target Size ────────────────────────────────────────────
         # Mode toggle: radio buttons
@@ -9938,6 +10067,7 @@ class PhotoSApp:
         # Build options BEFORE entering the processing state, so a bad
         # field can never leave the app stuck in processing=True.
         options = self._build_options()
+        write_xmp = self.write_xmp.get()
 
         self.processing = True
         self.cancel_requested = False
@@ -9958,7 +10088,7 @@ class PhotoSApp:
         # Start background thread
         thread = threading.Thread(
             target=self._process_thread,
-            args=(files.copy(), options),
+            args=(files.copy(), options, write_xmp),
             daemon=True,
         )
         thread.start()
@@ -9971,7 +10101,7 @@ class PhotoSApp:
         self.cancel_requested = True
         self.progress_label.config(text=self._t("cancelling"), fg=COLORS["warning"])
 
-    def _process_thread(self, files, options):
+    def _process_thread(self, files, options, write_xmp=False):
         """Background thread for batch processing."""
         def progress_callback(current, total, path, status=""):
             if self.cancel_requested:
@@ -9992,6 +10122,23 @@ class PhotoSApp:
                 cancel_checker=lambda: self.cancel_requested,
                 per_file_options=_per_file_masks,
             )
+            # v2.6: write the effective recipe into each output's XMP
+            # (JPEG embed, other formats sidecar next to the output) —
+            # mirrors the CLI batch --write-xmp loop, but on the outputs
+            self._xmp_stats = None
+            if write_xmp:
+                ok = fail = 0
+                for r in result.results:
+                    if not r.success or not getattr(r, "output_path", None):
+                        continue
+                    eff = _per_file_masks(r.input_path, options)
+                    try:
+                        workflows.xmp_write_back(
+                            r.output_path, eff, meta_from=r.input_path)
+                        ok += 1
+                    except Exception:
+                        fail += 1
+                self._xmp_stats = (ok, fail)
             with self._progress_lock:
                 self._batch_result = result
         except Exception as e:
@@ -10096,10 +10243,16 @@ class PhotoSApp:
             return
         elif result.success_count > 0:
             savings = format_size(result.savings_bytes)
+            text = self._t("done_status", ok=result.success_count,
+                           total=len(result.results), savings=savings,
+                           pct=f"{result.savings_percent:.1f}")
+            if self._xmp_stats:
+                ok, fail = self._xmp_stats
+                text += " · " + (self._t("xmp_written_status", ok=ok, fail=fail)
+                                 if fail else
+                                 self._t("xmp_written_ok_status", ok=ok))
             self.progress_label.config(
-                text=self._t("done_status", ok=result.success_count,
-                             total=len(result.results), savings=savings,
-                             pct=f"{result.savings_percent:.1f}"),
+                text=text,
                 fg=COLORS["success"],
             )
         else:

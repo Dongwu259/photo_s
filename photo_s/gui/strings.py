@@ -77,6 +77,7 @@ STRINGS = {
         "folder_vars": "留空 = 不分类。变量: {year} {month} {day} {date} {camera} {make}",
         "sec_options": "选项",
         "preserve_exif": "保留 EXIF 信息",
+        "write_xmp_label": "同时写 XMP（Lightroom 可续修）",
         "optimize": "优化压缩",
         "progressive": "渐进式 JPEG",
         "jpeg_subsampling": "JPEG 色度子采样（444 全色彩）",
@@ -120,6 +121,8 @@ STRINGS = {
         "tuning": "调整质量中…",
         "cancelled_status": "已取消 — {ok} 个完成，{fail} 个失败/未处理",
         "done_status": "完成 — {ok}/{total} 成功，节省 {savings} ({pct}%)",
+        "xmp_written_ok_status": "XMP 已写 {ok} 个",
+        "xmp_written_status": "XMP 已写 {ok} 个（失败 {fail}）",
         "failed_status": "处理失败",
         "stats_result": "原始: {sin} → 压缩后: {sout}  |  节省 {pct}%",
         "stats_files": "已选择 {n} 个文件  |  总大小: {size}",
@@ -712,6 +715,18 @@ STRINGS = {
         "dev_ai_no_params": "AI 未返回任何参数",
         "dev_ai_done": "AI 调色完成 · 置信度 {conf:.2f} · 参数已写入滑杆，可微调或 ⌘Z 撤销",
         "dev_ai_masks_added": "局部蒙版 ×{n}（蒙版编辑器可改可删）",
+        # ── v2.6 XMP roundtrip (develop) ──
+        "dev_xmp_write": "写回 XMP",
+        "dev_xmp_need_photo": "先在胶片条选择一张照片",
+        "dev_xmp_confirm": (
+            "将把当前调整（含蒙版）写入原文件：JPEG 直接内嵌 XMP，"
+            "其他格式写同名 .xmp sidecar。继续？"),
+        "dev_xmp_working": "正在写入 XMP…",
+        "dev_xmp_done": "XMP 已写入 {target}",
+        "dev_xmp_done_warn": (
+            "XMP 已写入 {target}（{n} 项警告，如：{first}）"),
+        "dev_xmp_failed": "XMP 写入失败：{err}",
+        "dev_xmp_loaded": "已从 XMP 载入 Lightroom 调整",
         "dev_mask_edit": "蒙版",
         "mask_done": "完成",
         # ── v2.4 shortcut table ──
@@ -810,6 +825,7 @@ STRINGS = {
         "folder_vars": "blank = flat. vars: {year} {month} {day} {date} {camera} {make}",
         "sec_options": "Options",
         "preserve_exif": "Preserve EXIF",
+        "write_xmp_label": "Also write XMP (Lightroom-editable)",
         "optimize": "Optimize",
         "progressive": "Progressive JPEG",
         "jpeg_subsampling": "JPEG chroma subsampling (444 = full color)",
@@ -853,6 +869,8 @@ STRINGS = {
         "tuning": "Tuning quality…",
         "cancelled_status": "Cancelled — {ok} done, {fail} failed/skipped",
         "done_status": "Done — {ok}/{total} succeeded, saved {savings} ({pct}%)",
+        "xmp_written_ok_status": "XMP written for {ok}",
+        "xmp_written_status": "XMP written for {ok} (failed {fail})",
         "failed_status": "Processing failed",
         "stats_result": "Original: {sin} → Compressed: {sout}  |  Saved {pct}%",
         "stats_files": "{n} files selected  |  Total: {size}",
@@ -1447,6 +1465,19 @@ STRINGS = {
         "dev_ai_no_params": "AI returned no parameters",
         "dev_ai_done": "AI tone done · confidence {conf:.2f} · params applied to sliders — tweak or ⌘Z to undo",
         "dev_ai_masks_added": "+{n} local mask(s) — editable/removable in the mask editor",
+        # ── v2.6 XMP roundtrip (develop) ──
+        "dev_xmp_write": "Write XMP",
+        "dev_xmp_need_photo": "Select a photo in the filmstrip first",
+        "dev_xmp_confirm": (
+            "Write the current adjustments (masks included) into the "
+            "original file: JPEGs get the XMP embedded, other formats "
+            "get a matching .xmp sidecar. Continue?"),
+        "dev_xmp_working": "Writing XMP…",
+        "dev_xmp_done": "XMP written to {target}",
+        "dev_xmp_done_warn": (
+            "XMP written to {target} ({n} warning(s), e.g. {first})"),
+        "dev_xmp_failed": "XMP write failed: {err}",
+        "dev_xmp_loaded": "Loaded Lightroom adjustments from XMP",
         "dev_mask_edit": "Masks",
         "mask_done": "Done",
         # ── v2.4 shortcut table ──

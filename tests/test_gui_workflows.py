@@ -1429,3 +1429,93 @@ class TestCompareDialog:
                     if isinstance(w, tk.Toplevel)], \
             "no dialog may open below the 2-image minimum"
         root.destroy()
+
+
+class TestXmpSeams:
+    """v2.6 Tk-free seams: XMP write-back / read-adjust / reveal."""
+
+    def _jpg(self, tmp_path, name="a.jpg", size=(64, 48)):
+        from PIL import Image
+        p = str(tmp_path / name)
+        Image.new("RGB", size, (120, 60, 40)).save(p, quality=90)
+        return p
+
+    def test_write_back_embeds_jpeg(self, tmp_path):
+        from photo_s.engine import ProcessOptions
+        from photo_s.gui import workflows
+        from photo_s.lrxmp import parse_xmp_sidecar, read_embedded_xmp
+        p = self._jpg(tmp_path)
+        res = workflows.xmp_write_back(p, ProcessOptions(ev=0.3,
+                                                         contrast=1.2))
+        assert res["target"] == p, "JPEG targets are embedded in place"
+        assert res["warnings"] == []
+        settings = parse_xmp_sidecar(read_embedded_xmp(p))
+        assert float(settings["Exposure2012"]) == 0.3
+
+    def test_write_back_sidecar_fallback_tiff(self, tmp_path):
+        from PIL import Image
+        from photo_s.engine import ProcessOptions
+        from photo_s.gui import workflows
+        p = str(tmp_path / "b.tif")
+        Image.new("RGB", (32, 32), (10, 10, 10)).save(p)
+        res = workflows.xmp_write_back(p, ProcessOptions(ev=0.5))
+        assert res["target"] == str(tmp_path / "b.xmp")
+        assert len(res["warnings"]) == 1, "non-JPEG fallback warns"
+
+    def test_write_back_carries_meta(self, tmp_path):
+        from photo_s.engine import ProcessOptions, apply_exif_tags
+        from photo_s.gui import workflows
+        from photo_s.lrxmp import parse_xmp_sidecar, read_embedded_xmp
+        p = self._jpg(tmp_path)
+        apply_exif_tags(p, {"rating": 4, "keywords": "山,海", "title": "测试"})
+        workflows.xmp_write_back(p, ProcessOptions(ev=0.1))
+        xmp = read_embedded_xmp(p)
+        assert 'xmp:Rating="4"' in xmp
+        assert "山" in xmp and "海" in xmp
+        assert "测试" in xmp
+
+    def test_read_adjust_from_embedded(self, tmp_path):
+        from photo_s.engine import ProcessOptions
+        from photo_s.gui import workflows
+        p = self._jpg(tmp_path)
+        workflows.xmp_write_back(p, ProcessOptions(
+            ev=0.35, contrast=1.15,
+            masks="m1:linear:0.1,0.1,0.9,0.9", mask_adjust="m1:exposure=0.35"))
+        res = workflows.xmp_read_adjust(p)
+        assert res["fields"]["ev"] == 0.35
+        assert res["fields"]["contrast"] == 1.15
+        assert res["masks"].startswith("m1:linear:")
+        assert res["mask_adjust"].startswith("m1:")
+
+    def test_read_adjust_prefers_sidecar(self, tmp_path):
+        from photo_s.engine import ProcessOptions
+        from photo_s.gui import workflows
+        p = self._jpg(tmp_path)
+        workflows.xmp_write_back(p, ProcessOptions(ev=0.2))  # embedded: 0.2
+        # sidecar must win over the embedded packet
+        with open(p.rsplit(".", 1)[0] + ".xmp", "w", encoding="utf-8") as f:
+            f.write(_CRS_SIDECAR)
+        res = workflows.xmp_read_adjust(p)
+        assert res["fields"]["ev"] == 0.9, "sidecar takes precedence"
+
+    def test_read_adjust_none_without_xmp(self, tmp_path):
+        from photo_s.gui import workflows
+        p = self._jpg(tmp_path, "plain.jpg")
+        assert workflows.xmp_read_adjust(p) is None
+
+    def test_reveal_never_raises(self):
+        from photo_s.gui import workflows
+        workflows.reveal_in_file_manager("/nonexistent/definitely-not-here")
+
+
+_CRS_SIDECAR = '''<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+    crs:Version="18.3.2" crs:ProcessVersion="15.4"
+    crs:HasSettings="True" crs:AlreadyApplied="False"
+    crs:Exposure2012="+0.90"/>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>'''

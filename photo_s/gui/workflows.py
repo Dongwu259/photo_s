@@ -180,3 +180,96 @@ def select_move(paths, selects_dir, rejects_dir,
                    in ("move", "copy"))
     error_count = sum(1 for r in results if not r["ok"])
     return results, ok_count, error_count, ""
+
+
+def xmp_write_back(path, options, *, meta_from=None):
+    """Sync: write a photo's adjustments back into its XMP (LR roundtrip).
+
+    JPEG targets get the XMP embedded (LR only reads embedded XMP for
+    JPEG); anything else falls back to a sidecar next to the file with a
+    warning. Rating/keywords/title are read from ``meta_from``'s EXIF
+    (default: the file itself) and carried into the XMP so LR's panels
+    see them. Returns {"target", "warnings"}; raises on I/O failure.
+    Tk-free so tests can call it directly.
+    """
+    from ..engine import read_exif_metadata
+    from ..lrxmp import write_xmp_sidecar
+
+    rating = keywords = title = None
+    try:
+        meta = read_exif_metadata(meta_from or path) or {}
+        rating = meta.get("rating") or None
+        keywords = meta.get("keywords") or None
+        title = (meta.get("title") or "").strip() or None
+    except Exception:
+        pass  # metadata is a bonus — settings alone are the payload
+    target, warnings = write_xmp_sidecar(
+        path, options, rating=rating, keywords=keywords,
+        title=title, embed=True)
+    return {"target": target, "warnings": warnings}
+
+
+def xmp_read_adjust(path):
+    """Sync: read develop settings a photo carries in its XMP.
+
+    Sidecar first (RAW workflow), then embedded XMP (JPEG). Returns
+    {"fields": {ProcessOptions kwargs}, "masks", "mask_adjust"} or None
+    when the photo has no XMP / nothing editable (an unedited photo is
+    the common case, so failure to parse is a None, not an error).
+    Tk-free so tests can call it directly.
+    """
+    from ..lrxmp import crs_to_options, parse_xmp_sidecar, read_embedded_xmp
+
+    sidecar = os.path.splitext(path)[0] + ".xmp"
+    settings = None
+    if os.path.exists(sidecar):
+        try:
+            settings = parse_xmp_sidecar(sidecar)
+        except Exception:
+            return None
+    if settings is None:
+        text = read_embedded_xmp(path)
+        if not text:
+            return None
+        try:
+            settings = parse_xmp_sidecar(text)
+        except Exception:
+            return None
+    if not settings.get("HasSettings"):
+        return None
+    size = None
+    try:
+        from PIL import Image
+        with Image.open(path) as img:
+            size = img.size
+    except Exception:
+        size = None
+    try:
+        out = crs_to_options(
+            settings, image_size=size,
+            white_balance=settings.get("WhiteBalance"))
+    except Exception:
+        return None
+    if "exposure" in out:
+        out["ev"] = out.pop("exposure")
+    masks = out.pop("masks", None) or None
+    mask_adjust = out.pop("mask_adjust", None) or None
+    fields = {k: v for k, v in out.items() if v is not None}
+    if not fields and not masks:
+        return None
+    return {"fields": fields, "masks": masks, "mask_adjust": mask_adjust}
+
+
+def reveal_in_file_manager(path):
+    """Best-effort: open ``path`` in the platform file manager."""
+    import subprocess
+    import sys
+    try:
+        if sys.platform == "win32":
+            os.startfile(path)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.run(["open", path], check=False)
+        else:
+            subprocess.run(["xdg-open", path], check=False)
+    except Exception:
+        pass
