@@ -8958,11 +8958,14 @@ class PhotoSApp:
 
     def _show_watch(self):
         """Folder watcher: auto-process new images dropped into a directory.
-        Runs in a daemon thread (watchdog Observer); closing the dialog stops
-        it. Uses the current watch fields, not the main-window options."""
+        Two modes: basic (straight convert with the dialog fields) and the
+        v2.6 autopilot modes (suggest / auto_tone / both — suggest → process
+        → audit → passed/review routing via photo_s.autopilot). Runs in a
+        daemon thread (watchdog Observer); closing the dialog stops it.
+        Uses the current watch fields, not the main-window options."""
         win = tk.Toplevel(self.root)
         win.title(self._t("watch_title"))
-        win.geometry("560x460")
+        win.geometry("560x520")
         win.configure(bg=COLORS["bg"])
         win.transient(self.root)
 
@@ -8974,8 +8977,18 @@ class PhotoSApp:
         fmt = tk.StringVar(value=self.output_format.get() or "JPEG")
         quality = tk.IntVar(value=85)
         rm_orig = tk.BooleanVar(value=False)
+        # v2.6 autopilot fields
+        mode_disp = tk.StringVar()          # localized combobox text
+        strength = tk.StringVar(value="1.0")
+        ap_write_xmp = tk.BooleanVar(value=False)
+        ap_scan = tk.BooleanVar(value=False)
+        modes = (("basic", "watch_mode_basic"), ("suggest", "watch_mode_suggest"),
+                 ("auto_tone", "watch_mode_auto_tone"), ("both", "watch_mode_both"))
+        disp_of = {m: self._t(key) for m, key in modes}
+        mode_of = {v: k for k, v in disp_of.items()}
+        mode_disp.set(disp_of["basic"])
         state = {"stop": threading.Event(), "running": False, "count": 0,
-                 "thread": None}
+                 "thread": None, "ap_pass": 0, "ap_review": 0, "ap_error": 0}
 
         body = tk.Frame(win, bg=COLORS["bg"])
         body.pack(fill="both", expand=True, padx=20, pady=16)
@@ -9005,6 +9018,37 @@ class PhotoSApp:
         _row(0, "watch_dir", watch_dir, browse_dir=True)
         _row(2, "watch_outdir", out_dir, browse_dir=True)
 
+        # v2.6: processing mode — basic watcher or autopilot (rows 1/3 were
+        # layout gaps in the original grid, so no renumbering needed)
+        tk.Label(body, text=self._t("watch_mode"), font=FONT_SMALL,
+                 fg=COLORS["text_secondary"], bg=COLORS["bg"]).grid(
+            row=1, column=0, sticky="w", pady=(0, 6), padx=(0, 10))
+        mode_box = ttk.Combobox(body, textvariable=mode_disp,
+                                values=[disp_of[m] for m, _ in modes],
+                                state="readonly", font=FONT_BODY)
+        mode_box.grid(row=1, column=1, sticky="ew", pady=(0, 6))
+        strength_lbl = tk.Label(body, text=self._t("watch_strength"),
+                                font=FONT_SMALL, fg=COLORS["text_secondary"],
+                                bg=COLORS["bg"])
+        strength_lbl.grid(row=3, column=0, sticky="w", padx=(0, 10))
+        strength_box = ttk.Combobox(body, textvariable=strength, width=5,
+                                    values=("1.0", "0.8", "0.6", "0.4", "0.2"),
+                                    state="readonly", font=FONT_BODY)
+        strength_box.grid(row=3, column=1, sticky="w")
+
+        def _current_mode():
+            return mode_of.get(mode_disp.get(), "basic")
+
+        def _on_mode(_evt=None):
+            m = _current_mode()
+            strength_box.configure(
+                state="readonly" if m in ("auto_tone", "both") else "disabled")
+            for cb in (ap_xmp_cb, ap_scan_cb):
+                cb.configure(state="normal" if m != "basic" else "disabled")
+            rm_cb.configure(state="normal" if m == "basic" else "disabled")
+
+        mode_box.bind("<<ComboboxSelected>>", _on_mode)
+
         ttk.Checkbutton(body, text=self._t("watch_recursive"),
                         variable=recursive).grid(
             row=4, column=0, columnspan=3, sticky="w", pady=(2, 6))
@@ -9029,9 +9073,20 @@ class PhotoSApp:
                   command=lambda v: qval.configure(text=str(int(float(v)))))\
             .pack(side="left", fill="x", expand=True, padx=(8, 8))
 
-        ttk.Checkbutton(body, text=self._t("watch_remove_original"),
-                        variable=rm_orig).grid(
-            row=7, column=0, columnspan=3, sticky="w", pady=(2, 10))
+        optrow = tk.Frame(body, bg=COLORS["bg"])
+        optrow.grid(row=7, column=0, columnspan=3, sticky="w", pady=(2, 10))
+        rm_cb = ttk.Checkbutton(optrow, text=self._t("watch_remove_original"),
+                                variable=rm_orig)
+        rm_cb.pack(side="left")
+        ap_xmp_cb = ttk.Checkbutton(optrow,
+                                    text=self._t("watch_ap_write_xmp"),
+                                    variable=ap_write_xmp)
+        ap_xmp_cb.pack(side="left", padx=(14, 0))
+        ap_scan_cb = ttk.Checkbutton(optrow,
+                                     text=self._t("watch_scan_existing"),
+                                     variable=ap_scan)
+        ap_scan_cb.pack(side="left", padx=(14, 0))
+        _on_mode()  # initial enable/disable for the default mode
 
         btns = tk.Frame(body, bg=COLORS["bg"])
         btns.grid(row=8, column=0, columnspan=3, sticky="w")
@@ -9047,6 +9102,11 @@ class PhotoSApp:
                               border_color=COLORS["border"])
         stop_btn.pack(side="left", padx=(8, 0))
         stop_btn.configure(state="disabled")
+        FlatButton(btns, text=self._t("watch_open_out"),
+                   command=lambda: _open_out(),
+                   bg=COLORS["card"], fg=COLORS["text"],
+                   hover_bg=COLORS["bg"], border_color=COLORS["border"],
+                   font=FONT_SMALL).pack(side="left", padx=(8, 0))
 
         status = tk.Label(body, text="", font=FONT_SMALL,
                           fg=COLORS["text_secondary"], bg=COLORS["bg"])
@@ -9082,25 +9142,56 @@ class PhotoSApp:
             state["stop"].clear()
             state["running"] = True
             state["count"] = 0
+            state["ap_pass"] = state["ap_review"] = state["ap_error"] = 0
             start_btn.configure(state="disabled")
             stop_btn.configure(state="normal")
             status.configure(text=self._t("watch_running"),
                              fg=COLORS["success"])
-            opts = ProcessOptions(
-                quality=int(quality.get()),
-                output_format=fmt.get(),
-                output_dir=out_dir.get().strip() or None,
-                remove_original=rm_orig.get(),
-            )
             rec = recursive.get()  # read on the main thread only
+            m = _current_mode()
+            if m == "basic":
+                opts = ProcessOptions(
+                    quality=int(quality.get()),
+                    output_format=fmt.get(),
+                    output_dir=out_dir.get().strip() or None,
+                    remove_original=rm_orig.get(),
+                )
 
-            def run():
-                from ..watcher import start_watching
-                start_watching(d, opts, recursive=rec,
-                               on_process=lambda r: schedule(
-                                   lambda: _on_result(r)),
-                               stop_event=state["stop"])
-                state["running"] = False
+                def run():
+                    from ..watcher import start_watching
+                    start_watching(d, opts, recursive=rec,
+                                   on_process=lambda r: schedule(
+                                       lambda: _on_result(r)),
+                                   stop_event=state["stop"])
+                    state["running"] = False
+            else:
+                from ..autopilot import AutopilotConfig, run_autopilot
+                try:
+                    ap_strength = float(strength.get())
+                except (ValueError, tk.TclError):
+                    ap_strength = 1.0
+                cfg = AutopilotConfig(
+                    watch_dir=d,
+                    out_dir=out_dir.get().strip() or None,
+                    mode=m,
+                    auto_tone_strength=ap_strength,
+                    write_xmp=ap_write_xmp.get(),
+                    recursive=rec,
+                    scan_existing=ap_scan.get(),
+                    quality=int(quality.get()),
+                    output_format=fmt.get(),
+                )
+
+                def run():
+                    try:
+                        # validate_config fail-loud (missing plugin etc.)
+                        # surfaces in the status line, buttons restored
+                        run_autopilot(cfg, on_event=lambda r: schedule(
+                            lambda: _on_ap_event(r)),
+                            stop_event=state["stop"])
+                    except RuntimeError as e:
+                        schedule(lambda err=str(e): _ap_start_failed(err))
+                    state["running"] = False
 
             state["thread"] = threading.Thread(target=run, daemon=True)
             state["thread"].start()
@@ -9109,6 +9200,19 @@ class PhotoSApp:
             state["stop"].set()
             start_btn.configure(state="normal")
             stop_btn.configure(state="disabled")
+
+        def _open_out():
+            m = _current_mode()
+            d = out_dir.get().strip()
+            if not d:
+                watch = watch_dir.get().strip()
+                d = (os.path.join(watch, "photo-s-out")
+                     if m != "basic" and watch else watch)
+            if not d or not os.path.isdir(d):
+                status.configure(text=self._t("watch_out_missing"),
+                                 fg=COLORS["warning"])
+                return
+            workflows.reveal_in_file_manager(d)
 
         def _on_result(r):
             if not win.winfo_exists():
@@ -9123,6 +9227,39 @@ class PhotoSApp:
                     text=self._t("watch_processed", n=state["count"]),
                     fg=COLORS["success"])
 
+        def _on_ap_event(rec):
+            if not win.winfo_exists():
+                return
+            name = os.path.basename(rec.get("input") or "")
+            err = rec.get("error")
+            routed = rec.get("routed") or ""
+            if err:
+                state["ap_error"] += 1
+                text, fg = self._t("ap_event_error", name=name,
+                                   err=err[:80]), COLORS["danger"]
+            elif "passed" in routed.replace("\\", "/"):
+                state["ap_pass"] += 1
+                text, fg = self._t(
+                    "ap_event_pass", name=name, p=state["ap_pass"],
+                    r=state["ap_review"], e=state["ap_error"],
+                    dir=os.path.basename(routed)), COLORS["success"]
+            else:
+                state["ap_review"] += 1
+                reason = ((rec.get("audit") or {}).get("reason") or "")[:60]
+                text, fg = self._t(
+                    "ap_event_review", name=name, p=state["ap_pass"],
+                    r=state["ap_review"], e=state["ap_error"],
+                    reason=reason), COLORS["warning"]
+            status.configure(text=text, fg=fg)
+
+        def _ap_start_failed(err):
+            if not win.winfo_exists():
+                return
+            state["running"] = False
+            start_btn.configure(state="normal")
+            stop_btn.configure(state="disabled")
+            status.configure(text=self._t("ap_start_failed", err=err[:140]),
+                             fg=COLORS["danger"])
 
         win.protocol("WM_DELETE_WINDOW", lambda: (_stop(), win.destroy()))
         bus.start()

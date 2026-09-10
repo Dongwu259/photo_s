@@ -288,3 +288,156 @@ class TestDevAutoload:
             time.sleep(0.02)
         assert paths[0] not in app._photo_adjust
         assert paths[0] not in app._photo_masks
+
+
+def _dark_img(path, fill=70, size=(160, 160)):
+    """test_autopilot 同款合成图：噪声过 blur 检测，暗填充驱动 suggest 补偿。"""
+    import numpy as np
+    from PIL import Image
+    rng = np.random.default_rng(7)
+    arr = np.full((*size, 3), fill, dtype=np.int16)
+    arr += rng.integers(-20, 21, arr.shape)
+    Image.fromarray(arr.clip(0, 255).astype("uint8")).save(str(path),
+                                                           quality=95)
+    return str(path)
+
+
+def _walk(widget, pred, out=None):
+    if out is None:
+        out = []
+    for c in widget.winfo_children():
+        try:
+            if pred(c):
+                out.append(c)
+        except Exception:
+            pass
+        _walk(c, pred, out)
+    return out
+
+
+def _open_watch(app):
+    import tkinter as tk
+    app._show_watch()
+    wins = [w for w in app.root.winfo_children()
+            if isinstance(w, tk.Toplevel)]
+    return wins[-1]
+
+
+class TestWatchAutopilot:
+
+    def test_mode_switch_toggles_controls(self):
+        root, app = _make_app()
+        win = _open_watch(app)
+        import tkinter.ttk as ttk
+        boxes = _walk(win, lambda w: isinstance(w, ttk.Combobox))
+        mode_box = next(b for b in boxes
+                        if app._t("watch_mode_suggest") in b.cget("values"))
+        strength_box = next(b for b in boxes
+                            if "0.8" in b.cget("values")
+                            and app._t("watch_mode_suggest")
+                            not in b.cget("values"))
+        cbs = _walk(win, lambda w: isinstance(w, ttk.Checkbutton))
+        rm = next(c for c in cbs
+                  if app._t("watch_remove_original") in str(c.cget("text")))
+        scan = next(c for c in cbs
+                    if app._t("watch_scan_existing") in str(c.cget("text")))
+        ap_xmp = next(c for c in cbs
+                      if app._t("watch_ap_write_xmp") in str(c.cget("text")))
+
+        def _mode(m):
+            mode_box.set(app._t("watch_mode_" + m))
+            mode_box.event_generate("<<ComboboxSelected>>")
+            root.update()
+
+        assert str(rm.cget("state")) == "normal", "basic default keeps rm_orig"
+        assert str(strength_box.cget("state")) == "disabled"
+        _mode("suggest")
+        assert str(strength_box.cget("state")) == "disabled", "suggest no AI"
+        assert str(scan.cget("state")) == "normal"
+        assert str(rm.cget("state")) == "disabled", "autopilot never deletes"
+        _mode("auto_tone")
+        assert str(strength_box.cget("state")) == "readonly"
+        _mode("basic")
+        assert str(rm.cget("state")) == "normal"
+        assert str(ap_xmp.cget("state")) == "disabled"
+        win.destroy()
+        root.destroy()
+
+    def test_suggest_e2e_routes_passed(self, tmp_path):
+        root, app = _make_app()
+        watch = tmp_path / "watch"
+        watch.mkdir()
+        _dark_img(watch / "dark.jpg")
+        win = _open_watch(app)
+        import tkinter.ttk as ttk
+        entries = _walk(win, lambda w: isinstance(w, ttk.Entry))
+        entries[0].delete(0, "end")
+        entries[0].insert(0, str(watch))
+        boxes = _walk(win, lambda w: isinstance(w, ttk.Combobox))
+        mode_box = next(b for b in boxes
+                        if app._t("watch_mode_suggest") in b.cget("values"))
+        # mode FIRST — ap controls stay disabled in basic mode, so an
+        # invoke() there is a silent no-op (found the hard way)
+        mode_box.set(app._t("watch_mode_suggest"))
+        mode_box.event_generate("<<ComboboxSelected>>")
+        root.update()
+        cbs = _walk(win, lambda w: isinstance(w, ttk.Checkbutton))
+        scan = next(c for c in cbs
+                    if app._t("watch_scan_existing") in str(c.cget("text")))
+        scan.invoke()
+        assert scan.instate(["selected"]), \
+            "scan_existing on — deterministic, no FS timing"
+        start = next(b for b in _walk(win, lambda w: hasattr(w, "_command"))
+                     if getattr(b, "_text", "") == app._t("watch_start"))
+        stop = next(b for b in _walk(win, lambda w: hasattr(w, "_command"))
+                    if getattr(b, "_text", "") == app._t("watch_stop"))
+        try:
+            start._command()
+
+            passed_dir = watch / "photo-s-out" / "passed"
+            ok = _poll(root, lambda: passed_dir.exists()
+                       and any(passed_dir.iterdir()))
+            assert ok, "dark image must be routed into passed/"
+            assert _poll(root, lambda: _find_status(app, win, "✅"))
+            assert (watch / "photo-s-out" / "autopilot.jsonl").exists()
+        finally:
+            stop._command()
+
+            def _worker_dead():
+                import threading
+                return not any(t.name == "autopilot-worker"
+                               for t in threading.enumerate())
+            _poll(root, _worker_dead, seconds=20)
+            win.destroy()
+            root.destroy()
+
+    def test_auto_tone_without_plugin_fails_loud(self, tmp_path,
+                                                 monkeypatch):
+        import photo_s.plugin as plugin_mod
+        monkeypatch.setattr(plugin_mod, "find_provider", lambda op: None)
+        root, app = _make_app()
+        watch = tmp_path / "watch"
+        watch.mkdir()
+        win = _open_watch(app)
+        import tkinter.ttk as ttk
+        entries = _walk(win, lambda w: isinstance(w, ttk.Entry))
+        entries[0].delete(0, "end")
+        entries[0].insert(0, str(watch))
+        boxes = _walk(win, lambda w: isinstance(w, ttk.Combobox))
+        mode_box = next(b for b in boxes
+                        if app._t("watch_mode_suggest") in b.cget("values"))
+        mode_box.set(app._t("watch_mode_auto_tone"))
+        mode_box.event_generate("<<ComboboxSelected>>")
+        start = next(b for b in _walk(win, lambda w: hasattr(w, "_command"))
+                     if getattr(b, "_text", "") == app._t("watch_start"))
+        start._command()
+        assert _poll(root, lambda: _find_status(app, win, "启动失败"))
+        assert _poll(root, lambda: start._state == "normal"), \
+            "buttons restored after a failed start"
+        win.destroy()
+        root.destroy()
+
+
+def _find_status(app, win, needle):
+    return any(needle in str(w.cget("text"))
+               for w in _walk(win, lambda w: w.winfo_class() == "Label"))

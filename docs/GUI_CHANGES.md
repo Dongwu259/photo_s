@@ -811,3 +811,41 @@ mkdtemp 追踪误伤 → root 泄漏 → macOS focus 事件风暴）。
 透传/三态读取/sidecar 优先/reveal）+ `test_gui_v26.py` 12 项（按钮
 守卫/确认一次/警告与失败状态/真实 JPEG 往返；Export 勾选三态；自动
 载入三态）
+
+## 19. v2.6 P0：watch 对话框升级 autopilot
+
+> 目录监视对话框获得「处理模式」：**基础监视**（原行为不动：新图按
+> 对话框字段直转换）+ 三个 **autopilot 智能模式**（suggest / auto_tone /
+> both——建议或 AI 参数 → 处理 → 质检闸门 → passed/review 分流 +
+> JSONL 轨迹，复用 `photo_s.autopilot` 引擎零新逻辑）。
+
+### 19.1 新增控件与联动
+
+- 模式下拉（原 grid 空隙行 1/3，无重排）；智能模式专属：AI 强度
+  下拉（auto_tone/both 时可用）、「写回 XMP」「启动时处理已有图片」
+  勾选；「删除原文件」仅基础模式可用（autopilot 只分流不删件）
+- 联动为 enable/disable（不增删控件，布局稳定）；模式内部值
+  basic/suggest/auto_tone/both 与显示名双向映射，i18n 安全
+- 新增「打开输出目录」按钮：基础=out_dir（空=监视目录），智能=
+  `<watch>/photo-s-out`（启动时创建）；经
+  `workflows.reveal_in_file_manager`（三平台 best-effort）
+
+### 19.2 运行与失败语义
+
+- 智能模式 start → daemon 线程 `run_autopilot(cfg, on_event=bus 回投,
+  stop_event)`；stop/关闭/stop-then-start 竞态守卫全部复用原有
+  `state["stop"]` 机制
+- `on_event` 单行状态：✅ passed / 👀 review（附 audit 原因）/ ❌ 错误
+  + 累计计数（通过/复查/失败）；`validate_config` 的 RuntimeError
+  （auto_tone 缺插件等）→ 状态行安装提示 + 按钮复位，不崩不挂
+- 智能模式输出不自动追加进主窗口文件列表（passed/review 双目录语义
+  下「输出」不唯一——用打开目录按钮查看）
+
+### 19.3 测试
+
+`test_gui_v26.py::TestWatchAutopilot` 3 项：模式切换联动（强度/勾选/
+删除原件三态）、suggest e2e（scan_existing 确定性路径 → passed/ 出图
++ ✅ 状态 + JSONL，stop 后 worker 线程退出断言防泄漏）、auto_tone 无
+插件 fail-loud（启动失败提示 + 按钮复位）。**测试教训**：ap 控件在
+basic 模式下禁用时 `invoke()` 是静默空操作——必须先切模式再勾选
+（macOS FSEvents 历史事件回放会让错误顺序偶发通过，不可依赖）。
