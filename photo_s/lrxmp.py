@@ -171,10 +171,11 @@ def _shim_curve_lists(out: Dict[str, Any]) -> None:
 
 def _coerce_xmp_scalar(v: str) -> Any:
     """XMP 标量文本 → int/float/bool/str（对齐 catalog blob 的值类型；
-    MaskInverted 之类必须真 bool——字符串 "False" 是 truthy）。"""
-    if v == "True":
+    MaskInverted 之类必须真 bool——字符串 "False"/"false" 是 truthy。LR 18
+    XMP 写小写 true/false，blob 写首字母大写，两种都收）。"""
+    if v in ("True", "true"):
         return True
-    if v == "False":
+    if v in ("False", "false"):
         return False
     try:
         return int(v)
@@ -227,23 +228,32 @@ def _xmp_mask_groups(root: Any) -> List[Dict[str, Any]]:
             continue
         for li in _rdf_li_items(elem):
             corr: Dict[str, Any] = {}
-            for k, v in li.attrib.items():
-                if k.startswith(_XMP_CRS):
-                    corr[k[len(_XMP_CRS):]] = _coerce_xmp_scalar(v)
-            for child in li:
-                if not child.tag.startswith(_XMP_CRS):
-                    continue
-                cname = child.tag[len(_XMP_CRS):]
-                if cname == "CorrectionMasks":
-                    corr[cname] = [
-                        {k[len(_XMP_CRS):]: _coerce_xmp_scalar(v)
-                         for k, v in m.attrib.items() if k.startswith(_XMP_CRS)}
-                        for m in _rdf_li_items(child)]
-                elif cname == "LocalPointColors":
-                    corr[cname] = [(it.text or "").strip()
-                                   for it in _rdf_li_items(child)]
-                elif child.text is not None and child.text.strip():
-                    corr[cname] = _coerce_xmp_scalar(child.text.strip())
+            # LR 18 XMP：修正属性挂在 li 下的嵌套 rdf:Description 上
+            # （What="Correction" + 全键集 Local* + CorrectionMasks）；
+            # 宽容兼容旧形态（属性直接在 li 上）
+            holders = [li]
+            for child in list(li):
+                if child.tag == f"{{{_XMP_RDF_NS}}}Description":
+                    holders.append(child)
+            for holder in holders:
+                for k, v in holder.attrib.items():
+                    if k.startswith(_XMP_CRS):
+                        corr[k[len(_XMP_CRS):]] = _coerce_xmp_scalar(v)
+                for child in holder:
+                    if not child.tag.startswith(_XMP_CRS):
+                        continue
+                    cname = child.tag[len(_XMP_CRS):]
+                    if cname == "CorrectionMasks":
+                        corr[cname] = [
+                            {k[len(_XMP_CRS):]: _coerce_xmp_scalar(v)
+                             for k, v in m.attrib.items()
+                             if k.startswith(_XMP_CRS)}
+                            for m in _rdf_li_items(child)]
+                    elif cname == "LocalPointColors":
+                        corr[cname] = [(it.text or "").strip()
+                                       for it in _rdf_li_items(child)]
+                    elif child.text is not None and child.text.strip():
+                        corr[cname] = _coerce_xmp_scalar(child.text.strip())
             if corr:
                 out.append(corr)
     return out
@@ -479,15 +489,23 @@ def _linear_mask(cm: Dict[str, Any], name: str) -> str:
 
 
 def _local_adjust(corr: Dict[str, Any], name: str) -> str:
+    """LR 局部参数 → PhotoS mask_adjust 段。
+
+    标度（blob 与 XMP 同标度，LR 18 实测两侧均为 0-1 小数：
+    blob fixture LocalContrast2012=0.201933、XMP 导出 LocalContrast2012=
+    0.445644 = UI +45）：倍率类 = 1 + v、小数类 = v 直传。v1.9 起
+    ``1 + v/100`` 的旧换算把 0.20 解析成 1.002——一直隐性偏低两个量级
+    （v2.5.1 修正）。temp 仍是偏移近似（5250 + v，无实测样本，待标定）。
+    """
     parts = []
     for lr_key, ps_key in LOCAL_MAP.items():
         v = _f(corr, lr_key)
         if v == 0.0:
             continue
         if ps_key in ("brightness", "contrast", "saturation", "sharpen"):
-            parts.append(f"{ps_key}={(1.0 + v / 100.0):.4f}")
+            parts.append(f"{ps_key}={(1.0 + v):.4f}")
         elif ps_key in ("vibrance", "clarity", "texture"):
-            parts.append(f"{ps_key}={(v / 100.0):.4f}")
+            parts.append(f"{ps_key}={v:.4f}")
         elif ps_key == "temp":
             parts.append(f"temp={5250.0 + v:.1f}")
         else:
@@ -515,6 +533,9 @@ def _masks_and_adjust(settings: Dict[str, Any]
             if what == "Mask/LinearGradient":
                 geom = _linear_mask(cm, name)
                 break
+            if what == "Mask/Gradient" and "ZeroX" in cm:
+                geom = _gradient_mask(cm, name)
+                break
         if geom is not None:
             masks_segs.append(geom)
             adj = _local_adjust(corr, name)
@@ -523,6 +544,23 @@ def _masks_and_adjust(settings: Dict[str, Any]
         else:
             v18.append(name)
     return ";".join(masks_segs), ";".join(adjust_segs), v18
+
+
+def _gradient_mask(cm: Dict[str, Any], name: str) -> str:
+    """LR 18 XMP 线性渐变（Mask/Gradient + Zero/Full 四点）→ PhotoS 端点。
+
+    Zero = 零效点（PhotoS 轴起点，蒙版值 0）、Full = 全效点（终点，值 1），
+    与 render_mask 的投影语义一一对应；LR 的 Zero 可越界（>1），PhotoS
+    坐标夹回 0-1。Mask/Gradient 无 Feather（渐变本身就是软过渡）。
+    """
+    zx, zy = _f(cm, "ZeroX"), _f(cm, "ZeroY")
+    fx, fy = _f(cm, "FullX"), _f(cm, "FullY")
+    c = lambda v: max(0.0, min(1.0, v))  # noqa: E731 — 单处夹取
+    seg = (f"{name}:linear:{c(zx):.4f},{c(zy):.4f},"
+           f"{c(fx):.4f},{c(fy):.4f}")
+    if cm.get("MaskInverted"):
+        seg += ",invert"
+    return seg
 
 
 def _crop_relative(settings: Dict[str, Any]
@@ -641,33 +679,76 @@ def _lr_signed(v: float) -> str:
     return f"{v:+.5f}".rstrip("0").rstrip(".")
 
 
+# LR 18.2.2 XMP 实测（1测试.jpg 导出样本）的局部键全集与顺序——全键写出
+# （含 0 值），缺键的修正组可能被 ACR 解析器整体拒绝
+_LOCAL_XMP_ORDER = (
+    "LocalExposure", "LocalHue", "LocalSaturation", "LocalContrast",
+    "LocalClarity", "LocalSharpness", "LocalBrightness",
+    "LocalToningHue", "LocalToningSaturation", "LocalExposure2012",
+    "LocalContrast2012", "LocalHighlights2012", "LocalShadows2012",
+    "LocalWhites2012", "LocalBlacks2012", "LocalClarity2012",
+    "LocalDehaze", "LocalLuminanceNoise", "LocalMoire", "LocalDefringe",
+    "LocalTemperature", "LocalTint", "LocalTexture", "LocalGrain",
+)
+
+# PhotoS mask_adjust 键 → (LR XMP 局部键, 值变换)。标度对齐 LR 18 实测：
+# XMP/blob 局部参数均为 0-1 小数（LocalContrast2012=0.445644 = UI +45）——
+# 倍率类差 1、小数类直传。XMP 键集**没有 LocalVibrance**（LR 局部调整本无
+# 鲜艳度——PhotoS 扩展，跳过+告警）；temp 仍是偏移近似（-5250，待标定）。
+_LOCAL_XMP_MAP = {
+    "exposure": ("LocalExposure2012", lambda v: v),
+    "brightness": ("LocalBrightness", lambda v: v - 1.0),
+    "contrast": ("LocalContrast2012", lambda v: v - 1.0),
+    "saturation": ("LocalSaturation", lambda v: v - 1.0),
+    "clarity": ("LocalClarity2012", lambda v: v),
+    "texture": ("LocalTexture", lambda v: v),
+    "sharpen": ("LocalSharpness", lambda v: v - 1.0),
+    "temp": ("LocalTemperature", lambda v: v - 5250.0),
+    "tint": ("LocalTint", lambda v: v),
+}
+
+
+def _lr_local(v: float) -> str:
+    """局部参数值：LR 风格 6 位小数（整值给 "0"，与实测样本一致）。"""
+    v = float(v)
+    if abs(v) < 5e-7:
+        return "0"
+    if abs(v - round(v)) < 5e-7:
+        return str(int(round(v)))
+    return f"{v:.6f}"
+
+
 def _corrections_from_masks(masks_str: str, adjust_str: str,
                             warnings: List[str]) -> List[Dict[str, Any]]:
-    """masks/mask_adjust 紧凑串 → LR 修正组（radial/linear 可逆，其余告警）。"""
+    """masks/mask_adjust 紧凑串 → LR 18 修正组（radial/linear 可逆，其余告警）。
+
+    结构对齐实测样本：每修正组 = 嵌套 rdf:Description（What="Correction"
+    + 全键集 Local*），几何在 CorrectionMasks/rdf:Seq 的 li 上——线性渐变是
+    ``Mask/Gradient`` + Zero/Full 四点（PhotoS 线性轴起点=0、终点=全效，
+    与 Zero/Full 语义一一对应）；径向沿用 blob 的 box 形。
+    """
     from .mask import parse_mask_adjust, parse_masks
 
     specs = parse_masks(masks_str) if masks_str else []
     adjusts = parse_mask_adjust(adjust_str) if adjust_str else {}
     out: List[Dict[str, Any]] = []
     for spec in specs:
-        lr_attrs: Dict[str, str] = {}
+        lr_attrs: Dict[str, str] = dict.fromkeys(_LOCAL_XMP_ORDER, "0")
+        lr_attrs["LocalCurveRefineSaturation"] = "100"
         for key, val in (adjusts.get(spec.name) or {}).items():
-            lr_key = _PS_LOCAL_TO_LR.get(key)
-            if lr_key is None:
-                warnings.append(
-                    f"mask '{spec.name}': 局部参数 {key} 无 LR 对应字段，已跳过")
+            mapped = _LOCAL_XMP_MAP.get(key)
+            if mapped is None:
+                if key == "vibrance":
+                    warnings.append(
+                        f"mask '{spec.name}': 局部 vibrance 是 PhotoS 扩展"
+                        f"（LR 局部调整无鲜艳度键），已跳过")
+                else:
+                    warnings.append(
+                        f"mask '{spec.name}': 局部参数 {key} 无 LR 对应字段"
+                        f"，已跳过")
                 continue
-            val = float(val)
-            if key in ("brightness", "contrast", "saturation", "sharpen"):
-                lr_v = (val - 1.0) * 100.0
-            elif key in ("vibrance", "clarity", "texture"):
-                lr_v = val * 100.0
-            elif key == "temp":
-                lr_v = val - 5250.0
-            else:
-                lr_v = val
-            if abs(lr_v) > 1e-9:
-                lr_attrs[lr_key] = _lr_num(lr_v)
+            lr_key, transform = mapped
+            lr_attrs[lr_key] = _lr_local(transform(float(val)))
         if spec.kind == "radial":
             cx, cy, rx, ry = (float(v) for v in spec.params[:4])
             geo = _mask_geo("Mask/CircularGradient",
@@ -675,17 +756,23 @@ def _corrections_from_masks(masks_str: str, adjust_str: str,
                             spec.feather, spec.invert)
         elif spec.kind == "linear":
             x0, y0, x1, y1 = (float(v) for v in spec.params[:4])
-            # _linear_mask 的逆：box = 端点包络；dx,dy = 半向量 →
-            # Angle = atan2(dx, dy)（LR 0° = 自上而下，正角顺时针）
-            angle = math.degrees(math.atan2((x1 - x0) / 2.0, (y1 - y0) / 2.0))
-            geo = _mask_geo("Mask/LinearGradient",
-                            min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1),
-                            spec.feather, spec.invert, angle)
+            # PhotoS 线性轴：起点处蒙版值 0、终点处 1 —— 即 LR 的
+            # Zero（零效点）/ Full（全效点），无 box/Angle（那是 catalog
+            # blob 格式）。LR 的 Zero 可越界（>1），PhotoS 坐标本就 0-1。
+            geo = {
+                "What": "Mask/Gradient",
+                "MaskBlendMode": "0", "MaskValue": "1",
+                "ZeroX": f"{x0:.6f}", "ZeroY": f"{y0:.6f}",
+                "FullX": f"{x1:.6f}", "FullY": f"{y1:.6f}",
+            }
+            if spec.invert:
+                geo["MaskInverted"] = "true"
         else:
             warnings.append(
                 f"mask '{spec.name}'（{spec.kind}）无 LR 几何等价，已跳过"
                 f"（其局部调整一并跳过）")
             continue
+        geo.setdefault("MaskInverted", "false")
         out.append({"name": spec.name, "attrs": lr_attrs, "mask": geo})
     kept = {c["name"] for c in out}
     for name, adj in adjusts.items():
@@ -698,18 +785,19 @@ def _corrections_from_masks(masks_str: str, adjust_str: str,
 def _mask_geo(what: str, left: float, top: float, right: float, bottom: float,
               feather: float, invert: bool,
               angle: Optional[float] = None) -> Dict[str, str]:
+    """径向 box 形几何（blob 同构）+ LR 18 公共蒙版属性（小写布尔）。"""
     def u(v: float) -> str:
         return f"{max(0.0, min(1.0, float(v))):.6f}"
 
     geo = {
         "What": what,
+        "MaskActive": "true",
         "Top": u(top), "Left": u(left), "Bottom": u(bottom), "Right": u(right),
         "CenterWeight": "0", "CornerRadius": "0",
         "XOffset": "0.000000", "YOffset": "0.000000",
         "Feather": _lr_num(max(0.0, min(1.0, float(feather or 0.0))) * 100.0),
-        "MaskInput": "100",
-        "MaskInverted": "True" if invert else "False",
-        "MaskVersion": "1",
+        "MaskBlendMode": "0", "MaskValue": "1",
+        "MaskInverted": "true" if invert else "false",
     }
     if angle is not None:
         geo["Angle"] = f"{float(angle):.4f}"
@@ -736,17 +824,30 @@ def _render_xmp(crs_attrs: Dict[str, str],
     for k, v in crs_attrs.items():
         desc.set(f"{_XMP_CRS}{k}", v)
     if corrections:
+        # LR 18.2.2 实测结构：rdf:Seq + 每修正组一个嵌套 rdf:Description
+        # （What="Correction" + 全键集 Local*），几何 li 在 CorrectionMasks
+        # 的 rdf:Seq 里；布尔小写；SyncID = 32 位十六进制
+        import uuid
+
         groups = ET.SubElement(desc, f"{_XMP_CRS}MaskGroupBasedCorrections")
-        bag = ET.SubElement(groups, f"{{{_XMP_RDF_NS}}}Bag")
+        seq = ET.SubElement(groups, f"{{{_XMP_RDF_NS}}}Seq")
         for corr in corrections:
-            li = ET.SubElement(bag, f"{{{_XMP_RDF_NS}}}li")
-            li.set(f"{_XMP_CRS}CorrectionName", corr["name"])
-            li.set(f"{_XMP_CRS}CorrectionActive", "True")
+            li = ET.SubElement(seq, f"{{{_XMP_RDF_NS}}}li")
+            cd = ET.SubElement(li, f"{{{_XMP_RDF_NS}}}Description")
+            cd.set(f"{_XMP_CRS}What", "Correction")
+            cd.set(f"{_XMP_CRS}CorrectionAmount", "1")
+            cd.set(f"{_XMP_CRS}CorrectionActive", "true")
+            cd.set(f"{_XMP_CRS}CorrectionName", corr["name"])
+            cd.set(f"{_XMP_CRS}CorrectionSyncID",
+                   uuid.uuid4().hex.upper()[:32])
             for k, v in corr["attrs"].items():
-                li.set(f"{_XMP_CRS}{k}", v)
-            masks_el = ET.SubElement(li, f"{_XMP_CRS}CorrectionMasks")
-            mbag = ET.SubElement(masks_el, f"{{{_XMP_RDF_NS}}}Bag")
-            mli = ET.SubElement(mbag, f"{{{_XMP_RDF_NS}}}li")
+                cd.set(f"{_XMP_CRS}{k}", v)
+            masks_el = ET.SubElement(cd, f"{_XMP_CRS}CorrectionMasks")
+            mseq = ET.SubElement(masks_el, f"{{{_XMP_RDF_NS}}}Seq")
+            mli = ET.SubElement(mseq, f"{{{_XMP_RDF_NS}}}li")
+            mli.set(f"{_XMP_CRS}MaskActive", "true")
+            mli.set(f"{_XMP_CRS}MaskName", corr["name"])
+            mli.set(f"{_XMP_CRS}MaskSyncID", uuid.uuid4().hex.upper()[:32])
             for k, v in corr["mask"].items():
                 mli.set(f"{_XMP_CRS}{k}", v)
     if keywords:

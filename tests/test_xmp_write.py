@@ -129,7 +129,8 @@ class TestMasks:
                         "brightness=1.05,vibrance=0.2,clarity=0.3,"
                         "texture=0.1,sharpen=1.2,temp=5400,tint=5")
         xmp, warns, back = _roundtrip(opts)
-        assert not warns
+        # vibrance 是 PhotoS 扩展：LR XMP 局部键集无 LocalVibrance → 告警跳过
+        assert any("vibrance" in w for w in warns)
         assert "face:radial:" in back["masks"]
         assert "invert" in back["masks"]
         adj = dict(kv.split("=", 1)
@@ -140,21 +141,48 @@ class TestMasks:
         assert float(adj["sharpen"]) == pytest.approx(1.2, abs=0.011)
         assert float(adj["temp"]) == pytest.approx(5400.0, abs=1.1)
         assert float(adj["tint"]) == pytest.approx(5.0, abs=1e-3)
+        assert "vibrance" not in adj
 
-    def test_linear_angle_math(self):
-        # 端点 (0.5,0)→(0.5,1)：垂直渐变 → Angle=0（LR 自上而下）
+    def test_linear_gradient_zero_full(self):
+        # LR 18 XMP：线性渐变 = Mask/Gradient + Zero/Full 四点。
+        # PhotoS 轴起点（值 0）→ Zero、终点（值 1）→ Full，一一对应
         opts = ProcessOptions(masks="sky:linear:0.5,0,0.5,1,feather=0.3")
-        xmp, _, back = _roundtrip(opts)
-        assert "sky:linear:" in back["masks"]
-        # 水平端点 → Angle=±90
-        opts2 = ProcessOptions(masks="l2:linear:0,0.5,1,0.5")
-        _, _, back2 = _roundtrip(opts2)
-        seg = back2["masks"]
-        x0, y0, x1, y1 = (float(v) for v in
-                          seg.split(":")[2].split(",")[:4])
-        dx, dy = abs(x1 - x0), abs(y1 - y0)
-        assert dx == pytest.approx(1.0, abs=1e-3)
-        assert dy == pytest.approx(0.0, abs=1e-3)
+        xmp, _, _ = _roundtrip(opts)
+        assert 'What="Mask/Gradient"' in xmp
+        assert 'ZeroX="0.500000"' in xmp and 'ZeroY="0.000000"' in xmp
+        assert 'FullX="0.500000"' in xmp and 'FullY="1.000000"' in xmp
+        # 往返：端点数值还原（Zero/Full 直接就是端点）
+        _, _, back = _roundtrip(opts)
+        vals = [float(v) for v in
+                back["masks"].split(":")[2].split(",")[:4]]
+        assert vals == pytest.approx([0.5, 0.0, 0.5, 1.0], abs=1e-3)
+
+    def test_lr18_gradient_mask_parsed(self):
+        # 真实 LR 18 导出形态：嵌套 rdf:Description + Seq + Mask/Gradient
+        xml = """<x:xmpmeta xmlns:x="adobe:ns:meta/"
+         xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/">
+         <rdf:RDF><rdf:Description rdf:about="">
+          <crs:MaskGroupBasedCorrections>
+           <rdf:Seq><rdf:li>
+            <rdf:Description crs:What="Correction"
+             crs:CorrectionActive="true" crs:CorrectionName="蒙版 1"
+             crs:LocalExposure2012="0.295617" crs:LocalContrast2012="0.445644">
+             <crs:CorrectionMasks><rdf:Seq><rdf:li
+              crs:What="Mask/Gradient" crs:MaskActive="true"
+              crs:MaskInverted="false" crs:MaskValue="1"
+              crs:ZeroX="1.057190" crs:ZeroY="0.878378"
+              crs:FullX="0.150966" crs:FullY="0.151692"/>
+             </rdf:Seq></crs:CorrectionMasks>
+            </rdf:Description>
+           </rdf:li></rdf:Seq>
+          </crs:MaskGroupBasedCorrections>
+         </rdf:Description></rdf:RDF></x:xmpmeta>"""
+        settings = parse_xmp_sidecar(xml)
+        opts = crs_to_options(settings)
+        assert opts["masks"].startswith("蒙版_1:linear:1.0000,0.8784,0.1510,0.1517")
+        assert "exposure=0.2956" in opts["mask_adjust"]
+        assert "contrast=1.4456" in opts["mask_adjust"]  # 0-1 小数标度
 
     def test_ai_mask_warned_not_written(self):
         opts = ProcessOptions(masks="ai0:subject;geo:radial:0.5,0.5,0.2,0.2",
