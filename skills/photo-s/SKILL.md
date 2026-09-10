@@ -1,6 +1,6 @@
 ---
 name: photo-s
-description: Batch photo processing toolbox (PhotoS). Use when the user asks to compress/convert/resize RAW or JPEG photos in batch, edit EXIF metadata (rating, keywords, camera, GPS), deduplicate similar photos, cull by exposure/sharpness, rank photos by quality score, keep the best of each burst, rank and move keepers by rating, merge bracketed HDR shots, blur or pixelate faces for privacy, build contact sheets or HTML galleries, generate SHA-256 manifests, rename files in batch, watch a folder and auto-process new files, benchmark processing speed, grade photos Lightroom-style (curves, levels, HSL, point color, masks, local adjustments, lens correction), analyze images perceptually (histograms, color stats) for closed-loop grading, get rule-based fix suggestions from analysis (suggest), apply AI auto-tone from a plugin, produce personal training packages from Lightroom data (lr-scan/lr-train/lr-recipes), or gate delivery with audit/preview/diff. 批量照片处理工具箱：压缩/转码/缩放/EXIF 编辑/去重/选片（阈值·评分·连拍）/HDR 合并/人脸模糊/联系表/画廊/校验清单/LR 方向调色（曲线·HSL·点颜色·蒙版·镜头矫正）/感知分析（调色反馈闭环）/规则型参数推荐（suggest）/AI 自动调色（auto-tone 插件）/LR 数据训练包（lr-scan 家族）/质量闸门（audit/preview/diff）。
+description: Batch photo processing toolbox (PhotoS). Use when the user asks to compress/convert/resize RAW or JPEG photos in batch, edit EXIF metadata (rating, keywords, camera, GPS), deduplicate similar photos, cull by exposure/sharpness, rank photos by quality score, keep the best of each burst, rank and move keepers by rating, merge bracketed HDR shots, blur or pixelate faces for privacy, build contact sheets or HTML galleries, generate SHA-256 manifests, rename files in batch, watch a folder and auto-process new files, benchmark processing speed, grade photos Lightroom-style (curves, levels, HSL, point color, masks, local adjustments, lens correction), analyze images perceptually (histograms, color stats) for closed-loop grading, get rule-based fix suggestions from analysis (suggest), apply AI auto-tone from a plugin, export adjustments as XMP sidecars or embedded XMP for a two-way Lightroom roundtrip (xmp-export), run an unattended watch pipeline with quality gating and passed/review routing (autopilot), build semantic embedding indexes and search photos by text or image / auto-tag them (index/find), produce personal training packages from Lightroom data (lr-scan/lr-train/lr-recipes), or gate delivery with audit/preview/diff. 批量照片处理工具箱：压缩/转码/缩放/EXIF 编辑/去重/选片（阈值·评分·连拍）/HDR 合并/人脸模糊/联系表/画廊/校验清单/LR 方向调色（曲线·HSL·点颜色·蒙版·镜头矫正）/感知分析（调色反馈闭环）/规则型参数推荐（suggest）/AI 自动调色（auto-tone 插件）/XMP 写出（LR 双向互通）/无人值守管线（autopilot 分流）/语义搜索与自动打标（index/find）/LR 数据训练包（lr-scan 家族）/质量闸门（audit/preview/diff）。
 ---
 
 # PhotoS — Batch Photo Toolbox
@@ -79,6 +79,10 @@ pip install "photo-s-tools[mcp]"     # + MCP server (Python 3.10+)
 | Similar-edit search | `photo-s lr-similar IMG --data lr_records.jsonl --images before/` | content-feature kNN → past edit as starting point |
 | Eval set prep | `photo-s lr-eval --data ... --out eval.json --sample 200` | before/after render pairs + teacher scoring template |
 | Trace log | `photo-s batch PATHS... --trace DIR` | before-analyze → params → after-analyze per file (training format) |
+| XMP export (Lightroom roundtrip) | `photo-s xmp-export IMG... [--embed] [--auto-tone 0.8] [--rating 4 --keywords a,b] [--json]` | writes adjustments as LR-readable XMP: JPEG gets it embedded (`--embed` — LR ignores sidecars on JPEG), RAW/other formats get a `.xmp` sidecar; masks/rating/keywords included; `--auto-tone` records the actually-applied predictions; batch variant: `batch ... --write-xmp` |
+| Unattended pipeline | `photo-s autopilot DIR [--mode suggest\|auto_tone\|both] [--scan-existing] [--write-xmp]` | watch → suggest/auto-tone → process → audit gate → route to passed/ review/ + JSONL trace; `--write-xmp` hands off to human LR fixes (residual training signal); stop with Ctrl+C; MCP autopilot_start/status/stop for async |
+| Semantic index | `photo-s index PATHS... [-r] [--tags "landscape,night" --min-score 0.2 --write-xmp]` | builds an embedding index (`.photo-s-index.npz`, incremental by mtime+size); plugin = SigLIP text+image, bare install = 84-dim histogram (image-only); `--tags` auto-tags top matches into EXIF/XMP keywords |
+| Semantic search | `photo-s find "query words" [-k 10]` or `photo-s find --image REF.jpg` | cosine ranking over the index; prefer English queries with SigLIP (Chinese unreliable); mismatched/missing index → explicit error telling you to rebuild |
 | Environment probe | `photo-s info --json` | version, optional features, plugins |
 
 ## Typical workflows
@@ -124,6 +128,17 @@ photo-s audit "scratch/*.jpg" --json
 # REST POST /process {"async":true,"audit":true}) — result carries pass_rate
 ```
 
+### 6. Lightroom roundtrip / residual data loop (v2.5)
+```bash
+# auto-tone everything and record what was actually applied
+photo-s batch "RAW/*.ARW" --format jpeg -o out/ --auto-tone 0.8 --write-xmp
+# human fixes the XMP-carrying outputs in Lightroom, then harvest the delta:
+photo-s lr-scan ~/Pictures --export-dir records/ --render-dir before/
+photo-s lr-train --data records/lr_records.jsonl --images before/ --out m.npz
+# single-photo handoff either way:
+photo-s xmp-export IMG.jpg --embed --auto-tone 0.8    # -> continue in LR
+```
+
 ## Errors & recovery
 
 - Per-file failures do not abort the batch — check `results[].status == "error"`
@@ -142,7 +157,8 @@ photo-s audit "scratch/*.jpg" --json
 - **MCP (deep, tool-level)**: install `photo-s-tools[mcp]` (Python 3.10+), then
   `claude mcp add photo-s -- photo-s mcp` and call tools (`process`, `select`,
   `hdr`, `blurfaces`, `dedup`, `analyze`, `suggest`, `preview`, `audit`,
-  `diff`, `batch_start/status/cancel`, …) directly. 26 core tools, schemas
+  `diff`, `batch_start/status/cancel`, `autopilot_start/status/stop`,
+  `index`, `find`, …) directly. 31 core tools, schemas
   via `photo-s mcp --list-tools`; installed plugins register their own tools
   automatically (auto-tone adds `auto_tone` / `aesthetic_score` /
   `tone_advisor` / `batch_auto_tone` / `auto_tone_with_style` /

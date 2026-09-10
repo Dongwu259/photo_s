@@ -1,9 +1,9 @@
 # PhotoS 功能清单 — Feature Inventory
 
-> 以代码实际为准（v2.1.0），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
+> 以代码实际为准（已发布 v2.5.1；v2.6 GUI 批进行中），覆盖 CLI / 引擎 / GUI / REST / MCP / 插件 六层。
 > 定位 "CLI for AI agents, GUI for humans"。
 
-## 1. CLI 命令（35 个）
+## 1. CLI 命令（39 个）
 
 | 命令 | 作用 |
 |---|---|
@@ -43,7 +43,7 @@
 | `config` | TOML 配置文件管理 |
 | `info` | 格式/环境探测（`--json`） |
 | `serve` | REST API（AI agent 集成，含 `/process/stream` SSE 进度） |
-| `mcp` | MCP server（stdio，26 核心工具 + 插件自动注册，py3.10+） |
+| `mcp` | MCP server（stdio，31 核心工具 + 插件自动注册，py3.10+） |
 | `plugin` | 插件管理 install/list/info/fetch/**scaffold** |
 | `bench` | 批量基准：`--dir -j 1,2,4,8 --denoise` 实测各并发耗时/加速比；每阶段计时（load/process/save）；`--evaluate` 输出质量（PSNR/SSIM 对比源图）；输出写临时目录跑完自动清理，不污染源目录 |
 
@@ -94,7 +94,7 @@
 - 多图并排对比（2-4 张，滚轮缩放/拖拽平移/双击复位，共享视口状态天然同步）
 - 去重查看器（缩略图+清晰度+★最锐预选、移入回收不删除、撤销回移）
 - 画廊导出（HTML + 浏览器打开）
-- 目录监视（watchdog，后台自动处理新图，关闭对话框即停）
+- 目录监视（watchdog，后台自动处理新图，关闭对话框即停；**v2.6 处理模式四档**：基础监视 + autopilot 智能模式 suggest/auto_tone/both——参数→处理→质检→passed/review 分流 + JSONL，AI 强度/写回 XMP/启动扫描随模式联动，「打开输出目录」按钮）
 - 联系表（网格拼图）
 - 曝光/清晰度筛选（cull，仅保留符合项可撤销）
 - 校验和清单（生成/校验 manifest）
@@ -104,6 +104,12 @@
 **全局快捷键**：⌘O 加文件 · ⌘⇧O 加文件夹 · ⌘R 处理 · ⌘P 预览 · ⌘E 审查 · ⌘D 去重 · ⌘G 画廊 · ⌘Z 撤销 · Esc 取消
 **其它**：设置对话框（MCP 状态/依赖安装/插件管理）、插件管理器、拖放（可选）、RAW 预览
 
+**v2.2–v2.6 增量**（自 v2.0 工作区之后的 GUI 演进）：
+- **v2.2 编辑效率**：LR 式复制/粘贴设置（42 字段快照，Develop + 导出队列「粘贴到勾选」）、逐照片撤销/重做（上限 50）、导出配方（22 输出字段持久化）
+- **v2.4 所见即所得**：⌘P/审查灯箱/蒙版画布三处统一走逐照片有效 options；Library VirtualGrid 虚拟列表（5k 首绘 20.9ms）；键盘评级 1-5/P；before/after 可拖分割线；设置搜索/预设悬停预览/首跑引导；**Develop「AI 调色」按钮**（插件 9 参数写逐照片覆盖层）
+- **v2.5 结构归位**：蒙版画布升格进 Develop（主行 pack 切换）、审查灯箱并入 Library
+- **v2.6 XMP 互通三入口**：Develop「写回 XMP」按钮（有效调整含蒙版写回原文件——JPEG 内嵌每会话首问、RAW sidecar，警告逐条报状态栏）；Export「同时写 XMP」勾选（配方写输出：JPEG 内嵌/其他格式输出旁 sidecar，完成状态行报计数）；**Develop 自动载入**（LR 修过的照片无本地编辑时自动解析 XMP 入覆盖层/蒙版/撤销史，本地编辑永远赢，状态栏提示）
+
 ## 4. REST API（`photo-s serve`）
 
 `/health` `/info` `/plugins` `/tasks`(+id) `/process` `/process/stream`(SSE) `/dedup` `/rename` `/contact-sheet` `/check` `/plugins`(POST)
@@ -111,7 +117,7 @@
 - 无 token 时 CSRF Origin 防护（拒绝跨域浏览器请求）
 - **`POST /process/stream`**：text/event-stream 实时进度（每文件一条 `data:` 帧 + 结束 `done` 帧），agent 免轮询
 
-## 5. MCP server（30 核心工具 + 插件自动注册）
+## 5. MCP server（31 核心工具 + 插件自动注册）
 
 `process` `info` `exif` `dedup` `cull` `select` `hdr` `blurfaces` `hash` `plugin` `contact_sheet` `gallery` `watermark` `preset` `bench` `watch` `watch_status` `watch_stop` `analyze` `batch_start` `batch_status` `batch_cancel` `diff` `audit` `preview` `suggest` `autopilot_start` `autopilot_status` `autopilot_stop` `index` `find` — dedup 默认 dry_run 安全；`select` 双阈值分拣、`hdr` 曝光融合、`blurfaces` 人脸模糊均需对应 extra；模块级零 mcp import
 
@@ -133,4 +139,4 @@
 ## 9. 平台 / 验证
 
 - macOS / Linux / Windows（CI 7 jobs：py3.9-3.12 全量 + Windows 真实 Tk + SCUNet 真推理 + exe 打包双版本：完整版 + lite 无 GUI 精简版）
-- 测试 1204 个全绿
+- 测试 1490 个全绿（2026-09-10，v2.6 P0 批后）

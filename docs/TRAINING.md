@@ -125,6 +125,11 @@ PhotoS/模型的调整写成 LR 可读 sidecar——LR 打开原图即见全部�
    的差值正是下一版模型要学的**残差**（在当前输出上继续学的信号，而不是
    又一组从零开始的 before/after）。
 
+GUI 入口（v2.6）：第 1 步可换成 GUI 监视对话框的智能模式（勾选「写回
+XMP」）或 Develop「AI 调色」后点「写回 XMP」；第 2 步结束把照片拖回
+GUI，Develop 会自动载入你在 LR 里的最终调整（无本地编辑时）——闭环
+两侧都能走。
+
 ## 5.1 局部调整头（v2.4 词汇表扩展）
 
 auto-tone 的输出词汇表从 9 个全局标量扩展到**局部调整**：`local:
@@ -200,4 +205,4 @@ photo-s lr-recipes --help       # 配方库（风格签名）
 photo-s lr-eval --help          # 评测集
 photo-s audit --help            # 出片质量闸门
 ```
-技能包 `skills/photo-s/SKILL.md` 已含上述工作流；MCP 26 核心工具覆盖全部端点。
+技能包 `skills/photo-s/SKILL.md` 已含上述工作流；MCP 31 核心工具覆盖全部端点。

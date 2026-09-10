@@ -24,7 +24,7 @@
 | v2.3.0 | Agent 自动化闭环收口 | **已发布 2026-08-28**：`photo-s suggest` 规则型参数推荐（analyze→保守参数+理由，`--scale` 调幅，CLI/MCP/REST 三面，零模型）；**auto-tone 插件三线接线修复**（engine `auto_tone` 槽位 + MCP/REST 启动注册钩子，装后 MCP 25→30 工具）+ 修复 v1.7.1 潜伏的 `_job_worker` 锁重入死锁（batch_status 永久挂死）；batch 任务内建 audit（`audit:true` 附 pass_rate）；cull `--score` 加权评分 + `--burst` 连拍留最佳。SKILL.md/全仓文档同步；1277 测试绿 |
 | v2.2.0 | GUI 编辑效率 | **已发布 2026-08-27**：LR 式**复制/粘贴设置**（`_DEV_FIELDS` 42 字段快照，Develop 按钮 + Export 队列「粘贴到勾选」+「已调」徽标；per-photo 覆盖层 `_photo_adjust` 经 `_per_file_overlay` 与蒙版合并注入批处理）；**逐照片撤销/重做**（上限 50、首次编辑记基线、沉降入栈、切照片 flush/加载、Cmd+Z 在 Develop 优先逐照片历史）；**导出配方**（22 输出字段规范值快照，gui_state 持久化，套用/存/删）。agent 面零改动；新增 `test_gui_v22.py` 15 测，全量 1256 绿 |
 | v2.4.0 | 所见即所得 + AI 调色 GUI + 全自动闭环批① | **已发布 2026-09-02**：三处所见统一（⌘P/review 灯箱/蒙版画布走 per-photo 有效 options）；Library VirtualGrid 虚拟列表（5k 首绘 20.9ms、翻页 0.3ms）；键盘评级 1-5/P/? 表；before/after 可拖分割线；设置搜索/预设悬停预览/首跑引导；**AI 调色 GUI**（auto-tone 插件 9 参数写入逐照片覆盖层）。闭环批①：**局部调整词汇表**（`local: [{region, params}]`，引擎真实管线全 9 字段应用——修复旧接线只落 3/9 字段的缺口）+ **美学 verifier**（SigLIP 头 + Qwen 终审组合，`audit --aesthetic` 四面接线，训练工具 `train_verifier.py`，lr-scan 导出星级）+ **ModelScope 国内下载链**（塔/tokenizer/插件权重三源，`PHOTOS_AUTO_TONE_TOWER_SOURCE` / `WEIGHT_SOURCE`）；修复 v2.1 风格化底座错配发布级 bug（误用 v7 CLIP 底座，tokenizer 可达机器必崩 64↔77）。1384 测试绿 |
-| v2.5.0 | 数据闭环 + LR 双向互通 + 语义搜索 | **已发布 2026-09-02**：蒙版画布升格进 Develop、审查灯箱并入 Library（v2.4 推迟的结构归位）；**XMP 写出**（`xmp-export`/`batch --write-xmp`：crs 字段逐项逆映射 + radial/linear 蒙版 + 评分/关键词 → LR 可续修；读侧补齐 XMP 曲线/蒙版解析既有缺口）；**autopilot 无人值守管线**（监视 → suggest/auto-tone → audit → passed/review 分流 + JSONL 轨迹，CLI/MCP×3/REST；watcher on_modified + on_file 钩子）；**语义搜索**（`index`/`find`：embed 槽位——插件 SigLIP 塔（文本+图像，零新增下载）或内置 84 维直方图；`--tags` 自动打标写 EXIF/XMP；MCP 30 核心工具）。平台打包 B 取消（无签名证书/开发者会员，OS 拒跑 unsigned——pip 为前期唯一入口，移远期）。1463 测试绿 + 真实 SigLIP e2e |
+| v2.5.0 | 数据闭环 + LR 双向互通 + 语义搜索 | **已发布 2026-09-02**：蒙版画布升格进 Develop、审查灯箱并入 Library（v2.4 推迟的结构归位）；**XMP 写出**（`xmp-export`/`batch --write-xmp`：crs 字段逐项逆映射 + radial/linear 蒙版 + 评分/关键词 → LR 可续修；读侧补齐 XMP 曲线/蒙版解析既有缺口）；**autopilot 无人值守管线**（监视 → suggest/auto-tone → audit → passed/review 分流 + JSONL 轨迹，CLI/MCP×3/REST；watcher on_modified + on_file 钩子）；**语义搜索**（`index`/`find`：embed 槽位——插件 SigLIP 塔（文本+图像，零新增下载）或内置 84 维直方图；`--tags` 自动打标写 EXIF/XMP；MCP 31 核心工具）。平台打包 B 取消（无签名证书/开发者会员，OS 拒跑 unsigned——pip 为前期唯一入口，移远期）。1463 测试绿 + 真实 SigLIP e2e |
 | v2.5.1 | patch：XMP 内嵌 LR 实测对齐 | **已发布 2026-09-10**（核心包，插件无改动）：`xmp-export --embed` JPEG 内嵌 XMP（LR 对 JPEG 只读内嵌不读 sidecar）；经 LR 实测三轮对照（用户提供的 ground truth 导出）逐项对齐——xpacket 包形态（PI 后无 xml 声明+尾部填充）、EXIF 段序、`AlreadyApplied=False` 开关、蒙版组 LR18 结构（Seq+嵌套 Description+Mask/Gradient Zero-Full+径向 Midpoint/Roundness/Flipped/Version 属性集+全键集局部参数+小写布尔）、局部参数 0-1 标度修正（v1.9 起 blob/XMP 双侧隐性偏低两个量级）。LR 实测全通：全局调色/线性蒙版/径向蒙版（含反选）/评分关键词逐值一致 |
 | auto-tone-v2.1.0 | 插件：风格化 + 场景自适应（训练侧 v2.1 同步） | **已发布 2026-08-28**：`auto_tone_with_style`（SigLIP 视觉分析 16 风格 top-K + Qwen3-VL 自然语言→9 字段偏置解析，Qwen 缺席回退 8 手工预设）与 `analyze_visual_style` MCP 工具（插件 4→6，装后 MCP 26→32）；Python API `auto_tone_with_scene`（552 张 LR 目录统计的 7 场景数据驱动偏置，包内 scene_biases.json）；SigLIP 主模型 `auto_tone_siglip_h192_d03.pt`（PSNR 32.21，+2.93 dB vs v7_clean，独立 release tag auto-tone-v2.1.0）；predictor 修复 LayerNorm→GELU→Dropout 重建（v7/siglip 双 checkpoint 验证，修复推理双 GELU bug）+ SigLIP sig_dim 推断；batch_auto_tone 加 style_desc；重存权重兼容 weights_only=True。1286 测试绿 + 真实权重 e2e |
 
@@ -201,6 +201,44 @@ process → audit → passed/review 分流 + JSONL）+ watcher `on_modified`/`on
 hist84；npz 增量索引；严格抽取器身份）+ 插件 `core/embed.py`（塔复用零新增
 下载）+ CLI index/find + MCP×2/REST×2 + `--tags` 自动打标（EXIF + 可选
 XMP dc:subject）。
+
+### v2.6.0 — GUI 数据闭环（进行中）
+
+> 立项来源（2026-09-10 全面盘点）：v2.5 系列做给 agent 的能力（XMP 互通 /
+> autopilot / 语义搜索 / suggest / audit）GUI 全部零入口（grep 核实 0 命中）；
+> 另有结构债——app.py 10542 行单文件（v2.0 计划的 panels/ 拆分从未启动）、
+> Tools 12 卡全模态弹窗、分栏不可拖、Library 过滤仅文件名、评级只有星级
+> 无旗标/色标。主题：**把 v2.5 的能力补给人，让 LR 往返在 GUI 收口**。
+
+**P0 — XMP 互通三入口 + watch 升级 autopilot**：✅ 已落地（2026-09-10，
+ac2198d + d12f63c，随本批发版）：
+- [x] workflows 三个 Tk-free seam（xmp_write_back / xmp_read_adjust /
+      reveal_in_file_manager），GUI 经 seam 走 lrxmp，agent 面零改动
+- [x] Develop「写回 XMP」按钮：有效调整（全局+覆盖层+蒙版+评分关键词）
+      写回原文件——JPEG 内嵌（v2.5.1 LR 实测对齐的包形态）每会话首问、
+      RAW 等 sidecar；笔刷/AI 蒙版等无 LR 等价项逐条警告
+- [x] Export「同时写 XMP」勾选：配方写**输出**文件（JPEG 内嵌/其他格式
+      输出旁 sidecar，用户定案），逐照片覆盖层生效
+- [x] Develop 自动载入：LR 修过的照片（sidecar 优先/JPEG 内嵌）无本地
+      编辑时自动入覆盖层/蒙版/撤销史，「已调」徽标点亮；本地编辑永远赢
+- [x] watch 对话框「处理模式」四档：基础监视（原行为）+ autopilot
+      suggest/auto_tone/both（分流 + JSONL + 打开输出目录；缺插件
+      fail-loud 状态提示）；测试 22 项新增，全量 1490 三连绿
+
+**P1 — Library 语义搜索 + 过滤增强 + Develop 智能建议按钮**：
+- [ ] Library 过滤框升级：文件名旁加语义搜索（有索引用之，无索引引导
+      构建；无插件时 hist84 不支持文本查询需明确提示）；按评级/已调徽标/
+      格式过滤
+- [ ] Develop「智能建议」按钮：suggest 参数一键应用（零依赖，可撤销），
+      兼作 AI 调色缺插件时的兜底
+
+**P2 — 反馈补全**：
+- [ ] 导出完成显示 audit 通过率与失败原因下钻（review/ 目录入口）
+- [ ] 颜色标签（XMP label 写出侧已支持，GUI 无入口；评级筛选联动）
+
+**结构项（可拆批）**：panels/ 拆分启动（新代码已按 seam 模式落在
+workflows.py，app.py 不再膨胀是目标）；Tools 卡非模态面板化；
+`ttk.PanedWindow` 分栏可拖 + 持久化。
 
 ### 远期（数据/生态，未排期）
 

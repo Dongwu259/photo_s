@@ -197,8 +197,10 @@ bind_text(btn, "start", fmt=...)     # 语言切换 → 只 configure(text=...)
 >   两页共用同一组 tk.Variable。GUI 测试全面 HOME 隔离（gui_state.json 污染
 >   曾引发跨文件级联失败）。
 > - [x] Tools：12 张工作流启动卡片（仍打开既有对话框）。
-> - [ ] 后续批：审查灯箱吸收进 Library、蒙版画布从弹窗升格进 Develop、
->   逐工具非模态面板化、VirtualGrid 网格、`ttk.PanedWindow` 分栏持久化。
+> - [ ] 后续批：~~审查灯箱吸收进 Library、蒙版画布从弹窗升格进 Develop~~
+>   （✅ v2.5 结构归位）、~~VirtualGrid 网格~~（✅ v2.4 Library 虚拟列表）、
+>   逐工具非模态面板化、`ttk.PanedWindow` 分栏持久化（仍未做，见 ROADMAP
+>   v2.6 结构项）。
 > - 源头文案统一（消歧义票）：`more_hdr`/`more_watch` en 与标题键一致、
 >   `mask_tool` zh 改"蒙版工具"。
 
@@ -263,6 +265,11 @@ bind_text(btn, "start", fmt=...)     # 语言切换 → 只 configure(text=...)
 ---
 
 ## 6. v2.3.0 — 平台收尾（P8）
+
+> **状态更新（2026-09-02）**：本节打包案**取消**（用户决策）——无代码签名
+> 证书与开发者会员，macOS Gatekeeper / Windows SmartScreen 拒跑 unsigned
+> 应用；前期以 pip 为唯一安装入口，打包移至 ROADMAP 远期（待签名条件）。
+> 下表保留为原案备查。
 
 | 平台 | 内容 |
 |---|---|
