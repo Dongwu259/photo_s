@@ -785,19 +785,26 @@ def _corrections_from_masks(masks_str: str, adjust_str: str,
 def _mask_geo(what: str, left: float, top: float, right: float, bottom: float,
               feather: float, invert: bool,
               angle: Optional[float] = None) -> Dict[str, str]:
-    """径向 box 形几何（blob 同构）+ LR 18 公共蒙版属性（小写布尔）。"""
-    def u(v: float) -> str:
-        return f"{max(0.0, min(1.0, float(v))):.6f}"
+    """径向 box 形几何——LR 18 实测（1测试径向渐变.jpg 导出样本）。
 
+    属性集必须逐项一致：``Midpoint``（50）而非 CenterWeight、``Roundness``
+    而非 CornerRadius、**无** XOffset/YOffset、须带 Angle/Flipped/Version="2"；
+    box 不夹 0-1（LR 可为负/超 1）；Feather 为 0-100 整数。未知/缺失属性
+    的组合会让 LR 静默丢弃该蒙版（box+CenterWeight+XOffset 的旧写法实测
+    被丢）。
+    """
     geo = {
         "What": what,
         "MaskActive": "true",
-        "Top": u(top), "Left": u(left), "Bottom": u(bottom), "Right": u(right),
-        "CenterWeight": "0", "CornerRadius": "0",
-        "XOffset": "0.000000", "YOffset": "0.000000",
-        "Feather": _lr_num(max(0.0, min(1.0, float(feather or 0.0))) * 100.0),
+        "Top": f"{float(top):.6f}", "Left": f"{float(left):.6f}",
+        "Bottom": f"{float(bottom):.6f}", "Right": f"{float(right):.6f}",
+        "Angle": "0", "Midpoint": "50", "Roundness": "0",
+        "Feather": str(int(round(max(0.0, min(1.0, float(feather or 0.0)))
+                                 * 100.0))),
+        "Flipped": "true",
         "MaskBlendMode": "0", "MaskValue": "1",
         "MaskInverted": "true" if invert else "false",
+        "Version": "2",
     }
     if angle is not None:
         geo["Angle"] = f"{float(angle):.4f}"
