@@ -275,11 +275,15 @@ def apply_white_balance(img: Image.Image, temp: Optional[float] = None,
     """Correct white balance from a Kelvin temperature or a reference image.
 
     ``temp`` (Kelvin) shifts R/B so the scene light is corrected back toward
-    neutral 6500K. ``reference`` (path) samples a neutral-gray area and
-    equalizes the channels. ``tint`` (range ~[-100, 100], 0 = none) adds a
-    green(-) / magenta(+) tilt on the G/M axis, applied on top of the temp/
-    reference gains (or alone). Neither temp nor reference nor tint →
-    unchanged; non-RGB/L modes unchanged.
+    neutral 6500K. **Direction note**: this is a *correction* semantic, the
+    opposite of the Lightroom Temp slider — pass the light source's own
+    temperature to neutralize it, whereas LR's slider value is the *target*
+    look (higher = warmer). Bridging LR slider values straight through
+    flips the result. ``reference`` (path) samples a neutral-gray area and
+    equalizes the channels. ``tint`` (range ~[-100, 100], 0 = none; same
+    sign convention as LR) adds a green(-) / magenta(+) tilt on the G/M
+    axis, applied on top of the temp/reference gains (or alone). Neither
+    temp nor reference nor tint → unchanged; non-RGB/L modes unchanged.
     """
     gains = None
     if reference:
@@ -320,6 +324,12 @@ def apply_exposure(img: Image.Image, ev: Optional[float] = None,
     (0-1); ``ev`` is a relative offset on top of that (or standalone, if no
     auto-exposure). Both are a single per-channel multiply, so they combine
     into one pass.
+
+    The gain is applied to the decoded sRGB (gamma-encoded) values, not to
+    linear light — a deliberate speed trade-off. Consequence: stops do not
+    match LR/RAW EV exactly and the deviation grows with |EV| (midtones
+    move less than 2^EV, highlights clip later). Linear-light EV would
+    require un-gamma/re-gamma around the multiply.
     """
     gain = 1.0
     if auto_exposure is not None:

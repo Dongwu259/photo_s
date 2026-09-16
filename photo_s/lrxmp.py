@@ -89,16 +89,19 @@ HSL_COLORS: Tuple[str, ...] = (
     "red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta",
 )
 
-# LR 局部调整键（Local*）→ PhotoS mask_adjust 标量键
+# LR 局部调整键（Local*）→ PhotoS mask_adjust 标量键。PhotoS mask_adjust
+# 的 brightness/contrast/saturation/sharpen 是 **delta** 口径
+# （mask.apply_local 内部 ``1.0 + v``：0.06 ≡ 全局倍率 1.06），与 LR 的
+# 0-1 小数标度同义 → v 直传；temp 例外（LR 是偏移量 → 近似绝对温度）。
 LOCAL_MAP: Dict[str, str] = {
     "LocalExposure2012": "exposure",    # EV 直传
-    "LocalBrightness": "brightness",    # 1 + v/100
-    "LocalContrast2012": "contrast",    # 1 + v/100
-    "LocalSaturation": "saturation",    # 1 + v/100
-    "LocalVibrance": "vibrance",        # v/100
-    "LocalClarity": "clarity",          # v/100
-    "LocalTexture": "texture",          # v/100
-    "LocalSharpness": "sharpen",        # 1 + v/100
+    "LocalBrightness": "brightness",    # delta 直传
+    "LocalContrast2012": "contrast",    # delta 直传
+    "LocalSaturation": "saturation",    # delta 直传
+    "LocalVibrance": "vibrance",        # [-1, 1] 直传
+    "LocalClarity": "clarity",          # [-1, 1] 直传
+    "LocalTexture": "texture",          # [-1, 1] 直传
+    "LocalSharpness": "sharpen",        # delta 直传
     "LocalTemperature": "temp",         # 5250 + v（偏移近似绝对温度）
     "LocalTint": "tint",                # 直传
 }
@@ -491,22 +494,19 @@ def _linear_mask(cm: Dict[str, Any], name: str) -> str:
 def _local_adjust(corr: Dict[str, Any], name: str) -> str:
     """LR 局部参数 → PhotoS mask_adjust 段。
 
-    标度（blob 与 XMP 同标度，LR 18 实测两侧均为 0-1 小数：
-    blob fixture LocalContrast2012=0.201933、XMP 导出 LocalContrast2012=
-    0.445644 = UI +45）：倍率类 = 1 + v、小数类 = v 直传。v1.9 起
-    ``1 + v/100`` 的旧换算把 0.20 解析成 1.002——一直隐性偏低两个量级
-    （v2.5.1 修正）。temp 仍是偏移近似（5250 + v，无实测样本，待标定）。
+    标度：blob 与 XMP 同标度（LR 18 实测均为 0-1 小数：XMP 导出
+    LocalContrast2012=0.445644 = UI +45），而 PhotoS mask_adjust 的
+    brightness/contrast/saturation/sharpen 也是 delta 口径
+    （mask.apply_local 内部 ``1.0 + v``）——数值同义，v 直传。旧写法
+    ``1.0 + v`` 会被 apply_local 再加一次 1.0，双重换算成 2.45 倍
+    对比度（P60 标定发现）。temp 仍是偏移近似（5250 + v，待标定）。
     """
     parts = []
     for lr_key, ps_key in LOCAL_MAP.items():
         v = _f(corr, lr_key)
         if v == 0.0:
             continue
-        if ps_key in ("brightness", "contrast", "saturation", "sharpen"):
-            parts.append(f"{ps_key}={(1.0 + v):.4f}")
-        elif ps_key in ("vibrance", "clarity", "texture"):
-            parts.append(f"{ps_key}={v:.4f}")
-        elif ps_key == "temp":
+        if ps_key == "temp":
             parts.append(f"temp={5250.0 + v:.1f}")
         else:
             parts.append(f"{ps_key}={v:.4f}")
@@ -692,17 +692,18 @@ _LOCAL_XMP_ORDER = (
 )
 
 # PhotoS mask_adjust 键 → (LR XMP 局部键, 值变换)。标度对齐 LR 18 实测：
-# XMP/blob 局部参数均为 0-1 小数（LocalContrast2012=0.445644 = UI +45）——
-# 倍率类差 1、小数类直传。XMP 键集**没有 LocalVibrance**（LR 局部调整本无
-# 鲜艳度——PhotoS 扩展，跳过+告警）；temp 仍是偏移近似（-5250，待标定）。
+# XMP/blob 局部参数均为 0-1 小数（LocalContrast2012=0.445644 = UI +45），
+# PhotoS mask_adjust 同为 delta 口径 → 恒等直传（与 _local_adjust 互逆；
+# temp 例外，-5250 偏移近似）。XMP 键集**没有 LocalVibrance**（LR 局部
+# 调整本无鲜艳度——PhotoS 扩展，跳过+告警）。
 _LOCAL_XMP_MAP = {
     "exposure": ("LocalExposure2012", lambda v: v),
-    "brightness": ("LocalBrightness", lambda v: v - 1.0),
-    "contrast": ("LocalContrast2012", lambda v: v - 1.0),
-    "saturation": ("LocalSaturation", lambda v: v - 1.0),
+    "brightness": ("LocalBrightness", lambda v: v),
+    "contrast": ("LocalContrast2012", lambda v: v),
+    "saturation": ("LocalSaturation", lambda v: v),
     "clarity": ("LocalClarity2012", lambda v: v),
     "texture": ("LocalTexture", lambda v: v),
-    "sharpen": ("LocalSharpness", lambda v: v - 1.0),
+    "sharpen": ("LocalSharpness", lambda v: v),
     "temp": ("LocalTemperature", lambda v: v - 5250.0),
     "tint": ("LocalTint", lambda v: v),
 }
@@ -894,8 +895,12 @@ def options_to_xmp(options: Any, *, image_size: Optional[Tuple[int, int]] = None
         from .engine import ProcessOptions
         if isinstance(options, dict):
             known = ProcessOptions.__dataclass_fields__
-            options = ProcessOptions(**{k: v for k, v in options.items()
-                                        if k in known})
+            items = {k: v for k, v in options.items() if k in known}
+            # crs_to_options 读侧键是 "exposure"（LR 命名空间），字段名是
+            # ev——不换名则 dict 路径把曝光静默丢弃（往返丢字段的根因）
+            if items.get("ev") is None and options.get("exposure") is not None:
+                items["ev"] = options["exposure"]
+            options = ProcessOptions(**items)
         else:
             options = ProcessOptions()
     crs: Dict[str, str] = {

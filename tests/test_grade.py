@@ -166,6 +166,23 @@ class TestVibrance:
         # desaturated → channels closer together
         assert (r - g) < 150
 
+    def test_neutrals_stay_neutral(self):
+        # regression (PS-2): the old additive form sat + (1-sat)*amount
+        # approximated sat + amount at low sat — neutrals had to be caught
+        # by the 1e-3 guard instead of the math itself
+        im = Image.new("RGB", (8, 8), (200, 200, 200))
+        out = apply_vibrance(im, 0.5)
+        assert out.getpixel((0, 0)) == (200, 200, 200)
+
+    def test_near_neutral_tint_not_amplified(self):
+        # regression (PS-2): an invisible ~1% tint must not balloon into a
+        # visible color patch — old form: sat 0.009 + 0.08 ≈ 9x relative
+        # boost, rendering gray (110,109,110) as a pink block
+        im = Image.new("RGB", (8, 8), (110, 109, 110))
+        out = apply_vibrance(im, 0.08)
+        r, g, b = out.getpixel((0, 0))
+        assert abs(r - g) <= 2 and abs(b - g) <= 2
+
     def test_alpha_and_info(self):
         im = Image.new("RGBA", (8, 8), (200, 50, 50, 160))
         im.info["exif"] = b"mock"
@@ -248,6 +265,22 @@ class TestHsl:
         r, g, b = out.getpixel((0, 0))
         # saturating blue → the channel spread widens (b pulled away from r/g)
         assert (b - r) > (140 - 120)
+
+    def test_neutrals_untouched(self):
+        # regression (PS-1): neutral pixels' HSV hue is undefined (falls
+        # back to 0° = the red centre), so a white sky ate the red band's
+        # shifts and collapsed to gray-pink before the saturation gate
+        im = Image.new("RGB", (8, 8), (250, 250, 250))
+        out = apply_hsl(im, {"red": (30.6, 0.17, -0.15)})
+        assert out.getpixel((0, 0)) == (250, 250, 250)
+
+    def test_near_neutral_barely_touched(self):
+        # sat 0.004 < 0.1 → gate weight 0.04: the red band's +0.17 sat
+        # shift lands as ~0.007, not the old blanket +0.17
+        im = Image.new("RGB", (8, 8), (245, 244, 245))
+        out = apply_hsl(im, {"red": (0, 0.17, 0)})
+        r, g, b = out.getpixel((0, 0))
+        assert max(r, g, b) - min(r, g, b) <= 4
 
     def test_alpha_and_info(self):
         im = Image.new("RGBA", (8, 8), (0, 180, 0, 170))

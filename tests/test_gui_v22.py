@@ -211,7 +211,7 @@ class TestBatchInjection:
         assert got.quality == base.quality     # untouched fields carry over
 
         app._photo_masks[paths[1]] = {
-            "masks": "sky:linear", "mask_adjust": "sky:contrast=1.2"}
+            "masks": "sky:linear", "mask_adjust": "sky:contrast=0.2"}
         got2 = app._per_file_overlay(paths[1], base)
         assert got2.masks == "sky:linear"
         assert got2.brightness == base.brightness

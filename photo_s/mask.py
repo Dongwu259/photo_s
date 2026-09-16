@@ -4,7 +4,7 @@ Masks are modeled as compact strings so they serialize into
 ``ProcessOptions`` and reach CLI / REST / MCP / presets with zero glue:
 
     masks       = "sky:linear:0.5,0,0.5,1,feather=0.3; face:color:255,200,180,tol=0.15"
-    mask_adjust = "sky:exposure=-0.7,sat=0.2; face:brightness=0.1,clarity=0.3"
+    mask_adjust = "sky:exposure=-0.7,saturation=0.2; face:brightness=0.1,clarity=0.3"
 
 Each ``masks`` entry is ``[name:]type:params`` (unnamed entries get the
 sequential name "1", "2", ...). Coordinates are relative 0-1, so one spec
@@ -58,6 +58,11 @@ _COMBO = "combo"
 _V18_TYPES = _AI_TYPES + (_BRUSH, _COMBO)
 # name characters forbidden everywhere (incl. brush '|' separators)
 _BAD_NAME_CHARS = ":;,= |"
+# Minimum radial radius (relative, ≈1px on a 1000px axis) — degenerate
+# radii from LR round-trips (lines / collapsed shapes arrive as rx=0.0000)
+# are clamped to this hairline instead of raising, so one degenerate mask
+# cannot abort the whole mask list.
+_RADIAL_MIN_R = 0.001
 
 
 class MaskSpec:
@@ -258,8 +263,14 @@ def _parse_mask_segment(seg: str, index: int) -> MaskSpec:
             feather = max(0.0, min(1.0, positional[4]))
         cx, cy = max(0.0, min(1.0, positional[0])), max(0.0, min(1.0, positional[1]))
         rx, ry = positional[2], positional[3]
-        if rx <= 0 or ry <= 0:
-            raise MaskError(f"radial mask radii must be > 0 (got {seg!r})")
+        if rx < 0 or ry < 0:
+            raise MaskError(f"radial mask radii must be >= 0 (got {seg!r})")
+        # Degenerate (zero/hairline) radii clamp to a thin line instead of
+        # raising — LR lines & collapsed shapes round-trip through lrxmp as
+        # rx=0.0000, and one MaskError here would abort every other mask
+        # in the list too.
+        rx = max(rx, _RADIAL_MIN_R)
+        ry = max(ry, _RADIAL_MIN_R)
         return MaskSpec("radial", (cx, cy, rx, ry), feather, invert, name)
     # color
     if len(positional) < 3:
@@ -366,12 +377,14 @@ def parse_masks(s: str) -> list:
     return specs
 
 
-# Supported per-mask adjustments. Scalar keys take float values (additive
-# deltas unless noted; temp is an absolute Kelvin value, tint the G(-)/M(+)
-# axis, blur a Gaussian radius in pixels, sharpen a multiplier offset from
-# 1.0). String keys take the same compact strings as the global grade
-# options (curves / hsl / color_grading / vignette / grain) - so any
-# grading can be localized under a mask.
+# Supported per-mask adjustments. Scalar keys take additive deltas unless
+# noted: brightness/contrast/saturation/sharpen are offsets from neutral
+# (0.06 ≡ global multiplier 1.06 — the same 0-1 decimal scale the LR bridge
+# emits in lrxmp._local_adjust); temp is an absolute Kelvin value, tint the
+# G(-)/M(+) axis, blur a Gaussian radius in pixels. String keys take the
+# same compact strings as the global grade options (curves / hsl /
+# color_grading / vignette / grain) - so any grading can be localized
+# under a mask.
 ADJUST_KEYS = (
     "exposure", "brightness", "contrast", "saturation", "vibrance",
     "clarity", "texture", "sharpen", "temp", "tint", "blur",

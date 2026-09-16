@@ -62,6 +62,18 @@ class TestScalars:
         xmp2, _, _ = _roundtrip(ProcessOptions(ev=0.35))
         assert 'Exposure2012="+0.35"' in xmp2
 
+    def test_exposure_key_alias_from_crs_dict(self):
+        # regression (PS-3): crs_to_options emits "exposure" (LR namespace)
+        # while the ProcessOptions field is ev — the dict path used to
+        # filter it out silently, dropping exposure on the roundtrip
+        xmp, _, back = _roundtrip({"exposure": 0.35, "contrast": 1.19})
+        assert 'Exposure2012="+0.35"' in xmp
+        assert back["ev"] == pytest.approx(0.35, abs=0.005)
+        assert back["contrast"] == pytest.approx(1.19, abs=0.01)
+        # explicit ev wins over the exposure alias
+        xmp2, _ = options_to_xmp({"exposure": 0.35, "ev": -0.4})
+        assert 'Exposure2012="-0.4"' in xmp2
+
 
 class TestCompactStrings:
     def test_hsl_roundtrip(self):
@@ -123,11 +135,13 @@ class TestCrop:
 
 class TestMasks:
     def test_radial_full_roundtrip(self):
+        # mask_adjust values are deltas (0.1 ≡ global multiplier 1.10) —
+        # the same 0-1 scale LR's Local* keys use (PS-4 unified contract)
         opts = ProcessOptions(
             masks="face:radial:0.4,0.3,0.2,0.25,feather=0.51,invert",
-            mask_adjust="face:exposure=-0.3,contrast=1.1,saturation=0.9,"
-                        "brightness=1.05,vibrance=0.2,clarity=0.3,"
-                        "texture=0.1,sharpen=1.2,temp=5400,tint=5")
+            mask_adjust="face:exposure=-0.3,contrast=0.1,saturation=-0.1,"
+                        "brightness=0.05,vibrance=0.2,clarity=0.3,"
+                        "texture=0.1,sharpen=0.2,temp=5400,tint=5")
         xmp, warns, back = _roundtrip(opts)
         # vibrance 是 PhotoS 扩展：LR XMP 局部键集无 LocalVibrance → 告警跳过
         assert any("vibrance" in w for w in warns)
@@ -136,9 +150,10 @@ class TestMasks:
         adj = dict(kv.split("=", 1)
                    for kv in back["mask_adjust"].split(":", 1)[1].split(","))
         assert float(adj["exposure"]) == pytest.approx(-0.3, abs=1e-3)
-        assert float(adj["contrast"]) == pytest.approx(1.1, abs=0.011)
-        assert float(adj["brightness"]) == pytest.approx(1.05, abs=0.011)
-        assert float(adj["sharpen"]) == pytest.approx(1.2, abs=0.011)
+        assert float(adj["contrast"]) == pytest.approx(0.1, abs=1e-3)
+        assert float(adj["saturation"]) == pytest.approx(-0.1, abs=1e-3)
+        assert float(adj["brightness"]) == pytest.approx(0.05, abs=1e-3)
+        assert float(adj["sharpen"]) == pytest.approx(0.2, abs=1e-3)
         assert float(adj["temp"]) == pytest.approx(5400.0, abs=1.1)
         assert float(adj["tint"]) == pytest.approx(5.0, abs=1e-3)
         assert "vibrance" not in adj
@@ -182,7 +197,8 @@ class TestMasks:
         opts = crs_to_options(settings)
         assert opts["masks"].startswith("蒙版_1:linear:1.0000,0.8784,0.1510,0.1517")
         assert "exposure=0.2956" in opts["mask_adjust"]
-        assert "contrast=1.4456" in opts["mask_adjust"]  # 0-1 小数标度
+        # delta 直传（PS-4）：0.4456 = UI +45，不再写 1 + v 双重换算
+        assert "contrast=0.4456" in opts["mask_adjust"]
 
     def test_ai_mask_warned_not_written(self):
         opts = ProcessOptions(masks="ai0:subject;geo:radial:0.5,0.5,0.2,0.2",

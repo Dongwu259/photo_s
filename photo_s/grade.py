@@ -274,20 +274,29 @@ def apply_vibrance(img: Image.Image, amount: float = 0.0) -> Image.Image:
     """Natural saturation: boost/soften inversely weighted by current sat.
 
     Muted colors get the most change; deep/skin colors are left alone —
-    unlike a global saturation multiply. ``amount > 0`` boosts (→1),
-    ``amount < 0`` softens (× (1+amount)), 0 = no change. Clamped to [-1, 1].
+    unlike a global saturation multiply. ``amount > 0`` boosts, ``amount <
+    0`` softens (``sat * (1 + amount)``), 0 = no change. Clamped to
+    [-1, 1].
+
+    The boost is multiplicative — ``new_sat = sat + sat * (1 - sat) *
+    amount`` — so neutrals stay neutral (``sat = 0 → 0``). The previous
+    additive form ``sat + (1 - sat) * amount`` approximated ``sat +
+    amount`` at low saturation: an invisible ~1% tint (sat 0.005) gained
+    ~9x relative saturation from ``amount = 0.08`` and rendered as a
+    visible color patch.
     """
     amount = max(-1.0, min(1.0, float(amount or 0.0)))
     if abs(amount) < 1e-4:
         return img
     arr, alpha = _normalize_grade_input(img)
     hue, sat, val = _to_hsv(arr)
-    new_sat = sat + (1.0 - sat) * amount if amount > 0 \
+    new_sat = sat + sat * (1.0 - sat) * amount if amount > 0 \
         else sat * (1.0 + amount)
     new_sat = np.clip(new_sat, 0.0, 1.0)
-    # Truly neutral pixels (sat ≈ 0) have an undefined hue — boosting their
-    # saturation would round-trip to a red/cyan tint via the HSV→RGB
-    # conversion and darken them. Real vibrance leaves neutrals alone.
+    # Truly neutral pixels (sat ≈ 0) have an undefined hue — the
+    # multiplicative form already keeps them at 0; this line also zeroes
+    # the sub-1e-3 residue so the HSV→RGB round-trip can't reintroduce a
+    # red/cyan tint through the fallback hue.
     new_sat[sat < 1e-3] = 0.0
     out_arr = _from_hsv(hue, new_sat, val)
     return _finish_grade(img, out_arr, alpha)
@@ -440,19 +449,27 @@ def apply_hsl(img: Image.Image, adjustments: dict) -> Image.Image:
     Each adjustment is ``(hue_shift_deg, sat_shift, lum_shift)`` applied
     under a gaussian hue mask centred on that domain, so neighbouring bands
     blend instead of banding. Shifts are additive in HSV space.
+
+    The hue mask is gated by saturation (full weight at sat >= 0.1, fading
+    to 0 at neutral): in HSV a neutral pixel's hue is undefined (the
+    conversion falls back to 0° = the red centre), so without the gate a
+    white sky or gray wall eats the red band's shifts and collapses to a
+    gray-pink cast. Same convention as :func:`_point_color_mask` and
+    ``mask._color_mask``; saturated pixels (sat >= 0.1) are unaffected.
     """
     if not adjustments:
         return img
     arr, alpha = _normalize_grade_input(img)
     hue, sat, val = _to_hsv(arr)
     hue_deg = hue * 360.0
+    satw = np.clip(sat / 0.10, 0.0, 1.0)  # neutral pixels carry no hue
     hue_shift = np.zeros_like(hue)
     sat_shift = np.zeros_like(sat)
     lum_shift = np.zeros_like(val)
     for color, (dh, ds, dl) in adjustments.items():
         center = _HSL_CENTERS[color]
         dist = np.abs(_hue_distance_deg(hue_deg, center))
-        mask = np.exp(-(dist ** 2) / (2.0 * _HSL_SIGMA ** 2))
+        mask = np.exp(-(dist ** 2) / (2.0 * _HSL_SIGMA ** 2)) * satw
         hue_shift += (dh / 360.0) * mask
         sat_shift += ds * mask
         lum_shift += dl * mask

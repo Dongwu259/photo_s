@@ -11,6 +11,7 @@ from PIL import Image
 from photo_s.mask import (
     ADJUST_KEYS,
     MaskError,
+    _RADIAL_MIN_R,
     apply_local,
     combine,
     parse_mask_adjust,
@@ -91,11 +92,23 @@ def test_parse_rejects_missing_params():
     with pytest.raises(MaskError):
         parse_masks("linear:0,0,0")           # needs 4 coords
     with pytest.raises(MaskError):
-        parse_masks("radial:0.5,0.5,0,0.2")   # rx must be > 0
+        parse_masks("radial:0.5,0.5,-0.2,0.2")  # negative radius
     with pytest.raises(MaskError):
         parse_masks("color:255,200")          # needs r,g,b
     with pytest.raises(MaskError):
         parse_masks("linear:0.5,0.5,0.5,0.5")  # zero-length axis
+
+
+def test_degenerate_radial_clamped_not_fatal():
+    # regression (PS-5): rx=0 (LR lines / collapsed shapes round-trip
+    # through lrxmp as "0.0000") must not raise — one bad mask used to
+    # abort the whole mask list. It clamps to a hairline ellipse instead.
+    specs = parse_masks("蒙版_2:radial:0.6657,0.5333,0.0000,0.0921,feather=0.5;"
+                        "sky:linear:0.5,0,0.5,1")
+    assert len(specs) == 2
+    assert specs[0].params[2] == pytest.approx(_RADIAL_MIN_R)
+    m = render_mask(specs[0], 16, 16)
+    assert np.isfinite(m).all() and m.max() <= 1.0
 
 
 def test_parse_rejects_duplicate_names():
