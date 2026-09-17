@@ -199,6 +199,7 @@ class TestAllToolsPanelized:
         root, app, paths = self._app_with_files(tmp_path)
         app._selected_rows = {paths[0]}
         app._show_module("tools")
+        strays = []  # (opener, 诊断) —— 诊断失败信息用，同时防级联泄漏
         for opener in sorted(PhotoSApp_PANELIZED):
             app._tools_toggle_panel(opener)
             root.update()
@@ -207,10 +208,22 @@ class TestAllToolsPanelized:
                 f"{opener} 面板已构建"
             tops = [w for w in root.winfo_children()
                     if isinstance(w, tk.Toplevel)]
-            assert not tops, f"{opener} 不应弹 Toplevel"
+            if tops:
+                def _describe(w, depth=3):
+                    out = [f"{w.winfo_class()}:{w.winfo_name()}"]
+                    if depth:
+                        for c in w.winfo_children()[:6]:
+                            out.append(_describe(c, depth - 1))
+                    return "/".join(out)
+                strays.append((opener, "; ".join(_describe(w) for w in tops)))
+                for w in tops:
+                    w.destroy()
             app._tools_toggle_panel(opener)  # 关闭再换下一个
             root.update()
             assert app._tools_panel_open is None
+        assert strays == [], \
+            "面板化工具不应弹 Toplevel: " + " | ".join(
+                f"{o} -> {d}" for o, d in strays)
         root.destroy()
 
     def test_routing_table_matches_cards(self):
