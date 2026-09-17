@@ -4,6 +4,8 @@
 
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
+[![CI](https://github.com/Dongwu259/photo_s/actions/workflows/ci.yml/badge.svg)](https://github.com/Dongwu259/photo_s/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-1496%20passed-brightgreen)](https://github.com/Dongwu259/photo_s/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Weights](https://img.shields.io/badge/auto--tone%20weights-CC--BY--NC%204.0-orange)](docs/COMMERCIAL.md)
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
@@ -103,7 +105,7 @@ PhotoS 首先是一个 **AI agent 就绪的图像管线**：四条集成通道�
 | REST API | — | ✅ | 供 agent 使用的 HTTP 服务（异步任务 + SSE 进度） |
 | 插件系统 | — | ✅ | 第三方插件支持 |
 | 官方插件管理 | — | ✅ | list/install/info/fetch + pip 安装 |
-| MCP server | — | ✅ | 向 MCP 客户端（Claude Desktop / Claude Code / 任意客户端）暴露 30 个核心工具（插件自动追加） |
+| MCP server | — | ✅ | 向 MCP 客户端（Claude Desktop / Claude Code / 任意客户端）暴露 31 个核心工具（插件自动追加） |
 | 批量基准 | — | ✅ | 并发扩展实测 |
 | AI 识别蒙版 | ✅ | ✅¹ | 主体/人物/物体（80 类）一键生成蒙版，U2Netp/HumanSeg/YOLOv8n-seg（v1.8，onnx 权重自动下载校验） |
 | 笔刷 + 组合蒙版 | ✅ | ✅ | 笔刷涂抹蒙版；A&B / A-B 组合引用已命名蒙版（v1.8） |
@@ -160,9 +162,21 @@ photo-s hash ~/deliver/ -o manifest.csv --verify manifest.csv
 | [`docs/GUI_CHANGES.md`](docs/GUI_CHANGES.md) | GUI 行为与接口契约 |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 版本路线（已发布至 v2.5.1，v2.6 进行中） |
 | [`docs/COMMERCIAL.md`](docs/COMMERCIAL.md) | 商用授权：双许可说明、边界判定表与 FAQ |
+| [`CHANGELOG.md`](CHANGELOG.md) | 逐版本更新日志（含官方插件） |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南：开发循环、改动的硬性规则、PR 要求 |
 
 > 命名：PyPI 发行名 **`photo-s-tools`**（原名 `photo-s` 被 PyPI 拦截）·
 > CLI 命令 `photo-s` · Python 包 `photo_s` · 品牌 **PhotoS**。
+
+---
+
+## 🤝 参与
+
+- **Bug / 功能建议** → [提交 issue](https://github.com/Dongwu259/photo_s/issues/new/choose)
+- **使用问题 / 想法** → [Discussions](https://github.com/Dongwu259/photo_s/discussions)
+- **安全漏洞** → 请勿公开，见 [`SECURITY.md`](SECURITY.md)（私密通道）
+- **想提 PR** → 先读 [`CONTRIBUTING.md`](CONTRIBUTING.md)；需要跑通
+  `python3 -m pytest tests/ -q`
 
 ---
 

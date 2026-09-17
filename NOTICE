@@ -1,0 +1,80 @@
+PhotoS — Licensing Notice
+=========================
+
+Copyright (c) 2026 PhotoS Contributors
+
+This file summarizes the license of every artifact shipped by this project.
+It is a convenience summary, NOT a substitute for the full license texts.
+
+1. Source code — MIT
+--------------------
+All PhotoS source code is licensed under the MIT License (see LICENSE):
+
+  * photo-s-tools            (core package: engine, CLI, REST, MCP, GUI)
+  * photo-s-plugin-scunet    (plugin code)
+  * photo-s-plugin-lut       (plugin code)
+  * photo-s-plugin-auto-tone (plugin code)
+  * tools/, tests/, packaging/, skills/
+
+You may use, modify, and redistribute the code commercially.
+
+2. Model weights — mixed
+------------------------
+Weights are NOT bundled in the wheels; they are downloaded on first use and
+verified against a pinned sha256.
+
+  * SCUNet denoising weights ................ MIT (commercial use permitted)
+  * auto-tone weights ....................... CC-BY-NC 4.0 (see below)
+
+"auto-tone weights" means every model file published on this repository's
+GitHub Releases and on the ModelScope repository
+(https://modelscope.cn/models/dwphoto/photo-s-auto-tone-v2), including:
+
+  * auto_tone_v7_clean.pt
+  * auto_tone_siglip_h192_d03.pt
+  * clip_train_rag.npz
+  * hand_features.npz
+  * aesthetic_head.pt
+  * lora_aesthetic.safetensors / lora_aesthetic_config.json
+  * lora_advisor.safetensors   / lora_advisor_config.json
+
+These are licensed under Creative Commons Attribution-NonCommercial 4.0
+International (CC-BY-NC 4.0), because they were trained on the author's
+personal Lightroom edit history.
+
+  * Free (no permission needed): personal, hobby, educational, research, and
+    other non-commercial use, including publishing your own edited photos.
+  * Commercial use requires a separate license. Contact:
+    <1634103640@qq.com> or <https://dwphoto.top/message>
+
+See docs/COMMERCIAL.md for the full boundary table and FAQ.
+
+3. Upstream model components
+----------------------------
+The auto-tone plugin builds on upstream vision-language models that are
+fetched at runtime (not redistributed here). Their licenses allow commercial
+use and derivative weights:
+
+  * SigLIP  — Apache-2.0
+  * CLIP    — MIT
+  * Qwen3-VL-2B — Apache-2.0
+
+The non-commercial restriction comes solely from the author's own trained
+grading heads/LoRAs; the rights chain is single-origin and clean.
+
+4. Third-party dependencies
+---------------------------
+PhotoS depends on third-party packages (Pillow, rawpy/libraw, numpy, and the
+optional opencv-python-headless, piexif, watchdog, tifffile, pillow-heif,
+pillow-avif-plugin, tkinterdnd2, onnxruntime, torch, open_clip_torch,
+transformers). Each is governed by its own license. Consult each project
+before redistribution.
+
+5. PhotoS output
+----------------
+Your photos are yours. Nothing in any PhotoS license claims rights over your
+input images, your EXIF metadata, or the images you produce. The auto-tone
+weight license covers the use of the model as a tool only, and does not
+extend to your work product.
+
+Questions about licensing: <1634103640@qq.com>

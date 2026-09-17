@@ -55,7 +55,7 @@
 | `plugin info NAME` | `{"name", "pypi_distribution", "description", "installed", "version", "provides"?, "weights"?[{name, cached, path, size}]}` | 插件详情 + 权重缓存状态 |
 | `plugin fetch NAME` | `{"ok", "name", "weights": [{name, path, cached}]}` | 预下载模型权重（sha256 校验） |
 
-### 2.6 batch/compress/convert 的全局校正选项
+### 2.2 batch/compress/convert 的全局校正选项
 
 `--ev STOPS`（2^EV 曝光补偿）、`--auto-exposure 0-1`（均值亮度归一化）、
 `--log-curve NAME`（LOG 还原：SLOG3/CLOG3/LOGC3/DLOG/VLOG/HLG，纯 1D LUT）、
@@ -89,7 +89,7 @@ key ∈ exposure/brightness/contrast/saturation/vibrance/clarity/texture/sharpen
 
 约束：透明输出需 PNG/WebP/TIFF/AVIF/HEIC；**JPEG + cutout → per-file 报错**（不会静默拍平白底）。坏 spec 同样 per-file 报错（错误含原始 spec）。REST `process` 的 options 键与 MCP `process` 工具直接传 `cutout` 字符串即可。
 
-### 2.7 LR 数据桥接（v1.7.1+，个人修图数据 → PhotoS 参数空间）
+### 2.3 LR 数据桥接（v1.7.1+，个人修图数据 → PhotoS 参数空间）
 
 | 命令 | stdout JSON shape | 说明 |
 |---|---|---|
@@ -110,12 +110,12 @@ key ∈ exposure/brightness/contrast/saturation/vibrance/clarity/texture/sharpen
 > 否则回退到内置 OpenCV NLM。agent 可用 `photo-s plugin list --json` 查询插件状态、
 > `photo-s plugin install scunet --json` 安装 —— 插件管理器与 `pip install` 双通道。
 
-### 2.2 输出通道约定
+### 2.4 输出通道约定
 
 - **stdout 只输出 JSON**；进度、扫描日志、警告一律走 **stderr**。解析只认 stdout。
 - 文件列表的 `--json` 模式同样遵循（`compress/batch/convert` 的文件清单在 stderr）。
 
-### 2.3 退出码约定
+### 2.5 退出码约定
 
 | 退出码 | 含义 |
 |---|---|
@@ -125,13 +125,13 @@ key ∈ exposure/brightness/contrast/saturation/vibrance/clarity/texture/sharpen
 
 > `dedup`：有重复 → `1`，无重复 → `0`，agent 可据此分支。
 
-### 2.4 JSON 模式下的交互确认
+### 2.6 JSON 模式下的交互确认
 
 以下交互确认在 `--json` 模式下**自动跳过**（agent 无 stdin，显式传参即视为确认）：
 - `--remove-original`
 - `dedup --action move|delete`
 
-### 2.5 示例
+### 2.7 示例
 
 ```bash
 # 压缩到 ≤5MB，8 线程，返回 JSON

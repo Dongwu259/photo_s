@@ -26,6 +26,11 @@ photo-s.toml
 # Model weight downloads (in-progress .part files)
 *.part
 
+# 演示素材与产出（含真实照片，不进公开仓库；用 tools/make_demo_video.py 本地重生成）
+demo/assets/
+demo/screenshots/
+demo/video/
+
 # Claude Code local settings (machine-specific, not for the repo)
 .claude/
 

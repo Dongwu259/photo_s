@@ -1,0 +1,81 @@
+name: 🐛 Bug 报告
+description: 报告一个可复现的问题（崩溃、结果错误、输出异常）
+title: "[Bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请尽量把下面的信息填全——**没有复现步骤的 bug 很难定位**。
+
+        ⚠️ **隐私提醒**：请勿上传真实私人照片或含 GPS/人脸的原始文件。
+        需要样本时请用合成图、公开素材，或对照片做 `photo-s batch ... --scrub` 处理后再附上。
+
+  - type: input
+    id: version
+    attributes:
+      label: PhotoS 版本
+      description: "`photo-s --version` 的输出"
+      placeholder: "2.5.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: 出问题的入口
+      options:
+        - CLI（photo-s 命令行）
+        - GUI（Tkinter 界面）
+        - REST API（photo-s serve）
+        - MCP server（photo-s mcp）
+        - Python 库直调（from photo_s.engine import ...）
+        - 插件（scunet / lut / auto-tone）
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统与 Python 版本
+      placeholder: "macOS 15.1 (arm64) / Python 3.11.15"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么
+      description: 期望结果 vs 实际结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 完整命令（或 GUI 操作序列）。涉及图片时请说明图片类型/尺寸/是否为 RAW。
+      placeholder: |
+        1. photo-s batch 'test/*.jpg' -o out/ --cutout subject
+        2. 观察到报错 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: 完整报错 / 日志
+      description: |
+        建议加 `--json` 一起跑；GUI 问题请附 `photo-s info` 的输出。
+        如果是 GUI 崩溃，终端里的 traceback 也要贴。
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 已装插件（`photo-s plugin list`）、配置文件、是否必现、是否是回归（之前版本正常）等
+    validations:
+      required: false

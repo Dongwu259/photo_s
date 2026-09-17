@@ -1,0 +1,56 @@
+name: ✨ 功能建议
+description: 提议一个新功能、新命令或改进
+title: "[Feature] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提建议前请先看一眼 [`docs/FEATURES.md`](../blob/main/docs/FEATURES.md) 与
+        [`docs/ROADMAP.md`](../blob/main/docs/ROADMAP.md)——39 个 CLI 子命令 +
+        31 个 MCP 工具覆盖面很广，你要的功能可能已经存在或在规划中。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      description: 请描述场景与痛点，而不是先给方案。"我在批量处理 X 时不得不手动 Y" 比 "加个 Z 参数" 有用得多。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audience
+    attributes:
+      label: 这个功能主要给谁用
+      description: PhotoS 的定位是 "CLI for AI agents, GUI for humans"，两条线的验收标准不同。
+      options:
+        - 摄影师（GUI）
+        - AI agent / 自动化脚本（CLI / REST / MCP）
+        - 两者都要
+        - Python 库调用方
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你设想的方案（可选）
+      description: 命令行长什么样？GUI 放哪个模块？JSON 输出应该包含什么？
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 现在你是怎么绕过这个问题的
+      description: 现有命令的组合、其他工具、或者手工步骤
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: 参与意愿
+      options:
+        - label: 我愿意提 PR 实现这个功能（请先看 CONTRIBUTING.md）
+          required: false
