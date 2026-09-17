@@ -219,13 +219,32 @@ class TestReviewExifEditor:
                             "fnumber": "1.8",
                             "datetime": "2025:11:12 13:14:15"}
         revert()
-        assert calls[1] == {"rating": None, "keywords": "", "title": "",
+        assert calls[1] == {"rating": None, "label": "",
+                            "keywords": "", "title": "",
                             "make": "Nikon", "iso": "100",
                             "fnumber": "4.0",
                             "datetime": "2023:05:06 07:08:09"}, \
             "revert writes the pre-save values back (plus the usual " \
-            "rating/keywords/title full restore); untouched fields " \
+            "rating/label/keywords/title full restore); untouched fields " \
             "(lens/shutter) stay out of both writes"
+        root.destroy()
+
+    def test_label_write_and_revert(self, tmp_path, monkeypatch):
+        """v2.6 P2: color labels flow through the same diff-only path —
+        set writes the label, clearing writes '', None leaves it alone."""
+        root, app = _make_app()
+        p = _img(tmp_path / "a.jpg")
+        calls = self._capture_engine(
+            monkeypatch, self._fixed_meta(rating=3, label="Blue"))
+        ok, _, _, _ = app._review_save(p, label="Red")
+        assert ok and calls[0] == {"label": "Red"}
+        ok2, _, revert, _ = app._review_save(p, label="")
+        assert ok2 and calls[1] == {"label": ""}
+        ok3, msg, _, _ = app._review_save(p, label=None)  # untouched
+        assert ok3 and msg == "" and len(calls) == 2
+        assert revert is not None
+        revert()
+        assert calls[2]["label"] == "Blue", "revert restores the label"
         root.destroy()
 
     def test_exif_fields_roundtrip_jpeg(self, tmp_path):

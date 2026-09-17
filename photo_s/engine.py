@@ -2172,8 +2172,8 @@ def _fmt_shutter(value) -> str:
 
 
 def _parse_usercomment(text: str) -> dict:
-    """Extract rating/keywords/title from a 'PhotoS: ...' UserComment segment."""
-    out = {"rating": None, "keywords": [], "title": ""}
+    """Extract rating/label/keywords/title from a 'PhotoS: ...' segment."""
+    out = {"rating": None, "label": "", "keywords": [], "title": ""}
     if _USERCOMMENT_PREFIX not in text:
         return out
     seg = text.split(_USERCOMMENT_PREFIX, 1)[1]
@@ -2191,6 +2191,10 @@ def _parse_usercomment(text: str) -> dict:
                 out["rating"] = int(v)
             except ValueError:
                 pass
+        elif k == "label":
+            # single-token LR color name (Red/Yellow/Green/Blue/Purple)
+            if v:
+                out["label"] = v
         elif k == "keywords":
             out["keywords"] = [x.strip() for x in v.split(",") if x.strip()]
         elif k == "title":
@@ -2202,12 +2206,17 @@ def _parse_usercomment(text: str) -> dict:
 
 
 def _write_usercomment(exif_dict: dict, rating=None, keywords=None,
-                       title=None, existing_text: str = "") -> None:
-    """Merge rating/keywords/title into the UserComment payload, preserving
-    any pre-existing human text. Mutates exif_dict in place."""
+                       title=None, label=None,
+                       existing_text: str = "") -> None:
+    """Merge rating/label/keywords/title into the UserComment payload,
+    preserving any pre-existing human text. Mutates exif_dict in place.
+    ``label`` must precede ``title`` in the segment — the title token
+    absorbs everything after it when parsed back."""
     seg = _USERCOMMENT_PREFIX
     if rating is not None:
         seg += f" rating={int(rating)}"
+    if label:
+        seg += f" label={str(label).strip()}"
     if keywords:
         seg += f" keywords={','.join(keywords)}"
     if title:
@@ -2288,16 +2297,17 @@ def apply_exif_tags(image_path: str, tags: dict) -> str:
     Requires piexif. tags is a dict of {name: value} where name is one of:
     artist, copyright, description/caption, make, model, software,
     datetime/date, title, keywords (comma list), rating (int 0-5),
-    lens (ASCII), iso (int), fnumber/aperture ('2.8' / 'f/2.8'),
-    shutter ('1/250' / '2'), focal ('50'), gps ('lat,lon' — both files get
-    the same coordinates; out-of-range/unparseable values are skipped).
-    rating/keywords/title are packed into EXIF UserComment (PhotoS: payload);
-    the rest are standard EXIF fields. All tags are written in a single
-    load/dump/insert pass. ``rating=None`` / ``keywords=""`` / ``title=""``
-    explicitly CLEAR the corresponding field (the PhotoS: segment is
-    dropped entirely when all three end up empty); ``""``/None on a typed
-    field (lens/iso/fnumber/shutter/focal) removes that EXIF tag. Typed
-    fields with unparseable values are skipped.
+    label (LR color name: Red/Yellow/Green/Blue/Purple), lens (ASCII),
+    iso (int), fnumber/aperture ('2.8' / 'f/2.8'), shutter ('1/250' / '2'),
+    focal ('50'), gps ('lat,lon' — both files get the same coordinates;
+    out-of-range/unparseable values are skipped).
+    rating/label/keywords/title are packed into EXIF UserComment (PhotoS:
+    payload); the rest are standard EXIF fields. All tags are written in a
+    single load/dump/insert pass. ``rating=None`` / ``label=""`` /
+    ``keywords=""`` / ``title=""`` explicitly CLEAR the corresponding field
+    (the PhotoS: segment is dropped entirely when all four end up empty);
+    ``""``/None on a typed field (lens/iso/fnumber/shutter/focal) removes
+    that EXIF tag. Typed fields with unparseable values are skipped.
 
     Returns a message string describing what was written.
     """
@@ -2309,7 +2319,7 @@ def apply_exif_tags(image_path: str, tags: dict) -> str:
 
     exif_dict = piexif.load(image_path)
 
-    # rating / keywords / title → UserComment payload
+    # rating / label / keywords / title → UserComment payload
     meta = _parse_usercomment(_usercomment_text_from_dict(exif_dict))
     if "rating" in tags:
         if tags["rating"] is None:
@@ -2319,19 +2329,23 @@ def apply_exif_tags(image_path: str, tags: dict) -> str:
                 meta["rating"] = int(tags["rating"])
             except (TypeError, ValueError):
                 pass
+    if "label" in tags:
+        meta["label"] = str(tags["label"] or "").strip()
     if "keywords" in tags:
         meta["keywords"] = [k.strip() for k in str(tags["keywords"]).split(",")
                             if k.strip()]
     if "title" in tags:
         meta["title"] = str(tags["title"])
-    if any(k in tags for k in ("rating", "keywords", "title")):
+    if any(k in tags for k in ("rating", "label", "keywords", "title")):
         human = _usercomment_text_from_dict(exif_dict).split(
             _USERCOMMENT_PREFIX, 1)[0].strip(" ,|")
         _write_usercomment(exif_dict, meta["rating"], meta["keywords"],
-                           meta["title"], existing_text=human)
+                           meta["title"], label=meta["label"],
+                           existing_text=human)
 
     # remaining tags → standard EXIF fields (ASCII map + typed fields)
-    written = [n for n in tags if n in ("rating", "keywords", "title")]
+    written = [n for n in tags if n in ("rating", "label", "keywords",
+                                        "title")]
     tag_map = _get_exif_tag_map()
     for name, value in tags.items():
         if name in ("rating", "keywords", "title"):
@@ -2373,14 +2387,16 @@ def read_exif_metadata(path: str) -> dict:
 
     Returns dict with keys: date, time, year, month, day, camera, make, iso,
     focal, lens, fnumber, shutter, original (stem), rating (int or None),
-    keywords (list[str]), title, caption. Missing values are '' / None / [].
+    label (LR color name or ''), keywords (list[str]), title, caption.
+    Missing values are '' / None / [].
     """
     base = {
         "date": "", "time": "", "year": "", "month": "", "day": "",
         "camera": "", "make": "", "iso": "", "focal": "",
         "lens": "", "fnumber": "", "shutter": "",
         "original": Path(path).stem,
-        "rating": None, "keywords": [], "title": "", "caption": "",
+        "rating": None, "label": "", "keywords": [], "title": "",
+        "caption": "",
     }
     try:
         with Image.open(path) as img:

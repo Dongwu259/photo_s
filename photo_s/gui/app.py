@@ -195,6 +195,19 @@ class PhotoSApp:
         # v2.6: write the recipe into each output's XMP (JPEG embed / other
         # formats sidecar) so Lightroom can continue editing the deliverable
         self.write_xmp = tk.BooleanVar(value=False)
+        # v2.6 P2: audit the finished outputs and report pass rate + failure
+        # reasons in the summary (quality gate visible without the agent)
+        self.audit_after_export = tk.BooleanVar(value=True)
+        # v2.6 P1: Library filter row state (semantic hits + facet combos).
+        # Combo selection is read by INDEX (localization-proof); the
+        # semantic hit set is None = inactive, set = membership filter.
+        self._lib_semantic_var = tk.StringVar(value="")
+        self._lib_filter_rating_var = tk.StringVar(value="")
+        self._lib_filter_edited_var = tk.StringVar(value="")
+        self._lib_filter_format_var = tk.StringVar(value="")
+        self._lib_filter_label_var = tk.StringVar(value="")
+        self._lib_semantic_hits = None
+        self._lib_semantic_busy = False
         self.optimize = tk.BooleanVar(value=True)
         self.progressive = tk.BooleanVar(value=False)
         self.jpeg_subsampling = tk.StringVar(value="420")
@@ -579,6 +592,11 @@ class PhotoSApp:
             self.root.bind(
                 str(n), lambda e, n=n: self._lib_key_rate(n))
         self.root.bind("p", lambda e: self._lib_key_rate(0))
+        # v2.6 P2: LR color labels — 6-9 pick the first four colors (Purple
+        # lives in the lightbox label row), 0 clears the label
+        for key, name in zip("6789", self._LABELS[:4]):
+            self.root.bind(key, lambda e, n=name: self._lib_key_label(n))
+        self.root.bind("0", lambda e: self._lib_key_label(""))
         self.root.bind("<Return>", lambda e: self._lib_key_open())
         self.root.bind("<Left>", self._dev_mask_key_page)
         self.root.bind("<Right>", self._dev_mask_key_page)
@@ -1004,6 +1022,14 @@ class PhotoSApp:
     # them per photo. masks / mask_adjust are deliberately excluded —
     # per-photo masks flow through the dedicated _photo_masks channel the
     # mask dialog owns; a second channel would race the first.
+    # v2.6 P2: LR color labels (XMP xmp:Label values, written to EXIF via
+    # the PhotoS UserComment segment). Badge colors are literals, not
+    # palette entries — same convention as the histogram data colors.
+    _LABELS = ("Red", "Yellow", "Green", "Blue", "Purple")
+    _LABEL_COLORS = {"Red": "#e5484d", "Yellow": "#f5a524",
+                     "Green": "#30a46c", "Blue": "#3e63dd",
+                     "Purple": "#8e4ec6"}
+
     _DEV_FIELDS = (
         "brightness", "contrast", "saturation", "gamma", "sharpen",
         "export_sharpen", "ev", "auto_exposure", "vibrance", "clarity",
@@ -1289,6 +1315,15 @@ class PhotoSApp:
             font=FONT_SMALL, padx=12, pady=4)
         self._dev_redo_btn.configure(state=tk.DISABLED)
         self._dev_redo_btn.pack(side="left", padx=(8, 0))
+        # v2.6 P1: rule-based smart suggest (zero-dep, offline) — one click
+        # applies the suggest params to the overlay; doubles as the fallback
+        # when the auto-tone plugin is absent
+        self._dev_suggest_btn = FlatButton(
+            bottom_bar, text=self._t("dev_suggest"),
+            command=self._dev_suggest, bg=COLORS["bg"],
+            fg=COLORS["text"], hover_bg=COLORS["divider"],
+            border_color=COLORS["border"], font=FONT_SMALL, padx=12, pady=4)
+        self._dev_suggest_btn.pack(side="left", padx=(12, 0))
         # v2.4: AI auto-tone (official plugin) — predicted params land in the
         # per-photo overlay, so they stay editable / undoable / previewed
         self._dev_ai_btn = FlatButton(
@@ -1704,6 +1739,82 @@ class PhotoSApp:
         self._paste_settings_to([self._dev_selected])
         self._dev_status_lbl.configure(
             text=self._t("paste_done", n=1), fg=COLORS["text_secondary"])
+
+    # ── v2.6 P1: smart suggest (rule-based, zero-dep) ──────────────────────
+
+    def _dev_suggest(self):
+        """Analyze the selected photo with the rule-based suggest engine and
+        write the advised params into its develop overlay. Zero-dep and
+        offline (unlike the auto-tone plugin), so it doubles as the
+        fallback when no plugin is installed; runs in a worker because
+        analyze decodes the image."""
+        path = self._dev_selected
+        if not path:
+            self._dev_status_lbl.configure(
+                text=self._t("dev_ai_need_photo"), fg=COLORS["warning"])
+            return
+        if getattr(self, "_dev_suggest_busy", False):
+            return
+        self._dev_suggest_busy = True
+        self._dev_suggest_btn.configure(state=tk.DISABLED)
+        self._dev_status_lbl.configure(
+            text=self._t("dev_suggest_running"),
+            fg=COLORS["text_secondary"])
+
+        def work():
+            res, err = None, None
+            try:
+                from ..suggest import suggest_file
+                res = suggest_file(path)
+            except Exception as e:  # unreadable file / analyze failure
+                err = str(e) or e.__class__.__name__
+            self._dev_bus.schedule(
+                lambda: self._dev_suggest_apply(path, res, err))
+
+        threading.Thread(target=work, daemon=True,
+                         name="photos-suggest").start()
+
+    def _dev_suggest_apply(self, path, res, err):
+        """Bus-delivered completion: merge the suggested params into the
+        photo's overlay + undo history (same contract as _dev_ai_apply)."""
+        self._dev_suggest_busy = False
+        try:
+            self._dev_suggest_btn.configure(state=tk.NORMAL)
+        except tk.TclError:
+            pass  # panel torn down mid-flight
+        if err is not None:
+            self._dev_status_lbl.configure(
+                text=self._t("dev_suggest_failed", err=err[:140]),
+                fg=COLORS["warning"])
+            return
+        if not (res or {}).get("ok"):
+            self._dev_status_lbl.configure(
+                text=self._t("dev_suggest_failed",
+                             err=(res or {}).get("error", "unreadable")),
+                fg=COLORS["warning"])
+            return
+        suggested = {k: v for k, v in (res.get("suggested") or {}).items()
+                     if k in self._DEV_FIELDS}
+        if not suggested:
+            self._dev_status_lbl.configure(
+                text=self._t("dev_suggest_neutral"),
+                fg=COLORS["text_secondary"])
+            return
+        base = dict(self._photo_adjust.get(path)
+                    or self._dev_fields_of(self._build_options()))
+        base.update(suggested)
+        if path not in self._photo_adjust:
+            self._dev_history_push(
+                path, self._dev_fields_of(self._build_options()))
+        self._photo_adjust[path] = base
+        self._dev_history_push(path, base)
+        if self._dev_selected == path:
+            self._apply_dev_fields(base)
+        self._dev_status_lbl.configure(
+            text=self._t("dev_suggest_done", n=len(suggested)),
+            fg=COLORS["text_secondary"])
+        self._dev_update_undo_buttons()
+        self._refresh_export_queue()
 
     # ── v2.4: AI auto-tone (official plugin) ─────────────────────────────
 
@@ -2525,6 +2636,62 @@ class PhotoSApp:
                    padx=6, pady=1, border_color=COLORS["border"]).pack(
             side="right")
 
+        # v2.6 P1: semantic search + facet filters. The semantic box queries
+        # the local .photo-s-index.npz ("photo-s index <dir>" builds it; the
+        # built-in hist84 extractor has no text encoder — hinted then). The
+        # combos filter the visible set in place; selections are read by
+        # index so they survive language switches.
+        facet_row = tk.Frame(card, bg=COLORS["card"])
+        facet_row.pack(fill="x", padx=14, pady=(6, 0))
+        tk.Label(facet_row, text=self._t("semantic_lbl"),
+                 font=FONT_SMALL, fg=COLORS["text_secondary"],
+                 bg=COLORS["card"]).pack(side="left")
+        self.semantic_entry = ttk.Entry(
+            facet_row, textvariable=self._lib_semantic_var,
+            font=FONT_SMALL, width=16)
+        self.semantic_entry.pack(side="left", padx=(6, 4))
+        self.semantic_entry.bind(
+            "<Return>", lambda e: self._lib_semantic_search())
+        FlatButton(facet_row, text="→", command=self._lib_semantic_search,
+                   bg=COLORS["card"], fg=COLORS["text_secondary"],
+                   hover_bg=COLORS["border"], font=FONT_SMALL,
+                   padx=6, pady=1, border_color=COLORS["border"]).pack(
+            side="left")
+        self._semantic_hint_lbl = tk.Label(
+            facet_row, text="", font=FONT_TINY, anchor="w",
+            fg=COLORS["text_secondary"], bg=COLORS["card"])
+        self._semantic_hint_lbl.pack(side="left", padx=(8, 0))
+
+        def _facet_combo(var, values, width):
+            combo = ttk.Combobox(facet_row, textvariable=var, values=values,
+                                 state="readonly", width=width,
+                                 font=FONT_SMALL)
+            combo.bind("<<ComboboxSelected>>",
+                       lambda e: self._apply_filter())
+            return combo
+
+        self._filter_rating_combo = _facet_combo(
+            self._lib_filter_rating_var,
+            (self._t("filter_all"),
+             self._t("filter_rating_min", n=1), self._t("filter_rating_min", n=2),
+             self._t("filter_rating_min", n=3), self._t("filter_rating_min", n=4),
+             self._t("filter_rating_min", n=5)), 6)
+        self._filter_edited_combo = _facet_combo(
+            self._lib_filter_edited_var,
+            (self._t("filter_all"), self._t("filter_edited_only"),
+             self._t("filter_unedited_only")), 8)
+        self._filter_format_combo = _facet_combo(
+            self._lib_filter_format_var, (self._t("filter_all"),), 7)
+        self._filter_label_combo = _facet_combo(
+            self._lib_filter_label_var,
+            (self._t("filter_all"),
+             *(self._t("label_" + name.lower()) for name in self._LABELS),
+             self._t("filter_no_label")), 7)
+        for combo in (self._filter_rating_combo, self._filter_edited_combo,
+                      self._filter_format_combo, self._filter_label_combo):
+            combo.current(0)
+            combo.pack(side="right", padx=(6, 0))
+
         list_frame = tk.Frame(card, bg=COLORS["card"])
         list_frame.pack(fill="both", expand=True, padx=14, pady=12)
         self._lib_list_frame = list_frame
@@ -2735,6 +2902,12 @@ class PhotoSApp:
         ttk.Checkbutton(
             fmt_frame, text=self._t("write_xmp_label"),
             variable=self.write_xmp).pack(anchor="w", pady=(6, 0))
+        # v2.6 P2: quality-gate the finished outputs (pass rate + failure
+        # reasons land in the summary dialog — the audit loop agents use,
+        # surfaced for humans)
+        ttk.Checkbutton(
+            fmt_frame, text=self._t("audit_after_export_label"),
+            variable=self.audit_after_export).pack(anchor="w", pady=(4, 0))
 
         # ── Quality / Target Size ────────────────────────────────────────────
         # Mode toggle: radio buttons
@@ -6779,12 +6952,12 @@ class PhotoSApp:
         return workflows.review_scan(paths, progress_cb=progress_cb)
 
 
-    def _review_save(self, path, rating=None, keywords=None, title=None,
-                     make=None, model=None, lens=None, iso=None,
+    def _review_save(self, path, rating=None, label=None, keywords=None,
+                     title=None, make=None, model=None, lens=None, iso=None,
                      shutter=None, aperture=None, date=None):
-        """Sync: write rating/keywords/title + camera/lens/shooting-field
-        diffs into ``path``'s EXIF (PhotoS: UserComment segment for the
-        first three; standard EXIF tags for the rest — ``aperture`` maps
+        """Sync: write rating/label/keywords/title + camera/lens/shooting-
+        field diffs into ``path``'s EXIF (PhotoS: UserComment segment for
+        the first four; standard EXIF tags for the rest — ``aperture`` maps
         to the engine's ``fnumber`` key, ``date`` to ``datetime``).
         Only changed fields are touched: None leaves a field alone, a
         string ("" included) writes/clears it. Returns (ok, message,
@@ -6797,6 +6970,9 @@ class PhotoSApp:
         tags = {}
         if rating is not None and rating != m.get("rating"):
             tags["rating"] = rating
+        lb = (label or "").strip() if label is not None else None
+        if lb is not None and lb != (m.get("label") or ""):
+            tags["label"] = lb
         kw = (keywords or "").strip()
         if kw != ",".join(m.get("keywords") or []):
             tags["keywords"] = kw
@@ -6826,6 +7002,7 @@ class PhotoSApp:
         if not tags:
             return True, "", None, None
         prev = {"rating": m.get("rating"),
+                "label": m.get("label") or "",
                 "keywords": ",".join(m.get("keywords") or []),
                 "title": m.get("title") or ""}
         prev.update(prev_extra)
@@ -6840,6 +7017,7 @@ class PhotoSApp:
             # full restore — None / "" explicitly clear the fields
             # (engine clear semantics, added for undo)
             t = {"rating": prev["rating"],
+                 "label": prev["label"],
                  "keywords": prev["keywords"],
                  "title": prev["title"]}
             for tag in prev_extra:
@@ -6933,6 +7111,9 @@ class PhotoSApp:
         cache = getattr(self, "_lib_rating_cache", None)
         if cache is not None:
             cache.clear()
+        lcache = getattr(self, "_lib_label_cache", None)
+        if lcache is not None:
+            lcache.clear()
         self._lib_draw()
 
     def _lib_lightbox_apply_layout(self):
@@ -6963,7 +7144,7 @@ class PhotoSApp:
         initial_idx = (all_paths.index(start_path)
                        if start_path and start_path in all_paths else 0)
         state = {"seq": [], "meta": {}, "idx": 0, "rating": None,
-                 "photo": None, "reverts": {}}
+                 "label": "", "photo": None, "reverts": {}}
 
         header = tk.Frame(host, bg=COLORS["bg"])
         header.pack(fill="x", padx=20, pady=(14, 4))
@@ -7020,6 +7201,32 @@ class PhotoSApp:
                 font=FONT_SMALL, padx=10, pady=3)
             btn.pack(side="left", padx=(4, 0))
             rating_btns[n] = btn
+
+        # v2.6 P2: LR color labels next to the stars — same write path
+        # (EXIF UserComment → XMP xmp:Label on write-back), keyboard 6-9
+        # in the grid, buttons here cover all five colors + clear
+        label_box = tk.Frame(ctrl, bg=COLORS["bg"])
+        label_box.pack(side="left", padx=(16, 0))
+        tk.Label(label_box, text=self._t("review_label"), font=FONT_BODY,
+                 fg=COLORS["text"], bg=COLORS["bg"]).pack(
+            side="left", padx=(0, 6))
+        label_btns = {}
+        for name in self._LABELS:
+            btn = FlatButton(
+                label_box, text=self._t("label_" + name.lower()),
+                command=lambda n=name: set_label(n),
+                bg=COLORS["card"], fg=COLORS["text"],
+                hover_bg=COLORS["bg"], border_color=COLORS["border"],
+                font=FONT_SMALL, padx=8, pady=3)
+            btn.pack(side="left", padx=(3, 0))
+            label_btns[name] = btn
+        label_clear_btn = FlatButton(
+            label_box, text="×",
+            command=lambda: set_label(""),
+            bg=COLORS["card"], fg=COLORS["text"],
+            hover_bg=COLORS["bg"], border_color=COLORS["border"],
+            font=FONT_SMALL, padx=6, pady=3)
+        label_clear_btn.pack(side="left", padx=(3, 0))
 
         # Keywords + title row
         fields = tk.Frame(host, bg=COLORS["bg"])
@@ -7223,7 +7430,7 @@ class PhotoSApp:
                 return v if v != cur else None
 
             ok, msg, revert, entry = self._review_save(
-                p, rating=state["rating"],
+                p, rating=state["rating"], label=state["label"],
                 keywords=keywords_var.get(),
                 title=title_var.get(),
                 make=_arg("make", (m0.get("make") or "").strip()),
@@ -7239,6 +7446,7 @@ class PhotoSApp:
                 return False
             m = state["meta"].get(p, {})
             m["rating"] = state["rating"]
+            m["label"] = state["label"]
             m["keywords"] = [k for k
                              in keywords_var.get().strip().split(",")
                              if k.strip()]
@@ -7287,6 +7495,7 @@ class PhotoSApp:
             except Exception:
                 m = state["meta"].get(p, {})
             state["rating"] = m.get("rating")
+            state["label"] = m.get("label") or ""
             keywords_var.set(",".join(m.get("keywords") or []))
             title_var.set(m.get("title") or "")
             _fill_exif(m)
@@ -7302,6 +7511,19 @@ class PhotoSApp:
                     fg="white" if active else COLORS["text"],
                     border_color=COLORS["accent"] if active
                     else COLORS["border"])
+            for name, btn in label_btns.items():
+                active = name == state.get("label")
+                color = self._LABEL_COLORS[name]
+                btn.configure(
+                    bg=color if active else COLORS["card"],
+                    fg="white" if active else color,
+                    border_color=color if active else COLORS["border"])
+            label_clear_btn.configure(
+                bg=COLORS["accent"] if not state.get("label")
+                else COLORS["card"],
+                fg="white" if not state.get("label") else COLORS["text"],
+                border_color=COLORS["accent"] if not state.get("label")
+                else COLORS["border"])
 
         def show():
             if not state["seq"]:
@@ -7321,6 +7543,7 @@ class PhotoSApp:
             except Exception:
                 m = state["meta"].get(p, {})
             state["rating"] = m.get("rating")
+            state["label"] = m.get("label") or ""
             keywords_var.set(",".join(m.get("keywords") or []))
             title_var.set(m.get("title") or "")
             _fill_exif(m)
@@ -7385,6 +7608,15 @@ class PhotoSApp:
             if not state["seq"]:
                 return
             state["rating"] = n
+            _restyle_rating()
+            save_current()
+
+        def set_label(name):
+            """Set/clear the LR color label on the current photo (persisted
+            through save_current like a rating change)."""
+            if not state["seq"]:
+                return
+            state["label"] = name or ""
             _restyle_rating()
             save_current()
 
@@ -7475,7 +7707,7 @@ class PhotoSApp:
         threading.Thread(target=scan_thread, daemon=True).start()
 
         return {"close": save_current, "set_rating": set_rating,
-                "go": go, "undo": undo_current}
+                "set_label": set_label, "go": go, "undo": undo_current}
 
     def _after_file_dialog(self, btn=None):
         """Work around the macOS Tk native-file-dialog focus bug: after
@@ -7931,6 +8163,7 @@ class PhotoSApp:
         (v2.4 VirtualGrid). Checkbox/selection state lives in
         self._checked / self._selected_rows and is read at draw time, so
         toggles redraw one pass instead of rebuilding rows of widgets."""
+        self._lib_refresh_format_filter()
         self._lib_model = []
         for path in self._visible_files():
             name = os.path.basename(path)
@@ -8075,12 +8308,17 @@ class PhotoSApp:
             canvas.create_text(
                 nx, cy, text=row["name"], anchor="w", font=FONT_BODY,
                 fill=COLORS["text"], width=max(80, w - nx - 340))
-            # right-aligned columns: rating stars / dims / fmt / size
+            # right-aligned columns: label dot / rating stars / dims / fmt / size
             rating = self._lib_rating(path)
             if rating:
                 canvas.create_text(
                     w - 320, cy, text="★" * rating, anchor="e",
                     font=FONT_SMALL, fill=COLORS["accent"])
+            label = self._lib_label(path)
+            if label in self._LABEL_COLORS:
+                canvas.create_oval(
+                    w - 312, cy - 4, w - 304, cy + 4,
+                    fill=self._LABEL_COLORS[label], outline="")
             canvas.create_text(w - 200, cy, text=row["dims"], anchor="e",
                                font=FONT_SMALL,
                                fill=COLORS["text_secondary"])
@@ -8103,8 +8341,27 @@ class PhotoSApp:
                 from ..engine import read_exif_metadata
                 m = read_exif_metadata(path)
                 cache[path] = int(m.get("rating") or 0)
+                self._lib_label(path, _meta=m)  # same parse fills both
             except Exception:
                 cache[path] = 0
+        return cache[path]
+
+    def _lib_label(self, path, _meta=None) -> str:
+        """LR color label for the row badge, cached beside the rating
+        (same EXIF parse fills both caches; '' = unlabeled)."""
+        cache = getattr(self, "_lib_label_cache", None)
+        if cache is None:
+            cache = self._lib_label_cache = {}
+        if path not in cache:
+            try:
+                from ..engine import read_exif_metadata
+                m = _meta or read_exif_metadata(path)
+                cache[path] = str(m.get("label") or "")
+                rc = getattr(self, "_lib_rating_cache", None)
+                if rc is not None and path not in rc:
+                    rc[path] = int(m.get("rating") or 0)
+            except Exception:
+                cache[path] = ""
         return cache[path]
 
     def _lib_queue_thumbs(self, todo):
@@ -8201,6 +8458,20 @@ class PhotoSApp:
         self._lib_rating_cache = {}
         self._lib_draw()
 
+    def _lib_set_label(self, name):
+        """Set/clear an LR color label on the selected rows (keyboard 6-9 /
+        0; the write path is the same EXIF UserComment segment a rating
+        uses, so XMP write-back carries it as xmp:Label)."""
+        if not self._selected_rows:
+            return
+        for path in list(self._selected_rows):
+            try:
+                self._review_save(path, label=name)
+            except Exception:
+                pass  # read-only file / EXIF host without write support
+        self._lib_label_cache = {}
+        self._lib_draw()
+
     def _lib_open_in_viewer(self):
         """Enter: send the first selected photo to the Develop viewer."""
         for path in self._selected_rows:
@@ -8227,6 +8498,16 @@ class PhotoSApp:
             return
         if self._lib_keys_active():
             self._lib_rate(n)
+
+    def _lib_key_label(self, name):
+        # v2.6 P2: 灯箱激活时 6-9/0 给灯箱当前照片，否则给网格选中行
+        if getattr(self, "_lib_lightbox_active", False):
+            if self._lib_lightbox_ctl is not None \
+                    and not self._focus_in_text_widget():
+                self._lib_lightbox_ctl["set_label"](name)
+            return
+        if self._lib_keys_active():
+            self._lib_set_label(name)
 
     def _lib_key_open(self):
         if self._lib_keys_active():
@@ -8381,13 +8662,165 @@ class PhotoSApp:
 
 
     def _visible_files(self):
-        """Files matching the filter box (display-only view over self.files)."""
+        """Files matching the filter box + facet combos (display-only view
+        over self.files). Semantic hits, when active, are a membership
+        filter on top; rating/label read through the per-path EXIF caches
+        (parsed once per path)."""
         q = self.filter_var.get().strip().lower()
-        if not q:
+        min_rating = self._lib_filter_min_rating()
+        edited_mode = self._lib_filter_edited_mode()
+        fmt = self._lib_filter_format()
+        label = self._lib_filter_label()
+        hits = self._lib_semantic_hits
+        if not (q or min_rating or edited_mode or fmt or label
+                or hits is not None):
             return list(self.files)
-        return [p for p in self.files
-                if q in os.path.basename(p).lower()
-                or q in Path(p).suffix.lower().lstrip(".")]
+        out = []
+        for p in self.files:
+            if q:
+                name = os.path.basename(p).lower()
+                if q not in name and q not in Path(p).suffix.lower().lstrip("."):
+                    continue
+            if hits is not None and p not in hits:
+                continue
+            if fmt and Path(p).suffix.lower().lstrip(".") != fmt:
+                continue
+            if min_rating and self._lib_rating(p) < min_rating:
+                continue
+            if edited_mode == "edited" and p not in self._photo_adjust:
+                continue
+            if edited_mode == "unedited" and p in self._photo_adjust:
+                continue
+            if label == "none":
+                if self._lib_label(p):
+                    continue
+            elif label and self._lib_label(p) != label:
+                continue
+            out.append(p)
+        return out
+
+    # ── v2.6 P1: facet filter accessors (index-based → language-proof) ────
+
+    def _lib_filter_min_rating(self) -> int:
+        """0 = off, else minimum star rating from the combo index."""
+        try:
+            return max(0, self._filter_rating_combo.current())
+        except (AttributeError, tk.TclError):
+            return 0
+
+    def _lib_filter_edited_mode(self) -> str:
+        # 0 = all, 1 = edited only, 2 = unedited only
+        try:
+            idx = self._filter_edited_combo.current()
+        except (AttributeError, tk.TclError):
+            return ""
+        return ("", "edited", "unedited")[idx] if idx <= 2 else ""
+
+    def _lib_filter_format(self) -> str:
+        """'' = off, else the selected extension. The fmt list is kept in
+        ``_lib_filter_fmts`` beside the combo — ``cget("values")``
+        degenerates to a bare string for single-element Tcl lists, so it
+        is never parsed back."""
+        fmts = getattr(self, "_lib_filter_fmts", None) or ()
+        try:
+            idx = self._filter_format_combo.current()
+        except (AttributeError, tk.TclError):
+            return ""
+        return fmts[idx - 1].lower() if 0 < idx <= len(fmts) else ""
+
+    def _lib_filter_label(self) -> str:
+        """'' = off, else a LR color name or 'none' (unlabeled only)."""
+        try:
+            idx = self._filter_label_combo.current()
+        except (AttributeError, tk.TclError):
+            return ""
+        if 1 <= idx <= len(self._LABELS):
+            return self._LABELS[idx - 1]
+        return "none" if idx == len(self._LABELS) + 1 else ""
+
+    def _lib_refresh_format_filter(self):
+        """Rebuild the format combo from the current file set; the selection
+        survives rebuilds by extension string, not index."""
+        fmts = sorted({Path(p).suffix.lower().lstrip(".")
+                       for p in self.files if p})
+        prev_sel = self._lib_filter_format()
+        self._lib_filter_fmts = tuple(fmts)
+        try:
+            self._filter_format_combo.configure(
+                values=(self._t("filter_all"),) + tuple(fmts))
+            self._filter_format_combo.current(
+                fmts.index(prev_sel) + 1 if prev_sel in fmts else 0)
+        except (AttributeError, tk.TclError):
+            pass  # panel not built yet / torn down
+
+    # ── v2.6 P1: semantic search over the local photo-s index ─────────────
+
+    def _lib_semantic_search(self):
+        """Query the library's .photo-s-index.npz with the semantic box and
+        filter the visible set to the hits. Index embedding may load the
+        SigLIP tower (first use), so the query runs in a worker and lands
+        back through a UiBus on the root window."""
+        query = self._lib_semantic_var.get().strip()
+        if not query:
+            self._lib_semantic_hits = None
+            self._semantic_hint("")
+            self._refresh_file_list()
+            return
+        if not self.files or self._lib_semantic_busy:
+            return
+        index_path = None
+        try:
+            from ..search import default_index_path
+            index_path = default_index_path(self.files)
+        except Exception:
+            pass
+        if index_path is None or not os.path.exists(index_path):
+            self._semantic_hint(self._t("semantic_need_index"), warning=True)
+            return
+        self._lib_semantic_busy = True
+        self._semantic_hint(self._t("semantic_searching"))
+        if getattr(self, "_lib_bus", None) is None:
+            self._lib_bus = UiBus(self.root)
+        self._lib_bus.start()
+        schedule = self._lib_bus.schedule
+        k = max(100, len(self.files))
+
+        def work():
+            hits, err = None, None
+            try:
+                from ..search import find_similar
+                res = find_similar(index_path, text=query, k=k,
+                                   min_score=0.2)
+                hits = {h["path"] for h in res.get("hits") or []}
+            except Exception as e:  # missing index / no text encoder
+                err = str(e) or e.__class__.__name__
+            schedule(lambda: self._lib_semantic_apply(hits, err))
+
+        threading.Thread(target=work, daemon=True,
+                         name="photos-semantic").start()
+
+    def _lib_semantic_apply(self, hits, err):
+        """Bus-delivered result: activate the membership filter or hint."""
+        self._lib_semantic_busy = False
+        if err is not None:
+            no_text = "text encoder" in err or "image-only" in err
+            self._semantic_hint(
+                self._t("semantic_need_plugin" if no_text
+                        else "semantic_failed", err=err[:120]),
+                warning=True)
+            return
+        self._lib_semantic_hits = hits
+        visible = self._visible_files()
+        self._semantic_hint(self._t("semantic_hits", n=len(visible)))
+        self._refresh_file_list()
+
+    def _semantic_hint(self, text, warning=False):
+        try:
+            self._semantic_hint_lbl.configure(
+                text=text, fg=COLORS["warning"] if warning
+                else COLORS["text_secondary"])
+        except (AttributeError, tk.TclError):
+            pass
 
     def _apply_filter(self, _event=None):
         """Rebuild the list for the current filter query."""
@@ -10205,11 +10638,16 @@ class PhotoSApp:
         # field can never leave the app stuck in processing=True.
         options = self._build_options()
         write_xmp = self.write_xmp.get()
+        try:
+            audit = self.audit_after_export.get()
+        except tk.TclError:
+            audit = False
 
         self.processing = True
         self.cancel_requested = False
         self._batch_result = None
         self._batch_error = None
+        self._audit_report = None
         self._progress_started = None  # ETA baseline
 
         # Update UI to processing state
@@ -10225,7 +10663,7 @@ class PhotoSApp:
         # Start background thread
         thread = threading.Thread(
             target=self._process_thread,
-            args=(files.copy(), options, write_xmp),
+            args=(files.copy(), options, write_xmp, audit),
             daemon=True,
         )
         thread.start()
@@ -10238,7 +10676,7 @@ class PhotoSApp:
         self.cancel_requested = True
         self.progress_label.config(text=self._t("cancelling"), fg=COLORS["warning"])
 
-    def _process_thread(self, files, options, write_xmp=False):
+    def _process_thread(self, files, options, write_xmp=False, audit=False):
         """Background thread for batch processing."""
         def progress_callback(current, total, path, status=""):
             if self.cancel_requested:
@@ -10276,6 +10714,11 @@ class PhotoSApp:
                     except Exception:
                         fail += 1
                 self._xmp_stats = (ok, fail)
+            # v2.6 P2: audit the finished outputs (same engine agents use)
+            # — pass rate + per-failure reasons land in the summary dialog.
+            # Runs here in the worker so the UI never decodes an image.
+            if audit:
+                self._audit_report = self._audit_outputs(result)
             with self._progress_lock:
                 self._batch_result = result
         except Exception as e:
@@ -10285,6 +10728,33 @@ class PhotoSApp:
                     success_count=0, fail_count=1,
                 )
                 self._batch_error = str(e)
+
+    def _audit_outputs(self, result):
+        """Quality-gate the successful outputs (worker thread, Tk-free):
+        ``{total, passed, failed: [{path, reason}]}``. Unreadable outputs
+        count as failed with their error — an export the audit could not
+        open is not a pass."""
+        from ..audit import audit_image
+        failed = []
+        passed = 0
+        for r in result.results:
+            if not r.success or not getattr(r, "output_path", None):
+                continue
+            try:
+                rep = audit_image(r.output_path)
+            except Exception as e:
+                failed.append({"path": r.output_path,
+                               "reason": str(e) or "audit error"})
+                continue
+            if rep.get("ok") and rep.get("passed"):
+                passed += 1
+            else:
+                failed.append({
+                    "path": r.output_path,
+                    "reason": (rep.get("reason")
+                               or (rep.get("error") or "audit failed"))})
+        return {"total": passed + len(failed), "passed": passed,
+                "failed": failed}
 
     def _poll_progress(self):
         """Poll progress from background thread and update UI."""
@@ -10388,6 +10858,15 @@ class PhotoSApp:
                 text += " · " + (self._t("xmp_written_status", ok=ok, fail=fail)
                                  if fail else
                                  self._t("xmp_written_ok_status", ok=ok))
+            rep = getattr(self, "_audit_report", None)
+            if rep and rep.get("total"):
+                text += " · " + (
+                    self._t("audit_pass_status",
+                            ok=rep["passed"], total=rep["total"])
+                    if not rep["failed"] else
+                    self._t("audit_fail_status",
+                            ok=rep["passed"], total=rep["total"],
+                            fail=len(rep["failed"])))
             self.progress_label.config(
                 text=text,
                 fg=COLORS["success"],
@@ -10436,6 +10915,16 @@ class PhotoSApp:
                 lines.append(f"{self._t('sum_failed')}: {os.path.basename(r.input_path)}"
                              f"\n  → {r.error}")
 
+        # v2.6 P2: audit drill-down — pass rate + per-output failure reasons
+        rep = getattr(self, "_audit_report", None)
+        if rep and rep.get("total"):
+            lines += ["", "-" * 40,
+                      self._t("sum_audit_header",
+                              ok=rep["passed"], total=rep["total"])]
+            for f in rep["failed"]:
+                lines.append(f"  {os.path.basename(f['path'])}"
+                             f"\n  → {f['reason']}")
+
         msg = "\n".join(lines)
 
         win = tk.Toplevel(self.root)
@@ -10458,6 +10947,22 @@ class PhotoSApp:
 
         btns = tk.Frame(win, bg=COLORS["bg"])
         btns.pack(pady=(0, 16))
+        out_dir = os.path.dirname(
+            next((r.output_path for r in result.results
+                  if r.success and getattr(r, "output_path", None)), ""))
+        if out_dir:
+            # v2.6 P2: jump straight to where the audited outputs live
+            # (drill-down follow-up: reveal the failing file's folder)
+            def _reveal(_d=out_dir):
+                try:
+                    workflows.reveal_in_file_manager(_d)
+                except Exception:
+                    pass
+            FlatButton(
+                btns, text=self._t("sum_open_output_dir"),
+                command=_reveal,
+                bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
+                border_color=COLORS["border"]).pack(side="left", padx=6)
         if result.success_count > 0:
             FlatButton(
                 btns, text=self._t("sum_view_compare"),

@@ -187,24 +187,25 @@ def xmp_write_back(path, options, *, meta_from=None):
 
     JPEG targets get the XMP embedded (LR only reads embedded XMP for
     JPEG); anything else falls back to a sidecar next to the file with a
-    warning. Rating/keywords/title are read from ``meta_from``'s EXIF
-    (default: the file itself) and carried into the XMP so LR's panels
-    see them. Returns {"target", "warnings"}; raises on I/O failure.
-    Tk-free so tests can call it directly.
+    warning. Rating/label/keywords/title are read from ``meta_from``'s
+    EXIF (default: the file itself) and carried into the XMP so LR's
+    panels see them. Returns {"target", "warnings"}; raises on I/O
+    failure. Tk-free so tests can call it directly.
     """
     from ..engine import read_exif_metadata
     from ..lrxmp import write_xmp_sidecar
 
-    rating = keywords = title = None
+    rating = label = keywords = title = None
     try:
         meta = read_exif_metadata(meta_from or path) or {}
         rating = meta.get("rating") or None
+        label = (meta.get("label") or "").strip() or None
         keywords = meta.get("keywords") or None
         title = (meta.get("title") or "").strip() or None
     except Exception:
         pass  # metadata is a bonus — settings alone are the payload
     target, warnings = write_xmp_sidecar(
-        path, options, rating=rating, keywords=keywords,
+        path, options, rating=rating, label=label, keywords=keywords,
         title=title, embed=True)
     return {"target": target, "warnings": warnings}
 

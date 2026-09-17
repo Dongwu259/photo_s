@@ -744,6 +744,34 @@ STRINGS = {
         "dev_xmp_loaded": "已从 XMP 载入 Lightroom 调整",
         "dev_mask_edit": "蒙版",
         "mask_done": "完成",
+        # ── v2.6 P1/P2: smart suggest · Library facets · labels · export audit ──
+        "dev_suggest": "智能建议",
+        "dev_suggest_running": "分析指标中…",
+        "dev_suggest_failed": "智能建议失败：{err}",
+        "dev_suggest_neutral": "指标均衡，暂无可修项",
+        "dev_suggest_done": "已应用 {n} 项建议（可撤销）",
+        "semantic_lbl": "语义:",
+        "semantic_searching": "语义搜索中…",
+        "semantic_need_index": "未找到索引，先运行 photo-s index <目录> 构建",
+        "semantic_need_plugin": "{err}",
+        "semantic_failed": "语义搜索失败：{err}",
+        "semantic_hits": "{n} 张匹配",
+        "filter_all": "全部",
+        "filter_rating_min": "≥{n}★",
+        "filter_edited_only": "仅已调",
+        "filter_unedited_only": "未调",
+        "filter_no_label": "无标签",
+        "label_red": "红",
+        "label_yellow": "黄",
+        "label_green": "绿",
+        "label_blue": "蓝",
+        "label_purple": "紫",
+        "review_label": "标签:",
+        "audit_after_export_label": "导出后质量检查（audit 通过率与失败原因）",
+        "audit_pass_status": "audit {ok}/{total} 通过",
+        "audit_fail_status": "audit {ok}/{total} 通过（{fail} 未过）",
+        "sum_audit_header": "质量检查：{ok}/{total} 通过",
+        "sum_open_output_dir": "打开输出目录",
         # ── v2.4 shortcut table ──
         "shortcuts_title": "键盘快捷键",
         "shortcuts_text": (
@@ -753,8 +781,8 @@ STRINGS = {
             "  ⌘1-4 切换 图库/修图/导出/工具 · Esc 取消批处理\n"
             "  ⌘Z 撤销 · ⌘⇧Z 重做 · ? 本表\n"
             "图库（列表）\n"
-            "  1-5 评级 · P 清除评级 · Enter 在修图中打开\n"
-            "  ⌫/Delete 移除所选 · 双击 前后对比 · 点击复选框列 勾选\n"
+            "  1-5 评级 · P 清除评级 · 6-9 颜色标签 · 0 清除标签\n"
+            "  Enter 在修图中打开 · ⌫/Delete 移除所选 · 双击 前后对比 · 点击复选框列 勾选\n"
             "修图（Develop）\n"
             "  ⌘Z/⌘⇧Z 逐照片撤销/重做 · 「显示原图」切换前后\n"
             "审查灯箱\n"
@@ -1510,6 +1538,36 @@ STRINGS = {
         "dev_xmp_loaded": "Loaded Lightroom adjustments from XMP",
         "dev_mask_edit": "Masks",
         "mask_done": "Done",
+        # ── v2.6 P1/P2: smart suggest · Library facets · labels · export audit ──
+        "dev_suggest": "Smart Suggest",
+        "dev_suggest_running": "Analyzing…",
+        "dev_suggest_failed": "Smart suggest failed: {err}",
+        "dev_suggest_neutral": "Metrics are balanced — nothing to adjust",
+        "dev_suggest_done": "Applied {n} suggestion(s) (undoable)",
+        "semantic_lbl": "Semantic:",
+        "semantic_searching": "Searching…",
+        "semantic_need_index": "No index found — build one with "
+                               "photo-s index <dir>",
+        "semantic_need_plugin": "{err}",
+        "semantic_failed": "Semantic search failed: {err}",
+        "semantic_hits": "{n} match(es)",
+        "filter_all": "All",
+        "filter_rating_min": "≥{n}★",
+        "filter_edited_only": "Edited",
+        "filter_unedited_only": "Unedited",
+        "filter_no_label": "No label",
+        "label_red": "Red",
+        "label_yellow": "Yellow",
+        "label_green": "Green",
+        "label_blue": "Blue",
+        "label_purple": "Purple",
+        "review_label": "Label:",
+        "audit_after_export_label": "Audit outputs after export "
+                                    "(pass rate & failure reasons)",
+        "audit_pass_status": "audit {ok}/{total} passed",
+        "audit_fail_status": "audit {ok}/{total} passed ({fail} failed)",
+        "sum_audit_header": "Quality audit: {ok}/{total} passed",
+        "sum_open_output_dir": "Open output folder",
         # ── v2.4 shortcut table ──
         "shortcuts_title": "Keyboard Shortcuts",
         "shortcuts_text": (
@@ -1519,8 +1577,8 @@ STRINGS = {
             "  ⌘1-4 switch Library/Develop/Export/Tools · Esc cancel batch\n"
             "  ⌘Z undo · ⌘⇧Z redo · ? this table\n"
             "Library (list)\n"
-            "  1-5 rate · P clear rating · Enter open in Develop\n"
-            "  ⌫/Delete remove selected · double-click compare · checkbox column to check\n"
+            "  1-5 rate · P clear rating · 6-9 color label · 0 clear label\n"
+            "  Enter open in Develop · ⌫/Delete remove selected · double-click compare · checkbox column to check\n"
             "Develop\n"
             "  ⌘Z/⌘⇧Z per-photo undo/redo · \"Show original\" toggles before/after\n"
             "Review lightbox\n"

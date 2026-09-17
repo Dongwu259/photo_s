@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com)
 [![CI](https://github.com/Dongwu259/photo_s/actions/workflows/ci.yml/badge.svg)](https://github.com/Dongwu259/photo_s/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1496%20passed-brightgreen)](https://github.com/Dongwu259/photo_s/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-1517%20passed-brightgreen)](https://github.com/Dongwu259/photo_s/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Weights](https://img.shields.io/badge/auto--tone%20weights-CC--BY--NC%204.0-orange)](docs/COMMERCIAL.md)
 [![PyPI](https://img.shields.io/badge/pypi-photo--s--tools-orange)](https://pypi.org/project/photo-s-tools/)
 
