@@ -15,7 +15,7 @@ from pathlib import Path
 APP_NAME = "PhotoS"
 
 
-APP_VERSION = "2.5.2"
+APP_VERSION = "2.6.0"
 
 
 WINDOW_WIDTH = 1120

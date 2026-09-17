@@ -49,7 +49,7 @@
 ## 常用命令
 
 ```bash
-python3 -m pytest tests/ -q      # 全量测试（当前 1525 个）
+python3 -m pytest tests/ -q      # 全量测试（当前 1528 个）
 python3 -m photo_s.cli --help    # CLI 冒烟（无 PATH 依赖；--language en/zh 切换）
 python3 -m photo_s.cli plugin list --json   # 官方插件目录 + 已装状态
 python3 -m photo_s.cli mcp --list-tools     # MCP 工具 + schema（需 photo-s-tools[mcp]，py3.10+）

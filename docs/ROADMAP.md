@@ -27,6 +27,7 @@
 | v2.5.0 | 数据闭环 + LR 双向互通 + 语义搜索 | **已发布 2026-09-02**：蒙版画布升格进 Develop、审查灯箱并入 Library（v2.4 推迟的结构归位）；**XMP 写出**（`xmp-export`/`batch --write-xmp`：crs 字段逐项逆映射 + radial/linear 蒙版 + 评分/关键词 → LR 可续修；读侧补齐 XMP 曲线/蒙版解析既有缺口）；**autopilot 无人值守管线**（监视 → suggest/auto-tone → audit → passed/review 分流 + JSONL 轨迹，CLI/MCP×3/REST；watcher on_modified + on_file 钩子）；**语义搜索**（`index`/`find`：embed 槽位——插件 SigLIP 塔（文本+图像，零新增下载）或内置 84 维直方图；`--tags` 自动打标写 EXIF/XMP；MCP 31 核心工具）。平台打包 B 取消（无签名证书/开发者会员，OS 拒跑 unsigned——pip 为前期唯一入口，移远期）。1463 测试绿 + 真实 SigLIP e2e |
 | v2.5.1 | patch：XMP 内嵌 LR 实测对齐 | **已发布 2026-09-10**（核心包，插件无改动）：`xmp-export --embed` JPEG 内嵌 XMP（LR 对 JPEG 只读内嵌不读 sidecar）；经 LR 实测三轮对照（用户提供的 ground truth 导出）逐项对齐——xpacket 包形态（PI 后无 xml 声明+尾部填充）、EXIF 段序、`AlreadyApplied=False` 开关、蒙版组 LR18 结构（Seq+嵌套 Description+Mask/Gradient Zero-Full+径向 Midpoint/Roundness/Flipped/Version 属性集+全键集局部参数+小写布尔）、局部参数 0-1 标度修正（v1.9 起 blob/XMP 双侧隐性偏低两个量级）。LR 实测全通：全局调色/线性蒙版/径向蒙版（含反选）/评分关键词逐值一致 |
 | v2.5.2 | patch：上游问题清单修复（PS-1~PS-5） | **已发布 2026-09-16**（核心包，插件无改动）：photo-s 渲染桥实测反馈五连修——`apply_hsl` 色带掩码补饱和度门控（白/近灰不再被当红色带处理，高光塌陷/灰粉污染消除）；`apply_vibrance` 正向改乘性公式（中性严格保持，~1% 不可见色偏不再被放大 ~9 倍成可见色块）；`options_to_xmp` dict 路径兼容 `exposure` 键（XMP 往返不再静默丢曝光）；局部调整统一 delta 口径（`_local_adjust`/`_LOCAL_XMP_MAP` 不再 `1+v` 双重换算，LR UI +45 = 1.45 倍对比度而非 2.45）；`parse_masks` 容忍退化径向蒙版（rx=0 clamp 到细线，不再中止整图蒙版渲染）。另：WB kelvin 方向与 EV gamma 空间两处设计差异文档化。1496 测试绿 |
+| v2.6.0 | GUI 数据闭环：agent 能力进 GUI + 结构债清偿 | **已发布 2026-09-18**：P1——Develop「智能建议」按钮（suggest 零依赖一键应用、可撤销、缺插件兜底）+ Library 语义搜索（本地 .photo-s-index.npz；hist84 无文本编码器给指引）与评级/已调/格式/标签 facet 过滤；P2——导出后 audit（通过率+逐文件失败原因+打开输出目录）+ LR 五色标签全链路（EXIF UserComment label 字段/键盘 6-9/灯箱/行徽标/筛选/写回 xmp:Label）。结构项——gui/panels/ 建包五 mixin（review/dialogs/watch/settings/mask，app.py 11337→6431 行），全部工具卡内嵌面板化（host= 双模式，watch close_hook 停表），Develop/Export 主行 sash 可拖+持久化。1528 测试绿 |
 | auto-tone-v2.1.0 | 插件：风格化 + 场景自适应（训练侧 v2.1 同步） | **已发布 2026-08-28**：`auto_tone_with_style`（SigLIP 视觉分析 16 风格 top-K + Qwen3-VL 自然语言→9 字段偏置解析，Qwen 缺席回退 8 手工预设）与 `analyze_visual_style` MCP 工具（插件 4→6，装后 MCP 26→32）；Python API `auto_tone_with_scene`（552 张 LR 目录统计的 7 场景数据驱动偏置，包内 scene_biases.json）；SigLIP 主模型 `auto_tone_siglip_h192_d03.pt`（PSNR 32.21，+2.93 dB vs v7_clean，独立 release tag auto-tone-v2.1.0）；predictor 修复 LayerNorm→GELU→Dropout 重建（v7/siglip 双 checkpoint 验证，修复推理双 GELU bug）+ SigLIP sig_dim 推断；batch_auto_tone 加 style_desc；重存权重兼容 weights_only=True。1286 测试绿 + 真实权重 e2e |
 
 ## 规划中
@@ -203,7 +204,7 @@ hist84；npz 增量索引；严格抽取器身份）+ 插件 `core/embed.py`（�
 下载）+ CLI index/find + MCP×2/REST×2 + `--tags` 自动打标（EXIF + 可选
 XMP dc:subject）。
 
-### v2.6.0 — GUI 数据闭环（进行中）
+### v2.6.0 — GUI 数据闭环（已发布 2026-09-18）
 
 > 立项来源（2026-09-10 全面盘点）：v2.5 系列做给 agent 的能力（XMP 互通 /
 > autopilot / 语义搜索 / suggest / audit）GUI 全部零入口（grep 核实 0 命中）；
