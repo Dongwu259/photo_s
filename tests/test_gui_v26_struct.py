@@ -32,6 +32,10 @@ def _make_app():
     return root, app
 
 
+from photo_s.gui import PhotoSApp as _App
+PhotoSApp_PANELIZED = set(_App._PANELIZED_TOOLS)
+
+
 def _poll(root, pred, seconds=10.0):
     deadline = time.time() + seconds
     while time.time() < deadline:
@@ -164,6 +168,71 @@ class TestWatchPanel:
         import tkinter as tk
         root, app = _make_app()
         app._show_watch()
+        tops = [w for w in root.winfo_children()
+                if isinstance(w, tk.Toplevel)]
+        assert tops
+        tops[0].destroy()
+        root.destroy()
+
+
+# ── v2.6 非模态化全量：其余工具卡内嵌 ───────────────────────────────────────
+
+class TestAllToolsPanelized:
+    def _app_with_files(self, tmp_path):
+        import numpy as np
+        from PIL import Image
+        root, app = _make_app()
+        paths = []
+        for i in range(2):
+            p = str(tmp_path / "t{}.jpg".format(i))
+            rng = np.random.default_rng(i + 1)
+            Image.fromarray(rng.integers(0, 256, (48, 64, 3),
+                                         dtype=np.uint8), "RGB").save(p)
+            paths.append(p)
+        app.files = list(paths)
+        app._checked = set(paths)
+        app._refresh_file_list()
+        return root, app, paths
+
+    def test_every_panelized_tool_hosts_inline(self, tmp_path):
+        import tkinter as tk
+        root, app, paths = self._app_with_files(tmp_path)
+        app._selected_rows = {paths[0]}
+        app._show_module("tools")
+        for opener in sorted(PhotoSApp_PANELIZED):
+            app._tools_toggle_panel(opener)
+            root.update()
+            assert app._tools_panel_open == opener, opener
+            assert app._tools_panel_host.winfo_children(), \
+                f"{opener} 面板已构建"
+            tops = [w for w in root.winfo_children()
+                    if isinstance(w, tk.Toplevel)]
+            assert not tops, f"{opener} 不应弹 Toplevel"
+            app._tools_toggle_panel(opener)  # 关闭再换下一个
+            root.update()
+            assert app._tools_panel_open is None
+        root.destroy()
+
+    def test_routing_table_matches_cards(self):
+        from photo_s.gui import PhotoSApp
+        card_openers = {op for _, _, op in PhotoSApp.TOOLS_CARDS}
+        # review 直通（本就内嵌 Library）；watch 经 _tools_open_watch；
+        # 其余全部在 _PANELIZED_TOOLS 且方法都接受 host
+        assert "_show_review" in card_openers
+        assert "_tools_open_watch" in card_openers
+        assert PhotoSApp._PANELIZED_TOOLS <= card_openers
+        assert "_show_watch" not in PhotoSApp._PANELIZED_TOOLS
+        import inspect
+        for opener in PhotoSApp._PANELIZED_TOOLS:
+            sig = inspect.signature(getattr(PhotoSApp, opener))
+            assert "host" in sig.parameters, opener
+
+    def test_dialog_mode_still_works(self, tmp_path):
+        """无 host 调用（既有测试/其他入口路径）保持 Toplevel 对话框。"""
+        import tkinter as tk
+        root, app, paths = self._app_with_files(tmp_path)
+        app._selected_rows = {paths[0]}
+        app._show_presets()
         tops = [w for w in root.winfo_children()
                 if isinstance(w, tk.Toplevel)]
         assert tops

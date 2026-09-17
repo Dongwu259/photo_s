@@ -24,7 +24,23 @@ from ..widgets import (FlatButton, _ZoomPanState, _open_image_safe,
 class WorkflowDialogsMixin:
     """工具工作流对话框：去重/挑片/重命名/校验和/画廊/联系表/对比/预设/分析。"""
 
-    def _show_dedup(self):
+    def _hosted_frame(self, host, title):
+        """v2.6 非模态化：Tools 内嵌面板模式的对话框窗体——标题 + × 关闭
+        头行，其余内容照 Toplevel 路径构建（两种模式共用 win 变量）。"""
+        win = tk.Frame(host, bg=COLORS["bg"])
+        win.pack(fill="both", expand=True)
+        head = tk.Frame(win, bg=COLORS["bg"])
+        head.pack(fill="x", pady=(0, 6))
+        tk.Label(head, text=title, font=FONT_BODY,
+                 fg=COLORS["text"], bg=COLORS["bg"]).pack(side="left")
+        FlatButton(
+            head, text="×", command=self._tools_close_panel,
+            bg=COLORS["bg"], fg=COLORS["text_secondary"],
+            hover_bg=COLORS["border"], font=FONT_SMALL, padx=6, pady=1,
+            border_color=COLORS["border"]).pack(side="right")
+        return win
+
+    def _show_dedup(self, host=None):
         """Duplicate viewer: scan in a background thread, render groups
         with per-image keep-checkboxes (sharpest pre-checked), move the
         unchecked ones into a ``_duplicates_trash`` subfolder."""
@@ -38,11 +54,14 @@ class WorkflowDialogsMixin:
                                 self._t("check_none"))
             return
 
-        win = tk.Toplevel(self.root)
-        win.title(self._t("dedup_title"))
-        win.geometry("980x660")
-        win.configure(bg=COLORS["bg"])
-        win.transient(self.root)
+        if host is not None:
+            win = self._hosted_frame(host, self._t("dedup_title"))
+        else:
+            win = tk.Toplevel(self.root)
+            win.title(self._t("dedup_title"))
+            win.geometry("980x660")
+            win.configure(bg=COLORS["bg"])
+            win.transient(self.root)
         canvas_unbind_safe(win)
 
         header = tk.Frame(win, bg=COLORS["bg"])
@@ -258,7 +277,7 @@ class WorkflowDialogsMixin:
 
         threading.Thread(target=scan_thread, daemon=True).start()
 
-    def _show_cull(self):
+    def _show_cull(self, host=None):
         """Cull: classify the file list by exposure/sharpness thresholds,
         then optionally keep only the matches (removing the rest, undoable)."""
         if not self.files:
@@ -266,11 +285,14 @@ class WorkflowDialogsMixin:
                                 self._t("cull_no_files"))
             return
 
-        win = tk.Toplevel(self.root)
-        win.title(self._t("cull_title"))
-        win.geometry("640x540")
-        win.configure(bg=COLORS["bg"])
-        win.transient(self.root)
+        if host is not None:
+            win = self._hosted_frame(host, self._t("cull_title"))
+        else:
+            win = tk.Toplevel(self.root)
+            win.title(self._t("cull_title"))
+            win.geometry("640x540")
+            win.configure(bg=COLORS["bg"])
+            win.transient(self.root)
 
         body = tk.Frame(win, bg=COLORS["bg"])
         body.pack(fill="both", expand=True, padx=20, pady=16)
@@ -411,7 +433,7 @@ class WorkflowDialogsMixin:
 
         bus.start()
 
-    def _show_rename(self):
+    def _show_rename(self, host=None):
         """Batch rename with live preview: template + options on top, a
         Treeview mapping old -> new names (in-batch conflicts and errors
         flagged), refreshed by a debounced background dry-run on every
@@ -425,11 +447,14 @@ class WorkflowDialogsMixin:
                                 self._t("check_none"))
             return
 
-        win = tk.Toplevel(self.root)
-        win.title(self._t("rename_title"))
-        win.geometry("880x560")
-        win.configure(bg=COLORS["bg"])
-        win.transient(self.root)
+        if host is not None:
+            win = self._hosted_frame(host, self._t("rename_title"))
+        else:
+            win = tk.Toplevel(self.root)
+            win.title(self._t("rename_title"))
+            win.geometry("880x560")
+            win.configure(bg=COLORS["bg"])
+            win.transient(self.root)
         canvas_unbind_safe(win)
 
         body = tk.Frame(win, bg=COLORS["bg"])
@@ -665,7 +690,10 @@ class WorkflowDialogsMixin:
                 state["after_id"] = None
             win.destroy()
 
-        win.protocol("WM_DELETE_WINDOW", _on_close)
+        if host is None:
+            win.protocol("WM_DELETE_WINDOW", _on_close)
+        else:
+            host.close_hook = _on_close
 
         execute_btn = FlatButton(
             footer, text=self._t("rename_execute"), command=_execute,
@@ -683,14 +711,17 @@ class WorkflowDialogsMixin:
         dir_var.trace_add("write", lambda *_: _queue_preview())
         _options_changed()          # syncs dir-entry state + first preview
 
-    def _show_hash(self):
+    def _show_hash(self, host=None):
         """Checksums: generate a manifest of the checked files, or verify an
         existing one."""
-        win = tk.Toplevel(self.root)
-        win.title(self._t("hash_title"))
-        win.geometry("600x500")
-        win.configure(bg=COLORS["bg"])
-        win.transient(self.root)
+        if host is not None:
+            win = self._hosted_frame(host, self._t("hash_title"))
+        else:
+            win = tk.Toplevel(self.root)
+            win.title(self._t("hash_title"))
+            win.geometry("600x500")
+            win.configure(bg=COLORS["bg"])
+            win.transient(self.root)
 
         nb = ttk.Notebook(win)
         nb.pack(fill="both", expand=True, padx=12, pady=12)
@@ -857,7 +888,7 @@ class WorkflowDialogsMixin:
 
         bus.start()
 
-    def _show_gallery_export(self):
+    def _show_gallery_export(self, host=None):
         """Gallery export dialog: title + thumb size + output dir, then
         build the HTML gallery in a background thread (thumbnail
         rendering can take a while)."""
@@ -871,11 +902,14 @@ class WorkflowDialogsMixin:
                                 self._t("check_none"))
             return
 
-        win = tk.Toplevel(self.root)
-        win.title(self._t("gallery_title"))
-        win.geometry("480x360")
-        win.configure(bg=COLORS["bg"])
-        win.transient(self.root)
+        if host is not None:
+            win = self._hosted_frame(host, self._t("gallery_title"))
+        else:
+            win = tk.Toplevel(self.root)
+            win.title(self._t("gallery_title"))
+            win.geometry("480x360")
+            win.configure(bg=COLORS["bg"])
+            win.transient(self.root)
 
         body = tk.Frame(win, bg=COLORS["bg"])
         body.pack(fill="both", expand=True, padx=20, pady=16)
@@ -994,7 +1028,7 @@ class WorkflowDialogsMixin:
             bg=COLORS["bg"], fg=COLORS["text"], hover_bg=COLORS["border"],
             border_color=COLORS["border"])
 
-    def _show_contact_sheet(self):
+    def _show_contact_sheet(self, host=None):
         """Contact sheet: grid of thumbnails from the checked files."""
         files = self._checked_files()
         if not files:
@@ -1006,11 +1040,14 @@ class WorkflowDialogsMixin:
                                     self._t("check_none"))
             return
 
-        win = tk.Toplevel(self.root)
-        win.title(self._t("contact_title"))
-        win.geometry("480x400")
-        win.configure(bg=COLORS["bg"])
-        win.transient(self.root)
+        if host is not None:
+            win = self._hosted_frame(host, self._t("contact_title"))
+        else:
+            win = tk.Toplevel(self.root)
+            win.title(self._t("contact_title"))
+            win.geometry("480x400")
+            win.configure(bg=COLORS["bg"])
+            win.transient(self.root)
 
         body = tk.Frame(win, bg=COLORS["bg"])
         body.pack(fill="both", expand=True, padx=20, pady=16)
@@ -1142,7 +1179,7 @@ class WorkflowDialogsMixin:
 
         bus.start()
 
-    def _show_compare(self):
+    def _show_compare(self, host=None):
         """Multi-image compare viewer: 2-4 checked images side by side on
         canvases. Wheel-zoom and drag-pan apply only to the panel under
         the cursor; the "sync zoom" checkbox makes the wheel zoom every
@@ -1159,11 +1196,14 @@ class WorkflowDialogsMixin:
             return
         files = files[:4]
 
-        win = tk.Toplevel(self.root)
-        win.title(self._t("compare_view_title"))
-        win.geometry("1100x640")
-        win.configure(bg=COLORS["bg"])
-        win.transient(self.root)
+        if host is not None:
+            win = self._hosted_frame(host, self._t("compare_view_title"))
+        else:
+            win = tk.Toplevel(self.root)
+            win.title(self._t("compare_view_title"))
+            win.geometry("1100x640")
+            win.configure(bg=COLORS["bg"])
+            win.transient(self.root)
         canvas_unbind_safe(win)
 
         panels = []
@@ -1328,14 +1368,17 @@ class WorkflowDialogsMixin:
         bus.start()
         _schedule_redraw()  # paint the loading placeholders right away
 
-    def _show_presets(self):
+    def _show_presets(self, host=None):
         """Presets: save / load / delete named option sets (stored as JSON in
         ~/.photos/presets). Load applies the preset back onto the settings."""
-        win = tk.Toplevel(self.root)
-        win.title(self._t("presets_title"))
-        win.geometry("520x440")
-        win.configure(bg=COLORS["bg"])
-        win.transient(self.root)
+        if host is not None:
+            win = self._hosted_frame(host, self._t("presets_title"))
+        else:
+            win = tk.Toplevel(self.root)
+            win.title(self._t("presets_title"))
+            win.geometry("520x440")
+            win.configure(bg=COLORS["bg"])
+            win.transient(self.root)
 
         from ... import presets
 
@@ -1462,7 +1505,7 @@ class WorkflowDialogsMixin:
 
         _refresh()
 
-    def _show_analysis(self):
+    def _show_analysis(self, host=None):
         """Dialog showing exposure / sharpness stats + luminance histogram
         for the currently selected file (via photo_s.metrics)."""
         from ...metrics import compute_exposure_stats, compute_blur_score
@@ -1480,12 +1523,17 @@ class WorkflowDialogsMixin:
                                  self._t("analyze_err"))
             return
 
-        win = tk.Toplevel(self.root)
-        win.title("{} — {}".format(self._t("analyze_title"),
+        if host is not None:
+            win = self._hosted_frame(
+                host, "{} — {}".format(self._t("analyze_title"),
+                                      os.path.basename(path)))
+        else:
+            win = tk.Toplevel(self.root)
+            win.title("{} — {}".format(self._t("analyze_title"),
                                    os.path.basename(path)))
-        win.configure(bg=COLORS["bg"])
-        win.transient(self.root)
-        win.resizable(False, False)
+            win.configure(bg=COLORS["bg"])
+            win.transient(self.root)
+            win.resizable(False, False)
 
         inner = tk.Frame(win, bg=COLORS["bg"])
         inner.pack(padx=24, pady=20)

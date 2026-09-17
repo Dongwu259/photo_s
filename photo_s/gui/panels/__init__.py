@@ -5,8 +5,10 @@ PhotoSApp 以多继承组合各面板簇；mixin 不定义 __init__、不持有�
 """
 
 from .review import ReviewPanelMixin
+from .settings import SettingsPanelMixin
+from .mask import MaskPanelMixin
 from .dialogs import WorkflowDialogsMixin
 from .watch import WatchPanelMixin
 
 __all__ = ["ReviewPanelMixin", "WorkflowDialogsMixin",
-           "WatchPanelMixin"]
+           "WatchPanelMixin", "SettingsPanelMixin", "MaskPanelMixin"]
