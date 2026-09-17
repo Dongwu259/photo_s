@@ -243,9 +243,19 @@ ac2198d + d12f63c，随本批发版）：
       语义），键盘 6-9/0、灯箱标签按钮行、行内彩色徽标、标签筛选，
       写回 XMP 时作为 `xmp:Label` 带给 LR
 
-**结构项（可拆批）**：panels/ 拆分启动（新代码已按 seam 模式落在
-workflows.py，app.py 不再膨胀是目标）；Tools 卡非模态面板化；
-`ttk.PanedWindow` 分栏可拖 + 持久化。
+**结构项（可拆批）**：✅ 首批落地（2026-09-18）：
+- [x] panels/ 拆分启动：`gui/panels/` 建包——Review（审查灯箱簇）/ Dialogs
+      （九个工具对话框）/ Watch（监视-autopilot）三个 mixin 平移出 app.py
+      （方法体逐字节保留，仅函数级相对导入加深一层；mixin 无独立状态，
+      全部经 self 与宿主共享），app.py 11337 → 约 8850 行；后续簇（设置
+      Notebook/蒙版编辑器/Develop）按此模式续拆
+- [x] Tools 卡非模态化首批：watch（autopilot 驾驶舱）内嵌进 Tools 模块
+      ——卡片点开为常驻面板、再点关闭，面板关闭经 close_hook 停表防
+      泄漏；其余工具仍为对话框（逐工具面板化续批）
+- [x] `ttk.PanedWindow` 分栏可拖 + 持久化：Develop 主行（预览↔侧栏）与
+      Export 主行（队列↔设置列）改为可拖 sash，位置经 gui_state
+      （develop_sash/export_sash）跨重启恢复（`<Map>` 一次性恢复——模块
+      启动时未必可见）；蒙版编辑器改为 pane forget/add + sash 记忆还原
 
 ### 远期（数据/生态，未排期）
 

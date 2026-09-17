@@ -34,14 +34,18 @@ def _isolate_home(tmp_path, monkeypatch):
 
 def _gui_sources():
     """All v2.0 GUI package sources (app.py + theme/strings/workflows/
-    widgets/*) — the audit below scans every module, not one file."""
+    widgets/* + v2.6 panels/*) — the audit below scans every module, not
+    one file."""
     gui_dir = os.path.join(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))), "photo_s", "gui")
     paths = [os.path.join(gui_dir, f) for f in sorted(os.listdir(gui_dir))
              if f.endswith(".py") and f != "__init__.py"]
-    wdir = os.path.join(gui_dir, "widgets")
-    paths += [os.path.join(wdir, f) for f in sorted(os.listdir(wdir))
-              if f.endswith(".py") and f != "__init__.py"]
+    for sub in ("widgets", "panels"):
+        sdir = os.path.join(gui_dir, sub)
+        if os.path.isdir(sdir):
+            paths += [os.path.join(sdir, f)
+                      for f in sorted(os.listdir(sdir))
+                      if f.endswith(".py") and f != "__init__.py"]
     return paths
 
 

@@ -14,7 +14,8 @@
 ## [Unreleased]
 
 v2.6.0 P1/P2 批次：把 v2.5 的 agent 能力补进 GUI（Library 语义搜索/过滤、
-智能建议、导出 audit、颜色标签）。
+智能建议、导出 audit、颜色标签）+ 结构项首批（panels/ 拆分、Tools 面板化
+首批、分栏可拖）。
 
 ### Added
 - **Develop「智能建议」按钮**：`photo-s suggest`（规则型、零依赖离线）参数
@@ -31,6 +32,17 @@ v2.6.0 P1/P2 批次：把 v2.5 的 agent 能力补进 GUI（Library 语义搜索
   （rating/keywords/title 同款写出与撤销语义）；键盘 6-9/0 设置与清除、
   审查灯箱标签按钮行、Library 行彩色圆点徽标、标签筛选联动；写回 XMP 时
   作为 `xmp:Label` 带给 Lightroom
+- **分栏可拖 + 持久化（结构项）**：Develop 主行与 Export 主行改
+  `ttk.PanedWindow`，sash 位置经 gui_state 跨重启恢复；蒙版编辑器收起
+  侧栏改 pane forget/add（sash 记忆还原）
+- **Tools 面板化首批（结构项）**：watch（autopilot 驾驶舱）内嵌为 Tools
+  模块常驻面板——卡片点开/再点关闭，面板关闭经 close_hook 停表防泄漏
+
+### Changed
+- **panels/ 拆分启动（结构项）**：`gui/panels/` 建包——审查灯箱簇、九个
+  工具对话框、watch 对话框以 mixin 平移出 app.py（约 2535 行，方法体
+  逐字节保留）；`PhotoSApp` 多继承组合，app.py 11337 → 约 8850 行；
+  worker→UI 封送契约审计（`lambda err=str(e)`）扫描范围同步覆盖 panels/
 
 ### Docs
 - 快捷键表（? 键）补 6-9/0 标签键
