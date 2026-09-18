@@ -198,6 +198,9 @@ class TestAllToolsPanelized:
         import tkinter as tk
         root, app, paths = self._app_with_files(tmp_path)
         app._selected_rows = {paths[0]}
+        # 900ms 延迟的首次运行引导会在慢 CI 上落进循环窗口——与本测试
+        # 无关，关掉（strays 兜底仍保留）
+        app._first_run_done = True
         app._show_module("tools")
         strays = []  # (opener, 诊断) —— 诊断失败信息用，同时防级联泄漏
         for opener in sorted(PhotoSApp_PANELIZED):
@@ -224,6 +227,10 @@ class TestAllToolsPanelized:
         assert strays == [], \
             "面板化工具不应弹 Toplevel: " + " | ".join(
                 f"{o} -> {d}" for o, d in strays)
+        # 让各面板的 worker 线程排空再拆 root（Windows 线程 Tcl 更敏感）
+        for _ in range(6):
+            root.update()
+            time.sleep(0.05)
         root.destroy()
 
     def test_routing_table_matches_cards(self):
